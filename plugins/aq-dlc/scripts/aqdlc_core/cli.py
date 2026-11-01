@@ -1572,6 +1572,17 @@ def hook_stop(payload):
     return {"decision": "block", "reason": reason}
 
 
+def _in_git_repo(path):
+    d = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return True
+        parent = os.path.dirname(d)
+        if parent == d:
+            return False
+        d = parent
+
+
 def hook_session_start(payload):
     cwd = payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     if os.path.realpath(cwd) in (os.path.realpath(os.path.expanduser("~")), os.path.realpath(os.sep)):
@@ -1597,7 +1608,15 @@ def hook_session_start(payload):
         except OSError:
             return None
         if visible:
-            return None
+            if not _in_git_repo(cwd):
+                return None
+            lines = [f"このフォルダ（{cwd}）は git リポジトリです（E-AQDL は未導入）。",
+                     "ユーザーが機能の追加・仕様の変更・まとまった不具合修正を依頼したら、コマンドを打たれなくても "
+                     "aq-dlc:start Skill を使い、init で E-AQDL を導入してから進めてください（既存のコードは変更の対象、"
+                     "変えない部分は回帰を確かめる対象として仕様にする）。",
+                     "誤字や1行の修正、質問への回答、調査だけの依頼なら、E-AQDL を使わず通常どおり対応してください。",
+                     LANG_RULE]
+            return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "\n".join(lines)}}
         lines = [f"このフォルダ（{cwd}）は空です。",
                  "ユーザーが新しいアプリやツールの作成を依頼したら、コマンドを打たれなくても aq-dlc:start Skill を使い、"
                  "このフォルダを E-AQDL プロジェクトとして初期化して開発してください。",

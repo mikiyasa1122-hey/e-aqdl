@@ -69,6 +69,11 @@ class HookTest(unittest.TestCase):
         with open(os.path.join(e.project, "a.txt"), "w") as f:
             f.write("x")
         self.assertIsNone(e.hook("session-start", {}))  # 既存の別プロジェクトには関与しない
+        os.makedirs(os.path.join(e.project, ".git"))
+        ctx = e.hook("session-start", {})["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("git リポジトリ", ctx)  # 既存の git リポジトリでは、まとまった開発の依頼なら E-AQDL を使う
+        self.assertIn("通常どおり", ctx)  # 小さな修正・質問には使わない
+        os.rmdir(os.path.join(e.project, ".git"))
         e.aq("init", "x")
         e.aq("new", "x")
         ctx = e.hook("session-start", {})["hookSpecificOutput"]["additionalContext"]
@@ -190,6 +195,19 @@ class CompletionTest(unittest.TestCase):
         self.assertEqual(e.state()["status"], "complete")
         self.assertIn("未確認", out)
         self.assertTrue(any(a.get("target") == "DEFER-V8" for a in e.state().get("approvals", [])))
+
+    def test_defer_is_void_when_verification_changes(self):
+        """未確認のまま進める扱いは、その後に検証の定義（手順など）が変わったら無効になる。"""
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                        "plugins", "aq-dlc", "scripts"))
+        from aqdlc_core import gate as G
+        from aqdlc_core.state import deferred_ok
+        cfg = {"checks": []}
+        v = {"id": "V8", "manual": "社内ネットワークで実行する"}
+        v["deferred"] = {"fp": G.verification_fp(v, cfg)}
+        self.assertTrue(deferred_ok(v, cfg))
+        v["manual"] = "本番で実行する"
+        self.assertFalse(deferred_ok(v, cfg))
 
     def test_gate_failure_routes_to_implementer(self):
         e = self.e
