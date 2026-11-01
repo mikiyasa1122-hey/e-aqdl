@@ -158,6 +158,39 @@ class CompletionTest(unittest.TestCase):
         e.aq("complete")
         self.assertEqual(e.state()["status"], "complete")
 
+    def test_defer_manual_verification_when_human_cannot_check(self):
+        """人が確認できない検証は、人間の承認（承認 DEFER-…）のもとで未確認のまま進められる。合格にはならない。"""
+        e = self.e
+        build_to_review(e, with_question=False)
+        e.spawn("requirements")
+        e.start("requirements")
+        e.as_role("requirements", "risk", "R1", "K2", "本番の在庫 API で動かない")
+        e.as_role("requirements", "verify", "K2", "V8", "本番の API で通知を確かめる", "--manual", "社内ネットワークで実行する")
+        e.stop("requirements", "")
+        e.aq("gate")
+        e.spawn("reviewer")
+        e.start("reviewer")
+        self.assertIsNone(e.stop("reviewer", REVIEW_PASS.replace("### E2E の要否", "- K2: V8 は人が確認\n### E2E の要否")))
+        e.aq("memory-done", "--end", "project", "--skipped", "テスト用の run のため保存する学びなし")
+        e.aq("complete", ok=False)  # V8 の人の確認待ち
+        self.assertIn("承認 DEFER-", e.next())  # 確認できないまま進める選択肢が示される
+        e.aq("defer", "V8", "確認できない", ok=False)  # ask の後の人間の返答がない
+        e.aq("ask", "V8 を確認できますか")
+        e.human_says("確認できません")
+        e.aq("defer", "V8", "確認できない", ok=False)  # 対象のない返答は承認にしない
+        e.aq("ask", "V8: 確認できた（承認 VERIFY-V8）／確認できないまま進める（承認 DEFER-V8）")
+        e.human_says("承認 DEFER-V8")
+        e.aq("defer", "V1", "自動の検証", ok=False)  # 自動の検証は対象外（検証条件を弱めない）
+        e.aq("defer", "V8", "社内ネットワークに入れないため未確認のまま進める")
+        ev = {x["verification"]: x for x in json.loads(e.aq("evidence", "--json"))["verifications"]}
+        self.assertEqual(ev["V8"]["state"], "insufficient")  # 合格の扱いにはしない
+        self.assertIn("未確認", e.aq("trace"))
+        self.assertIn("V8", e.aq("status"))
+        out = e.aq("complete")
+        self.assertEqual(e.state()["status"], "complete")
+        self.assertIn("未確認", out)
+        self.assertTrue(any(a.get("target") == "DEFER-V8" for a in e.state().get("approvals", [])))
+
     def test_gate_failure_routes_to_implementer(self):
         e = self.e
         build_to_review(e, with_question=False)

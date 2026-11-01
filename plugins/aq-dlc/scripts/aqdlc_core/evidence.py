@@ -15,7 +15,7 @@
 """
 from . import counterfactual as CF
 from . import gate as G
-from .state import current_review, iter_verifications, review_passed
+from .state import current_review, deferred_ok, iter_verifications, review_passed
 
 ORDER = ("insufficient", "invalidated", "passed_but_unchallenged", "not_applicable", "verified")
 LABEL = {"verified": "証明済み", "passed_but_unchallenged": "合格・反証未実施", "insufficient": "証拠不足",
@@ -70,7 +70,9 @@ def compute(ctx):
         res = vres.get(v["id"])
         causes, basis = [], []
         # ---- 通常 Gate の層
-        if v.get("manual") and not G.is_automated(v):
+        if not G.is_automated(v) and v.get("confirmed_by") != "human" and deferred_ok(v, cfg):
+            layer_g = "未確認（人の判断で保留）"
+        elif v.get("manual") and not G.is_automated(v):
             layer_g = "人の確認済み" if v.get("confirmed_by") == "human" else "人の確認待ち"
         elif v.get("after_merge") and not (res and not res.get("pending_after_merge")):
             layer_g = "マージ後に確認" if v.get("confirmed_by") != "human" else "人の確認済み"
@@ -116,6 +118,9 @@ def compute(ctx):
         if layer_g in ("人の確認済み",):
             state = "verified"
             basis.append("対象を指定した人間の確認")
+        elif layer_g == "未確認（人の判断で保留）":
+            state = "insufficient"
+            basis.append("人間が未確認のまま進めることを承認（DEFER-" + v["id"] + "）。確認はされていない")
         elif layer_g in ("人の確認待ち", "マージ後に確認", "実行方法なし", "未実行", "不合格"):
             state = "insufficient"
             basis.append(f"通常 Gate: {layer_g}")

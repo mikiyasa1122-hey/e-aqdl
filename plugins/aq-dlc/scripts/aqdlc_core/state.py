@@ -181,6 +181,9 @@ def validate_state(state):
                     if v.get("confirmed_by") == "human" and state.get("eaqdl"):
                         if not approved(state, f"VERIFY-{v.get('id')}"):
                             errs.append(f"{v.get('id')} が人間の確認済みだが、対象を指定した承認の記録がない")
+                    if v.get("deferred") and state.get("eaqdl"):
+                        if not approved(state, f"DEFER-{v.get('id')}"):
+                            errs.append(f"{v.get('id')} が未確認のまま進める扱いだが、対象を指定した承認の記録がない")
     for key in ("design", "impl"):
         m = (state.get(key) or {}).get("map", {}) or {}
         dangling = [k for k in m if k not in req_ids]
@@ -354,6 +357,16 @@ def iter_verifications(state):
         for p in r.get("acceptance", []) + r.get("risks", []):
             for v in p.get("verifications", []):
                 yield r, p, v
+
+
+def deferred_ok(v, cfg):
+    """人間の承認のもとで「未確認のまま進める」とされ、その後に検証の定義が変わっていないか。"""
+    d = v.get("deferred") or {}
+    return bool(d) and d.get("fp") == G.verification_fp(v, cfg)
+
+
+def deferred_list(state, cfg):
+    return [v["id"] for _r, _p, v in iter_verifications(state) if deferred_ok(v, cfg)]
 
 
 def find(state, nid, kinds=None):
@@ -759,7 +772,7 @@ def _problems(ctx, stage):
 
     manual_pre = [v["id"] for _r, _p, v in iter_verifications(s)
                   if v.get("manual") and not G.is_automated(v) and not v.get("after_merge")
-                  and v.get("confirmed_by") != "human"]
+                  and v.get("confirmed_by") != "human" and not deferred_ok(v, ctx.cfg)]
     if manual_pre:
         out.append(P("manual_unconfirmed", f"人間の確認待ちの検証: {', '.join(manual_pre)}", "human"))
     if not s.get("memory_done"):
@@ -786,6 +799,8 @@ def _problems(ctx, stage):
         if not v.get("after_merge"):
             continue
         if v.get("confirmed_by") == "human":
+            continue
+        if not G.is_automated(v) and deferred_ok(v, ctx.cfg):
             continue
         r = vres.get(v["id"], {})
         if not G.is_automated(v):
@@ -893,7 +908,11 @@ def instruction(p, ctx):
                     "ask を実行してから人間に方針を確認する（テスト環境を直す / counterfactual.mode を advisory に変える）。")
         if c == "manual_unconfirmed":
             return (head + "\n→ ask \"<確認してほしいこと（まとめて）>\" を実行してから人間に確認する。選択肢は検証ごとに"
-                    "「確認できた（承認 VERIFY-<検証ID>）」の形にし、その返答を得たものを confirm <検証ID> \"<人間の返答の要約>\" で記録する。")
+                    "「確認できた（承認 VERIFY-<検証ID>）」「確認できないまま進める（承認 DEFER-<検証ID>）」の2つを示す。"
+                    "「承認 VERIFY-…」の返答は confirm <検証ID> \"<人間の返答の要約>\"、"
+                    "「承認 DEFER-…」の返答は defer <検証ID> \"<人間の返答の要約>\" で記録する。"
+                    "未確認のまま進めた検証は合格ではないので、完了報告と PR に「未確認」として必ず書く。"
+                    "人が確認できない検証のために仕様を変えたり、run を中断したりする前に、まずこの選択肢を示す。")
         return head + "\n→ 修正ループが上限に達した。状況を要約し、ask を実行してから人間に方針を確認する。"
     if r == "orchestrator":
         return (head + "\n→ escalation で内容を確認する。仕様の変更が必要なら人間に確認して aq-dlc:requirements、"
@@ -963,6 +982,8 @@ def trace_rows(ctx):
                     status = "検証なし"
                 elif v.get("confirmed_by") == "human":
                     status = "人が確認済み"
+                elif not G.is_automated(v) and deferred_ok(v, ctx.cfg):
+                    status = "未確認（人の判断で保留）"
                 elif res.get("pending_after_merge"):
                     status = "マージ後"
                 elif not res:
@@ -1007,4 +1028,7 @@ def describe_state(ctx):
     bad = [r for r in s.get("reviews", []) if not r.get("valid")]
     if bad and (not rv or bad[-1]["n"] > rv["n"]):
         lines.append(f"  ! 最後のレビュー#{bad[-1]['n']} は無効: {bad[-1].get('invalid_reason')}")
+    dl = deferred_list(s, ctx.cfg)
+    if dl:
+        lines.append(f"未確認のまま進めた検証（人間の判断）: {', '.join(dl)}")
     return lines
