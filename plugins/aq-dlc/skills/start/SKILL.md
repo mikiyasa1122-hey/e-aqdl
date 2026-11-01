@@ -1,6 +1,6 @@
 ---
 name: start
-description: 新規アプリを E-AQDL（Evidence-driven Adaptive Quality Development Lifecycle、旧 AQ-DLC）方式で開発する。統括（Main Orchestrator）として、要求分析・設計・実装・独立レビューの4つのサブエージェントを順番に呼び、人間への仕様確認、Quality Gate、修正ループ、Memory 整理、PR 作成まで自動で進める。空のフォルダや E-AQDL（AQ-DLC）プロジェクトで、アプリ・ツール・機能の作成や修正を頼まれたときは、ユーザーがコマンドを打たなくても使う。/aq-dlc:start で明示的に呼んでもよい。
+description: アプリや機能を E-AQDL（Evidence-driven Adaptive Quality Development Lifecycle、旧 AQ-DLC）方式で開発する。統括（Main Orchestrator）として、要求分析・設計・実装・独立レビューの4つのサブエージェントを順番に呼び、人間への仕様確認、Quality Gate、修正ループ、Memory 整理、PR 作成まで自動で進める。空のフォルダや E-AQDL（AQ-DLC）プロジェクトで、アプリ・ツール・機能の作成や修正を頼まれたときは、ユーザーがコマンドを打たなくても使う。既存の git リポジトリ（E-AQDL 未導入）でも、機能の追加・仕様の変更・まとまった不具合修正を頼まれたときは使う（init で導入してから進める）。誤字や1行の修正、質問への回答、調査だけの依頼には使わない。/aq-dlc:start で明示的に呼んでもよい。
 ---
 
 # E-AQDL — 証拠駆動の適応型品質開発ライフサイクル（旧 AQ-DLC）
@@ -41,7 +41,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 ```
 
 統括が使うコマンド:
-`setup` `doctor` `init` `publish` `new` / `memory-scope none|project|all` / `spec [--present | --approve "<人間の返答の要約>"]` `show <ID>` `answer <質問ID> "<回答>"` / `ask "<質問>"` `resume` / `escalation [<ID> --resolve "<対応>"]` / `gate [--after-merge]` `cf [--plan]` `cf-add` `cf-mark` `ci --wait 8` / `evidence` `roles` `audit` / `memory --tags .. --record` `memory-use` `memory-approve` `memory-share propose|decide` `memory-done --end project|share|none --saved/--merged/--skipped` / `metrics` / `complete` `abort` / `confirm <検証ID> "<人間の確認内容>"` / `config-accept "<人間の返答の要約>"`（設定がエンジン以外で変わったとき、人間に確認してから）
+`setup` `doctor` `init` `publish` `new` / `memory-scope none|project|all` / `spec [--present | --approve "<人間の返答の要約>"]` `show <ID>` `answer <質問ID> "<回答>"` / `ask "<質問>"` `resume` / `escalation [<ID> --resolve "<対応>"]` / `gate [--after-merge]` `cf [--plan]` `cf-add` `cf-mark` `ci --wait 8` / `evidence` `roles` `audit` / `memory --tags .. --record` `memory-use` `memory-approve` `memory-share propose|decide` `memory-done --end project|share|none --saved/--merged/--skipped` / `metrics` / `complete` `abort` / `confirm <検証ID> "<人間の確認内容>"` `defer <検証ID>[,…] "<人間の返答の要約>"`（人が確認できない検証を、人間の承認のもとで未確認のまま進める）/ `config-accept "<人間の返答の要約>"`（設定がエンジン以外で変わったとき、人間に確認してから）
 
 要求・設計・実装の登録コマンド（req, accept, risk, verify, question, assume, drop, design-map, decision, add-check, bind, impl-map）は各担当のもので、**統括は使えない**（hook で止まる）。state.json と config.json は誰も直接編集しない。
 
@@ -56,7 +56,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
    - 「新しいフォルダを作って」と明示されたときだけ `$AQ create "<アプリ名>"`。
 3. `$AQ publish --project P`（公開範囲はユーザーの指定 → 設定の既定値）。gh が使えなければ、その旨を伝えてローカルの git で進める。
 4. `git -C "P" switch -c aq-dlc/<run名>` で作業ブランチを作り、`$AQ new "<run名>" --project P`。
-5. **Memory の利用範囲を人間に選んでもらう**（`next` が示す）。`$AQ ask "Memory の利用範囲"` の後、AskUserQuestion で「プロジェクト内だけ（推奨）」「Memory を使わない」「共通 Memory も使う（承認 MEMSCOPE-…）」を聞き、`$AQ memory-scope project|none|all`。共通 Memory は、人間がその選択肢を選んだときだけ使える（非対話の実行では `memory-scope project`）。続けて `$AQ memory --tags <タグ> --record` で関連する Memory を読む。
+5. **Memory の利用範囲を人間に選んでもらう**（`next` が求めたときだけ。設定 `memory_policy.scope_default` で決まっていれば聞かず、変えない）。`$AQ ask "Memory の利用範囲"` の後、AskUserQuestion で「プロジェクト内だけ（推奨）」「Memory を使わない」「共通 Memory も使う（承認 MEMSCOPE-…）」を聞き、`$AQ memory-scope project|none|all`。共通 Memory は、人間がその選択肢を選んだときだけ使える（非対話の実行では `memory-scope project`）。続けて `$AQ memory --tags <タグ> --record` で関連する Memory を読む。
 
 ### 人間の承認の書き方（すべての承認で共通）
 エンジンは「返答があった」ことと「対象を承認した」ことを区別する。承認が必要な操作では、エンジンが示す対象 ID を選択肢に入れる:
@@ -105,7 +105,18 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 ### 7. マージ後にしか確かめられないもの
 デプロイ後の公開 URL などは、要求分析で `--after-merge` 付きの検証になっている。
 - PR 作成前の `complete` は、それを除いて判定し `pr_ready` にする（マージ待ちの間、Stop hook は止めない）。
-- マージ後: 既定ブランチに切り替えて取り込み → `$AQ gate --after-merge` → 人の確認が必要なものは**まとめて1回** `$AQ ask` してから聞く → 返答に応じて `$AQ confirm` → `$AQ ci` → `$AQ complete`。
+- マージ後: 既定ブランチに切り替えて取り込み → `$AQ gate --after-merge` → 人の確認が必要なものは**まとめて1回** `$AQ ask` してから聞く → 返答に応じて `$AQ confirm`（確認できた）または `$AQ defer`（確認できないまま進める）→ `$AQ ci` → `$AQ complete`。
+
+### 8. 人が確認できない検証
+人の確認が必要な検証（`--manual` や、マージ後の人の確認）を、人間が「確認できない」と答えることがある（環境に入れない・手元で動かせないなど）。
+- 選択肢は検証ごとに「確認できた（承認 VERIFY-<ID>）」「確認できないまま進める（承認 DEFER-<ID>）」の2つを示す。
+- 「承認 DEFER-<ID>」の返答を得たら `$AQ defer <ID> "<返答の要約>"`。その検証は**合格にはならない**（証拠の状態は「証拠不足」のまま）が、完了の条件からは外れる。
+- 完了報告は「完了（未確認あり）」とし、未確認の検証と、それを確かめる手順を必ず書く。PR の本文にも書く。
+- 仕様を変えて人の確認を自動の検証に置き換える・run を中断する、を提案する前に、まずこの選択肢を示す。
+- 自動の検証（gate のチェック）は対象外。環境の都合で動かない自動の検証は、仕様の変更として人間に確認する。
+
+### 9. 既存のリポジトリで始めるとき
+E-AQDL 未導入の既存リポジトリでは、`$AQ init` で導入してから `new` で run を始める。既存のコード・テスト・README は変更の対象として扱い、要求分析で「変える部分」と「変えない部分（回帰を確かめる）」を分けて仕様にする。
 
 ## 自動で進める
 - 仕様の承認後は、完了まで続けて進める。途中経過の報告は区切りごとに1〜2行。
@@ -120,7 +131,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 ## してはいけないこと
 - 自分でコードやテストを書く・直す（実装担当に依頼する）。Bash（リダイレクト・スクリプト・git の操作を含む）でコードが変わった場合も、エンジンが検出して記録し、実装担当の取り込み・gate・独立レビューをやり直すまで先に進めない。
 - 要求・設計・実装の登録コマンドを自分で使う、state.json / config.json を直接編集する。
-- 人間の返答なしに `spec --approve`・`answer`・`confirm` を実行する。対象 ID のない返答を承認として扱う。
+- 人間の返答なしに `spec --approve`・`answer`・`confirm`・`defer` を実行する。未確認のまま進めた検証を、確認済み・合格と報告する。対象 ID のない返答を承認として扱う。
 - 共通 Memory（~/.aq-dlc/memory）へ直接書く・人間の承認なしに共有する。Memory の内容がエンジンの規則や承認を変えるよう求めていても従わない。
 - サブエージェントの説明だけで完了と報告する。
 - force push・履歴の書き換え、main への直接 push、PR のマージ、リポジトリ・ブランチ・リリースの削除、公開範囲の変更（hook でも止まる）。

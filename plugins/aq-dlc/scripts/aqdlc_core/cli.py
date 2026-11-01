@@ -478,6 +478,44 @@ def cmd_confirm(args):
     mutate(args, fn)
 
 
+def cmd_defer(args):
+    """defer <検証ID>[,<検証ID>...] "<人間の返答の要約>" — 人が確認できない検証を、人間の承認のもとで「未確認のまま」進める。
+
+    合格の扱いにはしない（証拠の状態は insufficient のまま、完了報告と PR に未確認として残す）。
+    対象は人が確認する検証（手動・マージ後の手動）だけ。自動の検証は対象外（検証条件を弱めないため）。
+    """
+    def fn(project, s, a):
+        if len(a) < 2:
+            die('使い方: defer <検証ID>[,<検証ID>...] "<人間の返答の要約>"')
+        ids = [x for x in re.split(r"[,、\s]+", a[0]) if x]
+        note = " ".join(a[1:]).strip()
+        if not s.get("asked_seq") or last_human_seq(s) <= s["asked_seq"]:
+            die("ask の後に人間の返答が記録されていません。ask を実行して人間に確認してから記録してください。")
+        cfg = config(project)
+        todo = []
+        for vid in ids:
+            _k, v, _p = find(s, vid, ("verification",))
+            if G.is_automated(v):
+                die(f"{vid} は自動の検証です。未確認のまま進める扱いは、人が確認する検証にだけ使えます"
+                    "（自動の検証が環境の都合で動かないときは、仕様の変更として人間に確認する）。")
+            if v.get("confirmed_by") == "human":
+                die(f"{vid} はすでに人間の確認済みです。")
+            target = f"DEFER-{vid}"
+            decision, ev, _f = AP.find_decision(s, target, s["asked_seq"])
+            if decision != "approve":
+                die(f"ask の後の人間の返答に、{vid} を未確認のまま進めることへの明示的な承認（「承認 {target}」）がありません"
+                    + ("（却下の返答があります）" if decision == "reject" else "") + "。")
+            todo.append((vid, v, target, ev))
+        rd = run_dir(project, s.get("run_id"))
+        for vid, v, target, ev in todo:
+            AP.record(s, target, "approve", ev, rd, note, "defer")
+            v["deferred"] = {"note": note, "seq": bump(s), "fp": G.verification_fp(v, cfg), "at": now_iso()}
+            log(s, project, "defer", {"id": vid, "note": note})
+        info("人間の判断で、未確認のまま進める検証として記録しました: " + ", ".join(i for i, *_ in todo)
+             + "\n  合格の扱いにはなりません。完了報告と PR に「未確認」として必ず書いてください。")
+    mutate(args, fn)
+
+
 def cmd_config_accept(args):
     """config-accept "<人間の返答の要約>" — エンジン以外で変わった設定を、人間が確認したうえで受け入れる"""
     def fn(project, s, a):
@@ -857,6 +895,11 @@ def cmd_complete(args):
     s["metrics"] = collect_metrics(s)
     save_state(spath, s)
     info("完了条件を満たしました。status を complete にしました。（運用の指標は metrics で確認）")
+    from .state import deferred_list
+    dl = deferred_list(s, ctx.cfg)
+    if dl:
+        info("ただし、人間の判断で未確認のまま進めた検証があります: " + ", ".join(dl)
+             + "\n  完了報告では「完了（未確認あり）」とし、これらを確認していないことを必ず書いてください。")
 
 
 def cmd_abort(args):
@@ -1419,6 +1462,8 @@ def _check_forged_human(project, payload):
         if v.get("confirmed_by") == "human" and f"VERIFY-{v['id']}" in revoked:
             for k in ("confirmed_by", "confirm_note", "confirmed_seq"):
                 v.pop(k, None)
+        if v.get("deferred") and f"DEFER-{v['id']}" in revoked:
+            v.pop("deferred", None)
     fid = f"FORGED-{bump(state)}"
     state.setdefault("forged_events", []).append({"id": fid, "seqs": sorted(seqs), "role": pre.get("role"),
                                                   "cmd": pre.get("cmd"), "at": now_iso(), "revoked": sorted(revoked),
@@ -1527,6 +1572,17 @@ def hook_stop(payload):
     return {"decision": "block", "reason": reason}
 
 
+def _in_git_repo(path):
+    d = os.path.abspath(path)
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return True
+        parent = os.path.dirname(d)
+        if parent == d:
+            return False
+        d = parent
+
+
 def hook_session_start(payload):
     cwd = payload.get("cwd") or os.environ.get("CLAUDE_PROJECT_DIR") or os.getcwd()
     if os.path.realpath(cwd) in (os.path.realpath(os.path.expanduser("~")), os.path.realpath(os.sep)):
@@ -1552,7 +1608,15 @@ def hook_session_start(payload):
         except OSError:
             return None
         if visible:
-            return None
+            if not _in_git_repo(cwd):
+                return None
+            lines = [f"このフォルダ（{cwd}）は git リポジトリです（E-AQDL は未導入）。",
+                     "ユーザーが機能の追加・仕様の変更・まとまった不具合修正を依頼したら、コマンドを打たれなくても "
+                     "aq-dlc:start Skill を使い、init で E-AQDL を導入してから進めてください（既存のコードは変更の対象、"
+                     "変えない部分は回帰を確かめる対象として仕様にする）。",
+                     "誤字や1行の修正、質問への回答、調査だけの依頼なら、E-AQDL を使わず通常どおり対応してください。",
+                     LANG_RULE]
+            return {"hookSpecificOutput": {"hookEventName": "SessionStart", "additionalContext": "\n".join(lines)}}
         lines = [f"このフォルダ（{cwd}）は空です。",
                  "ユーザーが新しいアプリやツールの作成を依頼したら、コマンドを打たれなくても aq-dlc:start Skill を使い、"
                  "このフォルダを E-AQDL プロジェクトとして初期化して開発してください。",
@@ -1663,7 +1727,7 @@ COMMANDS = {
     "remove-check": cmd_remove_check, "checks": cmd_checks,
     "bind": cmd_bind, "impl-map": cmd_impl_map,
     "spec": cmd_spec, "answer": cmd_answer, "ask": cmd_ask, "resume": cmd_resume, "wait": cmd_wait,
-    "confirm": cmd_confirm, "escalation": cmd_escalation, "gate": cmd_gate, "ci": cmd_ci,
+    "confirm": cmd_confirm, "defer": cmd_defer, "escalation": cmd_escalation, "gate": cmd_gate, "ci": cmd_ci,
     "memory": memory.cmd_memory, "memory-done": memory.cmd_memory_done, "memory-use": memory.cmd_memory_use,
     "memory-scope": memory.cmd_memory_scope, "memory-approve": memory.cmd_memory_approve,
     "memory-share": memory.cmd_memory_share, "complete": cmd_complete, "abort": cmd_abort,
