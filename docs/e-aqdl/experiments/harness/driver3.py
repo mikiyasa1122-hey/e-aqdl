@@ -74,7 +74,7 @@ def run_claude(text, cont):
 
 
 SIM_PROMPT = open("/root/.exp-hidden/simulator_prompt.md", encoding="utf-8").read()
-INTENT = open("/root/.exp-hidden/intent03.md", encoding="utf-8").read()
+INTENT = open(arg("--intent", "/root/.exp-hidden/intent03.md"), encoding="utf-8").read()
 
 
 def simulate(text, doc=""):
