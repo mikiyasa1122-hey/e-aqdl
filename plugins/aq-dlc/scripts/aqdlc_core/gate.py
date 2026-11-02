@@ -222,6 +222,11 @@ def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merg
     results = {"checks": {}, "verifications": {}}
     os.makedirs(log_dir, exist_ok=True)
     build_ok = True
+    # 低コスト化（既定は無効）: 前のチェックが不合格なら、重いチェック・検証（integration・e2e）を実行しない。
+    # 実行しなかったものは不合格（skipped）として記録し、合格にはしない（gate は前の不合格で不合格のまま）。
+    fail_fast = bool((cfg.get("cost_optimization") or {}).get("gate_fail_fast"))
+    heavy = ("integration", "e2e")
+    failed_checks = []
 
     def record(kind, key, cmd, timeout):
         code, out, dur = run_cmd(cmd, project, timeout, env)
@@ -237,12 +242,18 @@ def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merg
         if blocked:
             r = {"pass": False, "skipped": f"前提のチェック（{', '.join(blocked)}）が不合格・未登録のため実行しない"}
             print(f"  中止 チェック:{c['name']}（前提 {', '.join(blocked)} が不合格）")
+        elif fail_fast and failed_checks and c.get("kind") in heavy:
+            r = {"pass": False, "fail_fast": True,
+                 "skipped": f"前のチェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）"}
+            print(f"  未実行 チェック:{c['name']}（前のチェックが不合格・gate_fail_fast）")
         else:
             r = record("check", c["name"], c["command"], int(c.get("timeout_sec", default_to)))
             print(f"  {'合格' if r['pass'] else '不合格'} チェック:{c['name']}（{r['sec']}秒）")
         r["fp"] = fp
         r["kind"] = c.get("kind", "other")
         results["checks"][c["name"]] = r
+        if not r["pass"]:
+            failed_checks.append(c["name"])
         if c.get("kind") == "build" and not r["pass"]:
             build_ok = False
 
@@ -260,6 +271,10 @@ def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merg
             if v.get("level") == "e2e" and not build_ok:
                 r = {"pass": False, "skipped": "ビルドが不合格のため E2E を実行しない（古い成果物での合格を防ぐ）"}
                 print(f"  中止 検証:{vid}（ビルド不合格）")
+            elif fail_fast and failed_checks and v.get("level") in heavy:
+                r = {"pass": False, "fail_fast": True,
+                     "skipped": f"チェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）"}
+                print(f"  未実行 検証:{vid}（チェックが不合格・gate_fail_fast）")
             else:
                 r = record("verify", vid, v["command"], int(v.get("timeout_sec", default_to)))
                 print(f"  {'合格' if r['pass'] else '不合格'} 検証:{vid}")
