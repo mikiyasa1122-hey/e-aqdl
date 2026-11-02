@@ -220,7 +220,11 @@ class GateFailFastTest(unittest.TestCase):
                 for p in r["acceptance"]:
                     for v in p["verifications"]:
                         yield r, p, v
-        return G.run_gate(self.tmp, state, cfg, iv, os.path.join(self.tmp, "logs"), "s1")
+        # gate は日本語の進捗を表示する。Windows の既定のコンソール（cp1252）で落ちないよう、表示は捨てる
+        import contextlib
+        import io
+        with contextlib.redirect_stdout(io.StringIO()):
+            return G.run_gate(self.tmp, state, cfg, iv, os.path.join(self.tmp, "logs"), "s1")
 
     def test_fail_fast_skips_heavy_checks_without_passing_them(self):
         res, ok = self.run_gate(True)
