@@ -347,6 +347,49 @@ def cmd_bind(args):
     mutate(args, fn)
 
 
+def cmd_holdout(args):
+    """holdout <受け入れ条件ID> --command "<コマンド>" | <受け入れ条件ID> --remove | --list | --dir
+
+    隠し受け入れテスト（設定 holdout.enabled が true のとき、設計担当が登録する）。コマンドの {holdout} は
+    置き場所（プロジェクトの外）に置き換えて実行する。
+    """
+    from . import holdout as HO
+    command = pop_opt(args, "--command")
+    remove = pop_flag(args, "--remove")
+    show_list = pop_flag(args, "--list")
+    show_dir = pop_flag(args, "--dir")
+    if show_list or show_dir:
+        project, s, _ = open_state(args)
+        d = HO.run_holdout_dir(project, s.get("run_id"))
+        if show_dir:
+            os.makedirs(d, exist_ok=True)
+            print(d)
+            return
+        print(f"holdout: {'有効' if HO.enabled(config(project)) else '無効（設定 holdout.enabled）'}")
+        for it in HO.items(s):
+            print(f"- {it['ac']}: {it['command']}")
+        if not HO.items(s):
+            print("（登録なし）")
+        return
+
+    def fn(project, s, a):
+        if not HO.enabled(config(project)):
+            die("holdout は無効です（設定 holdout.enabled を true にすると使えます）。")
+        if not a or (not command and not remove):
+            die('使い方: holdout <受け入れ条件ID> --command "<コマンド（{holdout} は置き場所）>" | <ID> --remove')
+        kind, _n, _p = find(s, a[0], ("acceptance",))
+        if remove:
+            if not HO.remove(s, a[0]):
+                die(f"{a[0]} の holdout は登録されていません。")
+            log(s, project, "holdout.remove", {"ac": a[0]})
+            info(f"{a[0]} の holdout を外しました。")
+            return
+        HO.record(s, a[0], command)
+        log(s, project, "holdout", {"ac": a[0], "command": command})
+        info(f"{a[0]} の holdout を登録しました（gate で実行。実装担当には中身を見せない）。")
+    mutate(args, fn)
+
+
 def cmd_impl_map(args):
     files = split_list(pop_opt(args, "--files"))
 
@@ -591,6 +634,12 @@ def cmd_gate(args):
         t0 = time.time()
         results, ok = G.run_gate(project, s, cfg, iter_verifications, os.path.join(ctx.rd, "gate"), stamp,
                                  after_merge)
+        from . import holdout as HO
+        holdout_fp_before = HO.fingerprint(project, s) if HO.enabled(cfg) else None
+        if HO.enabled(cfg) and HO.items(s):
+            results["holdout"] = HO.run_all(project, s, cfg, stamp)
+            if not all(r["pass"] for r in results["holdout"].values()):
+                ok = False
         dur = round(time.time() - t0, 1)
         cfg_after = config(project)
         after = G.snapshot(project, cfg, fresh=True)
@@ -617,6 +666,7 @@ def cmd_gate(args):
     s["gate"] = {"seq": bump(s), "stamp": stamp, "ran_at": now_iso(), "after_merge": after_merge, "sec": dur,
                  "code_fp": G.code_fp(before), "code_fp_after": G.code_fp(after), "snapshot": before,
                  "checks_fp": checks_fp_before, "config_fp": config_fp_before, "graph_fp": ctx.graph_fp, "checks_pass": ok, "results": results,
+                 "holdout_fp": holdout_fp_before,
                  "modified_during_gate": modified}
     s.setdefault("gate_history", []).append({"stamp": stamp, "pass": ok, "sec": dur, "after_merge": after_merge,
                                              "modified": bool(modified)})
@@ -963,6 +1013,49 @@ def cmd_trace(args):
         extra = [x["counterfactual"], f"{x['state']}（{EV.LABEL[x['state']]}）", "；".join(x["causes"])] if x else \
             ["", "insufficient（証拠不足）", ""]
         print("| " + " | ".join(str(c).replace("|", "/") for c in list(r) + extra) + " |")
+
+
+def cmd_report(args):
+    """report — 人間向けの1ページの完了報告（証拠の状態・未確認・隠しテスト・時間・トークン）"""
+    from . import evidence as EV
+    project, s, _ = open_state(args)
+    ctx = Ctx(project, s)
+    rows = EV.compute(ctx)
+    m = collect_metrics(s, project)
+    groups = [("証明済み", lambda x: x["state"] == "verified"),
+              ("合格・反証は未実施", lambda x: x["state"] == "passed_but_unchallenged"),
+              ("反証は対象外", lambda x: x["state"] == "not_applicable"),
+              ("未確認（人の判断で進めた）", lambda x: x["gate"] == "未確認（人の判断で保留）"),
+              ("証拠不足", lambda x: x["state"] == "insufficient" and x["gate"] != "未確認（人の判断で保留）"),
+              ("失効（再確認が必要）", lambda x: x["state"] == "invalidated")]
+    print(f"# 完了報告: {s.get('title')}（{s['run_id']}・状態 {s['status']}）")
+    print()
+    print("## 証拠の状態")
+    for label, f in groups:
+        hit = [x for x in rows if f(x)]
+        if hit:
+            print(f"- **{label}**: {len(hit)} 件 — " + "、".join(f"{x['verification']}（{x['parent']}）" for x in hit[:12])
+                  + (" …" if len(hit) > 12 else ""))
+    g = s.get("gate") or {}
+    ho = (g.get("results") or {}).get("holdout") or {}
+    if ho:
+        ok = [ac for ac, r in ho.items() if r.get("pass")]
+        ng = [ac for ac, r in ho.items() if not r.get("pass")]
+        print(f"- **隠し受け入れテスト**: 合格 {len(ok)} / {len(ho)}" + (f"（不合格: {', '.join(ng)}）" if ng else ""))
+    print()
+    print("## 進め方の記録")
+    print(f"- 時間: {m['run_sec'] // 60} 分 {m['run_sec'] % 60} 秒。Quality Gate {m['gate']['runs']} 回（不合格 {m['gate']['failed']}）、"
+          f"独立レビュー {m['reviews']['runs']} 回（合格 {m['reviews']['passed']}）、修正ループ {m['fix_iterations']} 回")
+    print(f"- 人間への確認: {m['human']['asks']} 回、承認 {m['approvals']['approve']} 件")
+    t = m["tokens_total"]
+    print("- トークン: " + ("取得できず" if not t else
+                         f"入力（キャッシュ含む）{t['input'] + t['cache_read'] + t['cache_create']:,}・出力 {t['output']:,}"
+                         + ("" if m["tokens_complete"] else "（一部取得できず、下限）")) + "（料金ではない）")
+    models = (s.get("agents") or {}).get("models") or {}
+    if models.get("reviewer"):
+        print(f"- レビュー担当のモデル: {models['reviewer']}")
+    print()
+    print("通常の gate の合格は「テストが欠陥を検出できることの証明」ではありません。未確認・証拠不足の項目は、確かめていない範囲です。")
 
 
 def cmd_history(args):
@@ -1613,6 +1706,25 @@ def hook_pre_write(payload):
     return A.deny(why) if why else None
 
 
+def hook_pre_read(payload):
+    """Read・Grep・Glob の前: 実装担当は隠し受け入れテストを、ブラインドレビューのレビュー担当は実装報告を読めない。"""
+    ti = payload.get("tool_input") or {}
+    path = ti.get("file_path") or ti.get("path") or ti.get("notebook_path")
+    cwd, project, state, spath = hook_context(payload)
+    if not project:
+        return None
+    role = A.role_of(payload.get("agent_type"))
+    if not path:
+        # パス指定のない Grep・Glob はプロジェクト全体が対象（holdout はプロジェクトの外なので含まれない）
+        path = cwd
+    elif not os.path.isabs(path):
+        path = os.path.join(cwd, path)
+    why = A.check_read(role, path, os.path.realpath(project), state, config(project))
+    if not why and ti.get("pattern") and isinstance(ti.get("pattern"), str) and os.path.isabs(ti["pattern"]):
+        why = A.check_read(role, ti["pattern"], os.path.realpath(project), state, config(project))
+    return A.deny(why) if why else None
+
+
 def hook_pre_agent(payload):
     cwd, project, state, spath = hook_context(payload)
     if not project:
@@ -1752,7 +1864,7 @@ def hook_session_start(payload):
 
 HOOKS = {
     "session-start": hook_session_start, "user-prompt": hook_user_prompt, "pre-bash": hook_pre_bash,
-    "pre-write": hook_pre_write, "pre-agent": hook_pre_agent, "post-ask": hook_post_ask,
+    "pre-write": hook_pre_write, "pre-agent": hook_pre_agent, "pre-read": hook_pre_read, "post-ask": hook_post_ask,
     "post-bash": hook_post_bash,
     "subagent-start": hook_subagent_start, "subagent-stop": hook_subagent_stop, "stop": hook_stop,
 }
@@ -1847,7 +1959,7 @@ COMMANDS = {
     "assume": cmd_assume, "drop": cmd_drop,
     "design-map": cmd_design_map, "decision": cmd_decision, "add-check": cmd_add_check,
     "remove-check": cmd_remove_check, "checks": cmd_checks,
-    "bind": cmd_bind, "impl-map": cmd_impl_map,
+    "bind": cmd_bind, "impl-map": cmd_impl_map, "holdout": cmd_holdout, "report": cmd_report,
     "spec": cmd_spec, "answer": cmd_answer, "ask": cmd_ask, "resume": cmd_resume, "wait": cmd_wait,
     "confirm": cmd_confirm, "defer": cmd_defer, "escalation": cmd_escalation, "gate": cmd_gate, "ci": cmd_ci,
     "memory": memory.cmd_memory, "memory-done": memory.cmd_memory_done, "memory-use": memory.cmd_memory_use,

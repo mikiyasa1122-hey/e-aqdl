@@ -28,6 +28,11 @@ class MemoryTest(unittest.TestCase):
         c = json.loads(read_file(p))
         c.pop("memory_policy")
         write_file(p, json.dumps(c))
+        out = e.aq("memory", "--all")  # 既定（プロジェクト内だけ）でも、共通 Memory は読まない
+        self.assertNotIn("F-0001", out)
+        self.assertIn("プロジェクト内だけ", out)
+        c["memory_policy"] = {"scope_default": "ask"}  # run ごとに聞く設定で、未選択のとき
+        write_file(p, json.dumps(c))
         out = e.aq("memory", "--all")
         self.assertNotIn("F-0001", out)
         self.assertIn("共通 Memory は使わない", out)
@@ -75,9 +80,13 @@ class HookTest(unittest.TestCase):
         self.assertIn("通常どおり", ctx)  # 小さな修正・質問には使わない
         os.rmdir(os.path.join(e.project, ".git"))
         e.aq("init", "x")
+        p = os.path.join(e.project, ".aq-dlc", "config.json")
+        c = json.loads(read_file(p))
+        c["memory_policy"] = {"scope_default": "ask"}  # run ごとに聞く設定
+        write_file(p, json.dumps(c))
         e.aq("new", "x")
         ctx = e.hook("session-start", {})["hookSpecificOutput"]["additionalContext"]
-        self.assertIn("Memory の利用範囲", ctx)  # E-AQDL: run の開始時に利用範囲を選ぶ
+        self.assertIn("Memory の利用範囲", ctx)  # E-AQDL: ask の設定なら、run の開始時に利用範囲を選ぶ
         e.aq("memory-scope", "project")
         ctx = e.hook("session-start", {})["hookSpecificOutput"]["additionalContext"]
         self.assertIn("統括", ctx)

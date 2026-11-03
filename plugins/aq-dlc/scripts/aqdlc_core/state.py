@@ -311,7 +311,10 @@ def new_run(project, title):
     st["config_fp_registered"] = G.config_fp(cfg, project)
     default = (cfg.get("memory_policy") or {}).get("scope_default", "ask")
     if default in ("none", "project", "all"):
-        st["memory_scope"] = {"choice": default, "source": "config", "at": now_iso(), "seq": 0}
+        from .project import explicit_setting
+        # 人が設定に書いた値は "config"（エージェントは変えられない）。既定値のままなら "default"（memory-scope で変えられる）
+        src = "config" if explicit_setting(project, "memory_policy", "scope_default") is not None else "default"
+        st["memory_scope"] = {"choice": default, "source": src, "at": now_iso(), "seq": 0}
     save_state(os.path.join(d, "state.json"), st)
     tmpl = read_text(os.path.join(project, ".aq-dlc", "run-template.md"), "# {title}\n")
     with open(os.path.join(d, "run.md"), "w", encoding="utf-8") as f:
@@ -677,6 +680,9 @@ def _problems(ctx, stage):
         stale.append("チェックの定義")
     if g.get("config_fp") and g.get("config_fp") != ctx.config_fp:
         stale.append("設定")
+    from . import holdout as HO
+    if HO.enabled(cfg) and HO.items(s) and g.get("holdout_fp") != HO.fingerprint(ctx.project, s):
+        stale.append("隠し受け入れテスト（holdout）")
     vres = (g.get("results") or {}).get("verifications", {})
     changed_v, new_v = [], []
     for _r, _p, v in iter_verifications(s):
@@ -705,9 +711,11 @@ def _problems(ctx, stage):
             continue
         if not r.get("pass"):
             vfail.append(v["id"])
-    if failed or vfail:
+    hfail = [ac for ac, r in ((g.get("results") or {}).get("holdout") or {}).items() if not r.get("pass")]
+    if failed or vfail or hfail:
         what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
-                        ([f"検証 {', '.join(vfail[:6])}"] if vfail else []))
+                        ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
+                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []))
         route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
         out.append(P("gate_fail", f"gate が不合格: {what}", route))
         return out
