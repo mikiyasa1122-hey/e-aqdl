@@ -429,6 +429,10 @@ def cmd_spec(args):
         die("仕様を提示・承認できる状態ではありません: " + probs[0]["msg"])
     if present:
         print(spec_sheet(s), end="")
+        from . import workflow as WF
+        if WF.config_mode(ctx.cfg) != "full":
+            print(f"\n{WF.describe(s, ctx.cfg)}\n（工程を上げる・下げるときは人間に確認する。下げるには「承認 {WF.mode_target(s, 'lite')}」"
+                  "などの返答が必要）")
         sp["presented_hash"] = ctx.spec_hash
         sp["presented_seq"] = bump(s)
         save_state(spath, s)
@@ -457,7 +461,13 @@ def cmd_spec(args):
     s["awaiting_human"] = False
     log(s, project, "spec.approve", {"hash": ctx.spec_hash, "target": target, "note": approve})
     save_state(spath, s)
-    info(f"仕様 {short(ctx.spec_hash)} の承認を記録しました。次は設計（aq-dlc:design）です。")
+    from . import workflow as WF
+    wf = WF.effective(s, ctx.cfg)
+    s.setdefault("workflow_plan", {}).update(at_approval={"mode": wf["mode"], "source": wf["source"],
+                                                          "reasons": wf["reasons"], "spec_hash": ctx.spec_hash})
+    save_state(spath, s)
+    nxt = "設計（aq-dlc:design）" if wf["stages"]["design"] else "実装（aq-dlc:implementer。この工程では設計担当を使わない）"
+    info(f"仕様 {short(ctx.spec_hash)} の承認を記録しました。{WF.describe(s, ctx.cfg)}。次は{nxt}です。")
 
 
 def cmd_answer(args):
@@ -1015,6 +1025,47 @@ def cmd_trace(args):
         print("| " + " | ".join(str(c).replace("|", "/") for c in list(r) + extra) + " |")
 
 
+def cmd_workflow(args):
+    """workflow [--set lite|standard|strict "<人間の返答の要約>"] — この run の工程（リスクに応じた選択）を表示・変更する
+
+    上げるのは統括が自由に行える（理由を記録）。下げるのは、人間の「承認 MODE-<工程>-…」の返答があるときだけ。
+    """
+    from . import workflow as WF
+    to = pop_opt(args, "--set")
+    if not to:
+        project, s, _ = open_state(args)
+        cfg = config(project)
+        e = WF.effective(s, cfg)
+        print(WF.describe(s, cfg))
+        print(f"設定 workflow.mode: {e['config']}  判定の出どころ: {e['source']}")
+        return
+
+    def fn(project, s, a):
+        cfg = config(project)
+        if A.caller_role(project, "workflow") in A.ROLES:
+            die("工程の変更は統括だけが行えます（サブエージェントは差し戻しに書いて統括に返す）。")
+        if to not in WF.MODES:
+            die("使い方: workflow --set lite|standard|strict \"<人間の返答の要約、または上げる理由>\"")
+        if WF.config_mode(cfg) == "full":
+            die("設定 workflow.mode が full（従来どおり全工程）のため、工程は変えられません。")
+        note = " ".join(a).strip()
+        cur = WF.effective(s, cfg)["mode"]
+        plan = s.setdefault("workflow_plan", {})
+        if WF.ORDER.index(to) < WF.ORDER.index(cur):
+            target = WF.mode_target(s, to)
+            if not s.get("asked_seq") or last_human_seq(s) <= s["asked_seq"]:
+                die(f"工程を下げるには人間の承認が必要です。ask を実行し、選択肢「{to} に下げる（承認 {target}）」を含めて確認してください。")
+            decision, ev, _f = AP.find_decision(s, target, s["asked_seq"])
+            if decision != "approve":
+                die(f"ask の後の人間の返答に「承認 {target}」がありません（工程は下げません）。")
+            AP.record(s, target, "approve", ev, run_dir(project, s.get("run_id")), note, "workflow")
+        plan.update(human_mode=to, human_note=note or ("上げる" if WF.ORDER.index(to) > WF.ORDER.index(cur) else ""),
+                    changed_at=now_iso())
+        log(s, project, "workflow.set", {"from": cur, "to": to, "note": note})
+        info(f"工程を {cur} から {to} にしました。")
+    mutate(args, fn)
+
+
 def cmd_report(args):
     """report — 人間向けの1ページの完了報告（証拠の状態・未確認・隠しテスト・時間・トークン）"""
     from . import evidence as EV
@@ -1029,6 +1080,9 @@ def cmd_report(args):
               ("証拠不足", lambda x: x["state"] == "insufficient" and x["gate"] != "未確認（人の判断で保留）"),
               ("失効（再確認が必要）", lambda x: x["state"] == "invalidated")]
     print(f"# 完了報告: {s.get('title')}（{s['run_id']}・状態 {s['status']}）")
+    from . import workflow as WF
+    if WF.config_mode(ctx.cfg) != "full":
+        print(WF.describe(s, ctx.cfg))
     print()
     print("## 証拠の状態")
     for label, f in groups:
@@ -1193,9 +1247,20 @@ def collect_metrics(s, project=None):
         "conditions": {"memory_scope": (s.get("memory_scope") or {}).get("choice"),
                        "counterfactual_mode": (((s.get("counterfactual") or {}).get("latest") or {}).get("mode")),
                        "roles_enabled": bool((s.get("roles") or {}).get("history")),
-                       "workflow": "full",
+                       "workflow": _workflow_label(s, project),
                        "engine": "E-AQDL" if s.get("eaqdl") else "AQ-DLC v0.5"},
     }
+
+
+def _workflow_label(s, project):
+    from . import workflow as WF
+    try:
+        cfg = config(project) if project else config()
+        if WF.config_mode(cfg) == "full":
+            return "full"
+        return WF.effective(s, cfg)["mode"]
+    except Exception:  # noqa: BLE001
+        return None
 
 
 def _quality_metrics(s, project):
@@ -1959,7 +2024,7 @@ COMMANDS = {
     "assume": cmd_assume, "drop": cmd_drop,
     "design-map": cmd_design_map, "decision": cmd_decision, "add-check": cmd_add_check,
     "remove-check": cmd_remove_check, "checks": cmd_checks,
-    "bind": cmd_bind, "impl-map": cmd_impl_map, "holdout": cmd_holdout, "report": cmd_report,
+    "bind": cmd_bind, "impl-map": cmd_impl_map, "holdout": cmd_holdout, "report": cmd_report, "workflow": cmd_workflow,
     "spec": cmd_spec, "answer": cmd_answer, "ask": cmd_ask, "resume": cmd_resume, "wait": cmd_wait,
     "confirm": cmd_confirm, "defer": cmd_defer, "escalation": cmd_escalation, "gate": cmd_gate, "ci": cmd_ci,
     "memory": memory.cmd_memory, "memory-done": memory.cmd_memory_done, "memory-use": memory.cmd_memory_use,

@@ -41,7 +41,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 ```
 
 統括が使うコマンド:
-`setup` `doctor` `init` `publish` `new` / `memory-scope none|project|all` / `spec [--present | --approve "<人間の返答の要約>"]` `show <ID>` `answer <質問ID> "<回答>"` / `ask "<質問>"` `resume` / `escalation [<ID> --resolve "<対応>"]` / `gate [--after-merge]` `cf [--plan]` `cf-add` `cf-mark` `ci --wait 8` / `evidence` `roles` `audit` / `memory --tags .. --record` `memory-use` `memory-approve` `memory-share propose|decide` `memory-done --end project|share|none --saved/--merged/--skipped` / `metrics` `report`（1ページの完了報告）/ `holdout <受け入れ条件ID> --command ... | --list | --dir`（設計担当）/ `complete` `abort` / `confirm <検証ID> "<人間の確認内容>"` `defer <検証ID>[,…] "<人間の返答の要約>"`（人が確認できない検証を、人間の承認のもとで未確認のまま進める）/ `config-accept "<人間の返答の要約>"`（設定がエンジン以外で変わったとき、人間に確認してから）
+`setup` `doctor` `init` `publish` `new` / `memory-scope none|project|all` / `spec [--present | --approve "<人間の返答の要約>"]` `show <ID>` `answer <質問ID> "<回答>"` / `ask "<質問>"` `resume` / `escalation [<ID> --resolve "<対応>"]` / `gate [--after-merge]` `cf [--plan]` `cf-add` `cf-mark` `ci --wait 8` / `evidence` `roles` `audit` / `memory --tags .. --record` `memory-use` `memory-approve` `memory-share propose|decide` `memory-done --end project|share|none --saved/--merged/--skipped` / `metrics` `report`（1ページの完了報告）`workflow [--set <工程> "<理由>"]`（工程の確認・変更）/ `holdout <受け入れ条件ID> --command ... | --list | --dir`（設計担当）/ `complete` `abort` / `confirm <検証ID> "<人間の確認内容>"` `defer <検証ID>[,…] "<人間の返答の要約>"`（人が確認できない検証を、人間の承認のもとで未確認のまま進める）/ `config-accept "<人間の返答の要約>"`（設定がエンジン以外で変わったとき、人間に確認してから）
 
 要求・設計・実装の登録コマンド（req, accept, risk, verify, question, assume, drop, design-map, decision, add-check, bind, impl-map）は各担当のもので、**統括は使えない**（hook で止まる）。state.json と config.json は誰も直接編集しない。
 
@@ -119,7 +119,14 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 - 設定 `holdout.enabled` が true なら、設計担当が受け入れ条件ごとのテストをプロジェクトの外に置き、`holdout` で登録する。実装担当は中身を読めない（hook が止める）。gate で初めて実行し、不合格なら受け入れ条件の ID だけを実装担当に返す。
 - レビューは既定でブラインド（`review.blind`）: レビュー担当には実装報告を渡さず、読ませない。`review.model` を設定すると、レビュー担当だけそのモデルで動く（Agent の呼び出しにエンジンが指定する）。
 
-### 10. 既存のリポジトリで始めるとき
+### 10. リスクに応じた工程（設定 `workflow.mode`）
+- `full`（既定）: 従来どおり全工程。`auto`: 要求・受け入れ条件・リスクの文と、実装の対象ファイルから工程を選ぶ。`lite`・`standard`・`strict` は固定。
+- lite = 仕様の承認 → 実装 → gate（設計担当・独立レビューなし）。standard = lite ＋ 独立レビュー。strict = 全工程。認証・権限・秘密情報・決済・削除・DB のスキーマ・並行処理などの語やファイルがあれば strict。判定できなければ strict。
+- 仕様の提示（`spec --present`）で工程と理由を人間に見せる。`$AQ workflow` で確認できる。
+- 上げるのは統括の判断で `$AQ workflow --set <工程> "<理由>"`。下げるのは人間の「承認 MODE-…」の返答があるときだけ。実装の対象ファイルで上位の工程が必要になったら、エンジンが自動で上げる（欠けた設計・レビューを `next` が求める）。
+- 省いた工程は「省略（工程の選択による）」と表示される。完了報告で、レビュー済み・設計済みと書かない。
+
+### 11. 既存のリポジトリで始めるとき
 E-AQDL 未導入の既存リポジトリでは、`$AQ init` で導入してから `new` で run を始める。既存のコード・テスト・README は変更の対象として扱い、要求分析で「変える部分」と「変えない部分（回帰を確かめる）」を分けて仕様にする。
 
 ## 自動で進める

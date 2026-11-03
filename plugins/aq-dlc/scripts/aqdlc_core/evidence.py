@@ -60,8 +60,9 @@ def compute(ctx):
         if (crec and cc["mode"] != "off") else []
     bv = CF.by_verification(crec) if crec else {}
     rv = current_review(s)
-    review = "未実施"
-    if rv:
+    from . import workflow as WF
+    review = "未実施" if WF.needs(s, cfg, "review") else "省略（工程の選択による）"
+    if rv and WF.needs(s, cfg, "review"):
         review = "合格" if review_passed(rv) else "要修正"
         if rv.get("code_fp") != ctx.code_fp or rv.get("graph_fp") != ctx.graph_fp:
             review += "（古い）"
