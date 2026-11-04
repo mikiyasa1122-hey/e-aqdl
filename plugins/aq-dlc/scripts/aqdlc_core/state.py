@@ -311,7 +311,10 @@ def new_run(project, title):
     st["config_fp_registered"] = G.config_fp(cfg, project)
     default = (cfg.get("memory_policy") or {}).get("scope_default", "ask")
     if default in ("none", "project", "all"):
-        st["memory_scope"] = {"choice": default, "source": "config", "at": now_iso(), "seq": 0}
+        from .project import explicit_setting
+        # 人が設定に書いた値は "config"（エージェントは変えられない）。既定値のままなら "default"（memory-scope で変えられる）
+        src = "config" if explicit_setting(project, "memory_policy", "scope_default") is not None else "default"
+        st["memory_scope"] = {"choice": default, "source": src, "at": now_iso(), "seq": 0}
     save_state(os.path.join(d, "state.json"), st)
     tmpl = read_text(os.path.join(project, ".aq-dlc", "run-template.md"), "# {title}\n")
     with open(os.path.join(d, "run.md"), "w", encoding="utf-8") as f:
@@ -590,8 +593,16 @@ def _problems(ctx, stage):
         out.append(P("escalation", f"未対応の差し戻し: {', '.join(esc)}", "orchestrator"))
         return out
 
+    from . import workflow as WF
+    wf = WF.effective(s, cfg)
     d = s["design"]
-    if not d.get("registered_hash"):
+    if not wf["stages"]["design"]:
+        # 工程の選択で設計担当を使わない（実装担当が構成を決め、チェックを登録する）
+        if d.get("registered_hash") is None and not ctx.checks and last_impl(s):
+            out.append(P("no_checks", "Quality Gate のチェックが未登録（この工程では実装担当が add-check で登録する）",
+                         "implementer"))
+            return out
+    elif not d.get("registered_hash"):
         out.append(P("design_missing", "設計が未作成", "design"))
     elif d.get("registered_hash") != ctx.design_hash:
         out.append(P("design_changed", "設計書が登録後に変更された（aq-dlc:design で登録し直す）", "design"))
@@ -650,7 +661,7 @@ def _problems(ctx, stage):
     if out:
         return out
 
-    rv = current_review(s)
+    rv = current_review(s) if wf["stages"]["review"] else None
     if rv and not review_passed(rv):
         cats = {f.get("category") for f in rv.get("findings", []) if f.get("severity") == "重大"} or \
             {f.get("category") for f in rv.get("findings", [])}
@@ -677,6 +688,9 @@ def _problems(ctx, stage):
         stale.append("チェックの定義")
     if g.get("config_fp") and g.get("config_fp") != ctx.config_fp:
         stale.append("設定")
+    from . import holdout as HO
+    if HO.enabled(cfg) and HO.items(s) and g.get("holdout_fp") != HO.fingerprint(ctx.project, s):
+        stale.append("隠し受け入れテスト（holdout）")
     vres = (g.get("results") or {}).get("verifications", {})
     changed_v, new_v = [], []
     for _r, _p, v in iter_verifications(s):
@@ -705,9 +719,11 @@ def _problems(ctx, stage):
             continue
         if not r.get("pass"):
             vfail.append(v["id"])
-    if failed or vfail:
+    hfail = [ac for ac, r in ((g.get("results") or {}).get("holdout") or {}).items() if not r.get("pass")]
+    if failed or vfail or hfail:
         what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
-                        ([f"検証 {', '.join(vfail[:6])}"] if vfail else []))
+                        ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
+                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []))
         route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
         out.append(P("gate_fail", f"gate が不合格: {what}", route))
         return out
@@ -736,39 +752,42 @@ def _problems(ctx, stage):
                              + "、".join(f"{v}（{why}）" for v, why, _m in gaps[:4]), "human"))
                 return out
 
-    if not rv:
+    if not wf["stages"]["review"]:
+        rv = None  # 工程の選択で独立レビューを使わない（省略として記録し、レビュー済みとは扱わない）
+    elif not rv:
         bad = [r for r in s.get("reviews", []) if not r.get("valid")]
         why = f"（前回のレビューは無効: {bad[-1].get('invalid_reason')}）" if bad else ""
         out.append(P("review_missing", "独立レビューが未実施" + why, "reviewer"))
         return out
-    rs = []
-    if rv.get("code_fp") != ctx.code_fp:
-        rs.append("コード")
-    if rv.get("graph_fp") != ctx.graph_fp:
-        rs.append("検証条件")
-    if rv.get("checks_fp") != ctx.checks_fp:
-        rs.append("チェックの定義")
-    if rv.get("config_fp") and rv.get("config_fp") != ctx.config_fp:
-        rs.append("設定")
-    if rv.get("spec_hash") != ctx.spec_hash:
-        rs.append("仕様")
-    if rv.get("design_hash") != ctx.design_hash:
-        rs.append("設計")
-    if rv.get("role_fp"):
-        from .agents import role_selection
-        if role_selection("reviewer", ctx)["fp"] != rv["role_fp"]:
-            rs.append("レビューの役割の定義（Role Profile）")
-    if cc["mode"] != "off" and rv.get("cf_fp") != CF.record_fp(s):
-        rs.append("反証テストの結果")
-    if rs:
-        out.append(P("review_stale", f"レビュー#{rv['n']} の後に {'・'.join(rs)} が変わった（再レビューが必要）",
-                     "reviewer"))
-        return out
-    if not review_passed(rv):
-        out.append(P("review_blocking", f"レビュー#{rv['n']} が合格ではない（判定「{rv.get('verdict')}」・"
-                     f"重大 {rv['blocking']} 件）。修正して再レビューが必要",
-                     fix_route("implementer")))
-        return out
+    if rv:
+        rs = []
+        if rv.get("code_fp") != ctx.code_fp:
+            rs.append("コード")
+        if rv.get("graph_fp") != ctx.graph_fp:
+            rs.append("検証条件")
+        if rv.get("checks_fp") != ctx.checks_fp:
+            rs.append("チェックの定義")
+        if rv.get("config_fp") and rv.get("config_fp") != ctx.config_fp:
+            rs.append("設定")
+        if rv.get("spec_hash") != ctx.spec_hash:
+            rs.append("仕様")
+        if rv.get("design_hash") != ctx.design_hash:
+            rs.append("設計")
+        if rv.get("role_fp"):
+            from .agents import role_selection
+            if role_selection("reviewer", ctx)["fp"] != rv["role_fp"]:
+                rs.append("レビューの役割の定義（Role Profile）")
+        if cc["mode"] != "off" and rv.get("cf_fp") != CF.record_fp(s):
+            rs.append("反証テストの結果")
+        if rs:
+            out.append(P("review_stale", f"レビュー#{rv['n']} の後に {'・'.join(rs)} が変わった（再レビューが必要）",
+                         "reviewer"))
+            return out
+        if not review_passed(rv):
+            out.append(P("review_blocking", f"レビュー#{rv['n']} が合格ではない（判定「{rv.get('verdict')}」・"
+                         f"重大 {rv['blocking']} 件）。修正して再レビューが必要",
+                         fix_route("implementer")))
+            return out
 
     manual_pre = [v["id"] for _r, _p, v in iter_verifications(s)
                   if v.get("manual") and not G.is_automated(v) and not v.get("after_merge")
@@ -1031,4 +1050,7 @@ def describe_state(ctx):
     dl = deferred_list(s, ctx.cfg)
     if dl:
         lines.append(f"未確認のまま進めた検証（人間の判断）: {', '.join(dl)}")
+    from . import workflow as WF
+    if WF.config_mode(ctx.cfg) != "full":
+        lines.append(WF.describe(s, ctx.cfg))
     return lines

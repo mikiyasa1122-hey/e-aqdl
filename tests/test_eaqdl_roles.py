@@ -168,7 +168,8 @@ class TestPermissionsUnchanged(unittest.TestCase):
             for role in ("requirements", "design", "implementer", "reviewer"):
                 self.assertEqual(A.ROLE_COMMANDS[role] - A.COMMON_READ,
                                  {"requirements": {"req", "accept", "risk", "verify", "assume", "question", "drop"},
-                                  "design": {"design-map", "decision", "add-check", "remove-check", "bind"},
+                                  # holdout: 隠し受け入れテストの登録（0.6.3 で設計担当に追加。設定で有効なときだけ使える）
+                                  "design": {"design-map", "decision", "add-check", "remove-check", "bind", "holdout"},
                                   "implementer": {"bind", "impl-map", "add-check", "gate", "cf"},
                                   "reviewer": set()}[role])
         finally:

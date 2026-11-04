@@ -151,10 +151,14 @@ def _gate_items(s, li):
         if md:
             failed = [("gate中の変更", {"error": f"gate の実行中に変わった: {md.get('summary')}（テスト・ビルドが追跡対象の"
                                               "ファイルを書き換えないようにする）"})] + failed
-        if failed or vfail:
+        hfail = [ac for ac, r in (g["results"].get("holdout") or {}).items() if not r.get("pass")]
+        if failed or vfail or hfail:
             kind = ("gate", g["stamp"])
             items = [{"label": n, "text": r.get("skipped") or r.get("error") or f"不合格（ログ: {r.get('log')}）"}
                      for n, r in failed + vfail]
+            # 隠しテストは、どの受け入れ条件かだけを返す（テストの中身・出力は見せない）
+            items += [{"label": f"隠しテスト {ac}", "text": f"受け入れ条件 {ac} の隠し受け入れテストが不合格。中身は見せない。"
+                       f"仕様の {ac} と設計書の契約（名前・入出力・エラー）どおりに動くかを見直す"} for ac in hfail]
     return kind, items
 
 
@@ -284,6 +288,16 @@ def _brief_design(ctx):
         df = [f for f in rv.get("findings", []) if f.get("category") == "設計"]
         if df:
             lines += ["", f"## レビュー#{rv['n']} の設計に関する指摘"] + [f"- [{f['label']}] {f['text']}" for f in df]
+    from . import holdout as HO
+    if HO.enabled(ctx.cfg):
+        d = HO.run_holdout_dir(ctx.project, s.get("run_id"))
+        lines += ["", "## 隠し受け入れテスト（holdout）を作る",
+                  f"- 置き場所: `{d}`（プロジェクトの外。実装担当からは読めない）。ここにテストファイルを書く。",
+                  "- 受け入れ条件ごとに、設計書で決めた契約（モジュール名・関数・エンドポイント・入出力・エラー）だけを使って"
+                  "外から確かめるテストを書く。境界値・権限・異常系など、実装がテストに合わせて弱めがちな点を入れる。",
+                  "- 登録: `$AQ holdout <受け入れ条件ID> --command \"<コマンド>\"`（コマンドの {holdout} は置き場所に置き換わる。"
+                  "例: `python3 -m pytest {holdout}/test_ac1.py -q`。作業フォルダはプロジェクト）",
+                  "- 重要な要求の受け入れ条件には必ず1つ以上。テストの中身を設計書・プロジェクト内に書かない。"]
     lines += ["", "## 終了時の報告", "選んだ構成と理由、登録したチェック、実装担当への申し送りを短く書く。"]
     return lines
 
@@ -292,6 +306,25 @@ def _brief_implementer(ctx, compact=False):
     s = ctx.state
     sp, dp, ip = doc_path(ctx.rd, "spec"), doc_path(ctx.rd, "design"), doc_path(ctx.rd, "impl")
     kind, items = pending_fix(ctx)
+    from . import workflow as WF
+    wf = WF.effective(s, ctx.cfg)
+    if not wf["stages"]["design"]:
+        lines = [
+            "## あなたの仕事",
+            f"承認済みの仕様 `{sp}`（{short(ctx.spec_hash)}）に基づいて実装とテストを作る。**最初に仕様を読む。仕様を独断で変えない。**",
+            f"この run の工程は {wf['mode']}（{'・'.join(wf['reasons'])}）で、**設計担当はいない**。次もあなたが行う:",
+            "- 既存のコードの構成に合わせて、技術スタックと構成を決める。実装報告の「## 実施内容」に構成と理由を短く書く。",
+            "- Quality Gate のチェックを登録する: `$AQ add-check <名前> \"<コマンド>\" --kind typecheck|lint|build|unit|integration|e2e`"
+            "（少なくとも単体テスト。既存のテスト・Lint があれば含める）",
+            "- 要求と実装ファイルの対応（`$AQ impl-map`）・各検証の実行方法（`$AQ bind`）を設定する。",
+            f"- 実装報告: `{ip}`。先頭に「仕様: {short(ctx.spec_hash)}」の行"
+            + ("。「## 指摘への対応」に下の各ラベルごとの対応を書く" if kind else ""),
+            "- 認証・権限・秘密情報・決済・削除・DB のスキーマ・並行処理に触れる必要が出たら、作業を止めて「## 差し戻し」に書く"
+            "（工程を上げて設計とレビューを加える判断が必要）。",
+            "禁止: テストを通すために検証条件を弱める・重要な検証を消す・テストを skip する。",
+            "",
+        ]
+        return lines + _impl_tail(ctx, s, kind, items)
     if compact:
         # 手順・禁止事項の一般論はエージェント定義（implementer.md）にある。読む版の指紋と報告の置き場所は残す
         lines = [
@@ -338,6 +371,12 @@ def _impl_tail(ctx, s, kind, items):
         for f in items:
             lines.append(f"- [{f['label']}] {f['text']}")
         lines.append("")
+    from . import holdout as HO
+    if HO.enabled(ctx.cfg) and HO.items(s):
+        lines += ["## 隠し受け入れテスト（holdout）",
+                  "次の受け入れ条件は、あなたからは見えないテストで gate のときに確かめる。中身は読めない（読もうとすると止まる）。"
+                  "仕様と設計書の契約（名前・入出力・エラー）どおりに作る:",
+                  "- " + "、".join(it["ac"] for it in HO.items(s)), ""]
     unbound = [v for _r, _p, v in iter_verifications(s) if not G.is_automated(v) and not v.get("manual")]
     if unbound:
         lines += ["## 実行方法が未設定の検証"] + [f"- {v['id']}: {v.get('method')}（レベル {v.get('level') or '未設定'}）"
@@ -392,6 +431,10 @@ def _reviewer_extra(ctx, entry):
     return lines
 
 
+def review_blind(cfg):
+    return bool((cfg.get("review") or {}).get("blind", True))
+
+
 def _brief_reviewer(ctx):
     s = ctx.state
     g = s.get("gate") or {}
@@ -406,7 +449,9 @@ def _brief_reviewer(ctx):
         "## 読むもの",
         f"- 仕様: `{doc_path(ctx.rd, 'spec')}`（{short(ctx.spec_hash)}）",
         f"- 設計: `{doc_path(ctx.rd, 'design')}`（{short(ctx.design_hash)}）",
-        f"- 実装報告: `{doc_path(ctx.rd, 'impl')}`（参考。鵜呑みにしない）",
+        (f"- 実装報告: `{doc_path(ctx.rd, 'impl')}`（参考。鵜呑みにしない）" if not review_blind(ctx.cfg) else
+         "- 実装報告は渡さない（ブラインドレビュー）。impl.md と実装担当のメッセージは読まない（エンジンが読み取りを止める）。"
+         "実装担当の説明ではなく、仕様・設計・コード・テスト・gate の結果で判断する"),
         "- 要求→受け入れ条件→設計→実装→テスト→結果の対応: `$AQ trace`",
         f"- 検証条件・チェックの変更履歴: `$AQ history --since {since}`（弱められた検証がないか）",
         f"- gate の結果: {g.get('stamp')}（ログ: {os.path.join(ctx.rd, 'gate')}）",
@@ -475,6 +520,14 @@ def spawn_problem(role, ctx):
     blk = [p for p in probs if p["code"] in ("config_changed", "state_invalid", "forged_human")]
     if blk:
         return blk[0]["msg"] + "。人間の確認が済むまで進めません。"
+    from . import workflow as WF
+    wf = WF.effective(s, ctx.cfg)
+    if role == "design" and not wf["stages"]["design"]:
+        return (f"この run の工程（{wf['mode']}）では設計担当を使いません（実装担当が構成を決め、チェックを登録します）。"
+                "設計が必要なら workflow --set strict で工程を上げてください。")
+    if role == "reviewer" and not wf["stages"]["review"]:
+        return (f"この run の工程（{wf['mode']}）では独立レビューを使いません。"
+                "レビューが必要なら workflow --set standard（または strict）で工程を上げてください。")
     spec_block = {"spec_missing", "graph_incomplete", "spec_unregistered", "questions_open",
                   "answers_unapplied", "spec_unpresented", "spec_unapproved", "dup_ids"}
     blocking = [p for p in probs if p["code"] in spec_block]
@@ -603,6 +656,8 @@ def validate(role, ctx, entry, message):
             errs.append("設計に対応付いていない要求（design-map）: " + "、".join(unmapped))
         if not ctx.checks:
             errs.append("Quality Gate のチェックが登録されていない（add-check）")
+        from . import holdout as HO
+        errs += HO.coverage_problems(s, ctx.cfg, ctx.project)
     elif role == "implementer":
         md = read_text(doc_path(rd, "impl"))
         if md is None or (entry.get("impl_hash_start") and doc_hash(rd, "impl") == entry.get("impl_hash_start")):
@@ -611,7 +666,11 @@ def validate(role, ctx, entry, message):
             mh = missing_headings(md, REQUIRED["implementer"])
             if mh:
                 errs.append("実装報告に必須の見出しがない: " + "、".join(mh))
-            if not hash_line_ok(md, "設計書", ctx.design_hash):
+            from . import workflow as WF
+            # 設計担当を使う工程で、設計が登録済みなら、読んだ版の行を求める（実装中に工程が上がった場合は、
+            # この時点では設計がないので求めない。次に設計担当が呼ばれ、実装は設計に合わせてやり直しになる）
+            if WF.needs(s, ctx.cfg, "design") and s["design"].get("registered_hash") \
+                    and not hash_line_ok(md, "設計書", ctx.design_hash):
                 errs.append(f"実装報告の「設計書: {short(ctx.design_hash)}」の行がない、または古い版を参照している")
             if not hash_line_ok(md, "仕様", ctx.spec_hash):
                 errs.append(f"実装報告の「仕様: {short(ctx.spec_hash)}」の行がない、または古い版を参照している")
@@ -761,9 +820,19 @@ def on_pre_agent(payload, project, state, spath):
     save_state(spath, state)
     out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
                                   "permissionDecisionReason": f"E-AQDL: {ROLE_LABEL[role]} を順番に実行します"}}
+    upd = None
     if cfg["automation"].get("force_foreground_agents", True) and ti.get("run_in_background") is not False:
         upd = dict(ti)
         upd["run_in_background"] = False
+    model = str((cfg.get("review") or {}).get("model") or "").strip()
+    if role == "reviewer" and model and ti.get("model") != model:
+        # レビュー担当だけ別のモデルにする（実装担当と同じ盲点を共有しにくくする）
+        upd = dict(upd or ti)
+        upd["model"] = model
+    used = (upd or ti).get("model") or "inherit"
+    state["agents"].setdefault("models", {})[role] = used
+    save_state(spath, state)
+    if upd:
         out["hookSpecificOutput"]["updatedInput"] = upd
     return out
 
@@ -945,15 +1014,15 @@ def deny(reason):
 ENGINE_RE = re.compile(r"aqdlc\.py[\"']?\s+[\"']?([a-z][a-z-]*)")
 COMMON_READ = {"status", "next", "trace", "history", "show", "spec", "checks", "memory", "check", "escalation", "audit",
                "evidence", "roles",
-               "metrics"}
+               "metrics", "report", "workflow"}
 ROLE_COMMANDS = {
     "requirements": COMMON_READ | {"req", "accept", "risk", "verify", "assume", "question", "drop"},
-    "design": COMMON_READ | {"design-map", "decision", "add-check", "remove-check", "bind"},
+    "design": COMMON_READ | {"design-map", "decision", "add-check", "remove-check", "bind", "holdout"},
     "implementer": COMMON_READ | {"bind", "impl-map", "add-check", "gate", "cf"},
     "reviewer": COMMON_READ,
 }
 WORK_COMMANDS = {"req", "accept", "risk", "verify", "assume", "question", "drop", "design-map", "decision",
-                 "add-check", "remove-check", "bind", "impl-map"}
+                 "add-check", "remove-check", "bind", "impl-map", "holdout"}
 REVIEWER_BASH_DENY = re.compile(
     r"\bgit\s+(add|commit|push|checkout|switch|reset|stash|rebase|merge|restore|clean|rm|mv|apply|cherry-pick)\b"
     r"|(^|[\s;&|])(rm|mv|cp|touch|tee|truncate)\s|\bsed\s+-i|\bperl\s+-p?i"
@@ -982,7 +1051,7 @@ def check_bash(role, cmd, project, state, cfg):
             owner = {"req": "requirements", "accept": "requirements", "risk": "requirements",
                      "verify": "requirements", "assume": "requirements", "question": "requirements",
                      "drop": "requirements", "design-map": "design", "decision": "design",
-                     "add-check": "design", "remove-check": "design", "bind": "implementer",
+                     "add-check": "design", "remove-check": "design", "bind": "implementer", "holdout": "design",
                      "impl-map": "implementer"}[sub]
             return (f"`{sub}` は {ROLE_LABEL[owner]} の担当です。統括は直接編集せず、"
                     f"Agent ツールで aq-dlc:{owner} に依頼してください。")
@@ -990,6 +1059,32 @@ def check_bash(role, cmd, project, state, cfg):
         return "サブエージェントはブランチを作成・切り替えできません（統括が作った作業ブランチで作業する）。"
     if role == "reviewer" and REVIEWER_BASH_DENY.search(cmd):
         return "独立レビュー担当は、ファイルやリポジトリを変更するコマンドを実行できません。"
+    from . import holdout as HO
+    if role == "implementer" and HO.enabled(cfg) and re.search(r"holdout", _normalize(cmd), re.I) \
+            and not re.search(r"aqdlc\.py\S*\s+holdout\s+--list\b", _normalize(cmd)):
+        return "実装担当は隠し受け入れテスト（holdout）の中身を読めません。仕様と設計書の契約どおりに作ってください。"
+    if role == "reviewer" and review_blind(cfg) and re.search(r"impl[^/\s]*\.md|artifacts/messages", cmd):
+        return "ブラインドレビューのため、実装報告（impl.md）と実装担当のメッセージは読めません。"
+    return None
+
+
+def check_read(role, path, project, state, cfg):
+    """Read・Grep・Glob の前の確認（隠し受け入れテスト・ブラインドレビュー）。"""
+    if not path:
+        return None
+    if not os.path.isabs(path):
+        path = os.path.join(project, path)
+    path = real_target(path)
+    from . import holdout as HO
+    if role == "implementer" and HO.enabled(cfg) and is_within(path, os.path.realpath(HO.root())):
+        return "実装担当は隠し受け入れテスト（holdout）の中身を読めません。仕様と設計書の契約どおりに作ってください。"
+    if role == "reviewer" and review_blind(cfg) and state:
+        rd = run_dir(project, state.get("run_id"))
+        if rd:
+            arts = os.path.realpath(artifacts_dir(rd))
+            if is_within(path, os.path.join(arts, "messages")) or \
+                    (is_within(path, arts) and re.match(r"impl.*\.md$", os.path.basename(path))):
+                return "ブラインドレビューのため、実装報告（impl.md）と実装担当のメッセージは読めません。"
     return None
 
 
@@ -1104,6 +1199,12 @@ def check_write(role, path, project, state, cfg):
     from .project import home
     h = os.path.realpath(home())
     if is_within(path, h):
+        from . import holdout as HO
+        if state and HO.enabled(cfg) and \
+                is_within(path, os.path.realpath(HO.run_holdout_dir(project, state.get("run_id")))):
+            if role == "design" or not auto.get("enforce_roles", True):
+                return None
+            return "隠し受け入れテスト（holdout）は設計担当だけが書けます。"
         # 全体設定・実行中の記録は、エージェントからは変更できない（Memory は統括だけが書ける）
         if is_within(path, os.path.join(h, "memory")):
             return ("共通 Memory（~/.aq-dlc/memory）へは直接書き込めません。プロジェクトの .aq-dlc/memory に保存し、"

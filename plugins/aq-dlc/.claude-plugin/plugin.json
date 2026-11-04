@@ -1,7 +1,7 @@
 {
   "name": "aq-dlc",
   "displayName": "E-AQDL（旧 AQ-DLC）",
-  "version": "0.6.2",
+  "version": "0.6.4",
   "description": "E-AQDL（Evidence-driven Adaptive Quality Development Lifecycle／証拠駆動の適応型品質開発ライフサイクル。旧 AQ-DLC）。統括と、要求分析・設計・実装・独立レビューのサブエージェントが、工程と技術分野に応じた Role Profile、Failure First、Evidence Graph、Quality Gate、反証テスト（Counterfactual Gate）、未証明範囲の可視化、効果を検証する Memory で開発を進める。",
   "author": {
     "name": "E-AQDL (AQ-DLC) contributors"

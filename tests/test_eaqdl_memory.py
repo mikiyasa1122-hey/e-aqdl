@@ -6,7 +6,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from helpers import ROOT, Env, build_to_review, denied, read_file, write_file  # noqa: E402
+from helpers import edit_json, ROOT, Env, build_to_review, denied, read_file, write_file  # noqa: E402
 
 sys.path.insert(0, os.path.join(ROOT, "plugins", "aq-dlc", "scripts"))
 
@@ -51,10 +51,23 @@ class TestScopeConsent(unittest.TestCase):
         self.e.cleanup()
 
     def test_unselected_does_not_read_common(self):
+        # 既定（プロジェクト内だけ）: 聞かずに進め、共通 Memory は読まない
         out = self.e.aq("memory", "--tags", "memo")
         self.assertIn("W-0500", out)
         self.assertNotIn("W-0600", out)
-        self.assertIn("Memory の利用範囲", self.e.next())
+        self.assertNotIn("Memory の利用範囲", self.e.next())
+
+    def test_ask_setting_unselected_does_not_read_common(self):
+        # run ごとに聞く設定（ask）で未選択のとき: 共通 Memory は読まず、利用範囲を聞く
+        e = self.e
+        edit_json(os.path.join(e.project, ".aq-dlc", "config.json"),
+                  lambda c: c.update(memory_policy={"scope_default": "ask"}))
+        e.aq("abort")
+        e.aq("new", "y")
+        out = e.aq("memory", "--tags", "memo")
+        self.assertIn("W-0500", out)
+        self.assertNotIn("W-0600", out)
+        self.assertIn("Memory の利用範囲", e.next())
 
     def test_none_reads_nothing(self):
         self.e.aq("memory-scope", "none")
