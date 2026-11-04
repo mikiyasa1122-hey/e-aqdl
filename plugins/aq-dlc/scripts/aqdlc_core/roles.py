@@ -277,8 +277,23 @@ def _merge(a, b):
     return out
 
 
-def brief_section(sel):
-    """引き継ぎ情報に加える節。"""
+COMPACT_DOMAIN_KEEP = ("判断基準", "禁止事項", "検証条件")
+
+
+def _compact_body(text):
+    """追加の専門性の Profile から、判断基準・禁止事項・検証条件の節だけを残す（責務・成果物・引き継ぎ条件は省く）。"""
+    out, keep = [], False
+    for ln in text.splitlines():
+        m = re.match(r"^#### (.+)$", ln)
+        if m:
+            keep = m.group(1).strip() in COMPACT_DOMAIN_KEEP
+        if keep:
+            out.append(ln)
+    return "\n".join(out).strip() or text
+
+
+def brief_section(sel, compact=False):
+    """引き継ぎ情報に加える節。compact なら、追加の専門性は判断基準・禁止事項・検証条件だけを渡す。"""
     if not sel.get("enabled", True):
         return []
     lines = ["", "## 適用する役割（Role Profile。エンジンが工程と技術分野から自動で選んだ作業方針）",
@@ -291,9 +306,12 @@ def brief_section(sel):
                      + (f"（関係: {', '.join(x['related'][:6])}）" if x["related"] else ""))
     if sel.get("fallback"):
         lines.append("- 追加の専門性: なし（根拠が十分な分野がないため、工程の基本 Profile だけを使う）")
+    domain_ids = {x["id"] for x in sel.get("domain", [])}
     for pid, body in sel.get("_bodies", {}).items():
         text = re.sub(r"^#\s.*\n", "", body.strip() + "\n", count=1).strip()
         text = re.sub(r"^## ", "#### ", text, flags=re.M)
+        if compact and pid in domain_ids:
+            text = _compact_body(text)
         lines += ["", f"### {pid}", text]
     return lines
 

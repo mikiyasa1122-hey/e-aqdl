@@ -204,6 +204,12 @@ python3 <プラグイン>/scripts/aqdlc.py audit --verify  # 承認・同意・�
 
 ## 更新履歴
 
+### 0.6.2（低コスト化 P0・P1）
+- `metrics --json`: 工程別の起動回数・所要時間・トークン（`stages`）、統括の使用量を run の期間に限定（会話全体は `orchestrator_tokens_session`）、API 呼び出し回数・モデル、合計と欠損の有無（`tokens_complete`）、手戻り（`rework`）、未検証の数（`quality`）。取得できない値は null（0 と区別）。料金には換算しない
+- `metrics --runs`: 工程・モデル・トークンの列を追加
+- 設定 `cost_optimization`（既定はすべて無効）: `compact_handoff`（引き継ぎからエージェント定義と重複する説明などを省く）、`gate_fail_fast`（前のチェックが不合格なら integration・e2e を実行しない。合格にはしない）
+- 詳細と実測: `docs/e-aqdl/cost-P0-P1.md`
+
 ### 0.6.1
 - 人が確認できない検証の出口: `defer <検証ID> "<要約>"`（「承認 DEFER-<ID>」が必要）。未確認のまま完了でき、未確認は報告・`trace`・`status` に残る。これまでは仕様の変更か中断しかなかった
 - 既存の git リポジトリ（E-AQDL 未導入）でも、機能の追加・仕様の変更・まとまった不具合修正の依頼なら E-AQDL を使う（SessionStart で案内。誤字・1行修正・質問は通常どおり。`automation.auto_start: false` で無効）

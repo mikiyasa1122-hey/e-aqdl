@@ -450,6 +450,7 @@ class _Interrupted(Exception):
 def execute(project, state, cfg, muts, log_dir, stamp, only=None):
     """反証テストを実行する。戻り値: 実行の記録（dict）。"""
     cc = cf_config(cfg)
+    t_start = time.time()
     rec = {"stamp": stamp, "at": now_iso(), "mode": cc["mode"], "mutations": [], "notes": [],
            "status": "running"}
     vmap = {v["id"]: (r, p, v) for r, p, v in targets_of(state)}
@@ -571,6 +572,7 @@ def execute(project, state, cfg, muts, log_dir, stamp, only=None):
         rec["notes"].append("反証テストの実行中に元の作業ツリーが変わった（結果は使わない）: "
                             + G.describe_diff(before, after))
     rec["code_fp"] = G.code_fp(before)
+    rec["sec"] = round(time.time() - t_start, 1)
     return rec
 
 

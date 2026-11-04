@@ -1,4 +1,5 @@
 """全体設定・プロジェクトの初期化・アクティブなrunの登録。"""
+import copy
 import os
 import shutil
 import sys
@@ -67,6 +68,15 @@ DEFAULTS = {
         "scope_default": "ask",
         # 終了時に共通 Memory へ共有するときは、候補ごとに人間の承認が必要（変更できない）
     },
+    # 低コスト化（既定はすべて無効＝従来と同じ動き。効果を測ってから有効にする）
+    "cost_optimization": {
+        # 引き継ぎ情報から、エージェント定義と重複する一般的な説明と、追加の専門性の Role Profile の
+        # 責務・成果物・引き継ぎ条件を省く（run 固有の情報・判断基準・禁止事項・検証条件は省かない）
+        "compact_handoff": False,
+        # gate で、前のチェックが不合格なら、後ろの重いチェック（integration・e2e）を実行しない
+        # （実行しなかったものは「未実行（前のチェックの不合格）」で、合格にはしない。gate は不合格のまま）
+        "gate_fail_fast": False,
+    },
     "memory": {
         "max_loaded_per_run": 10,
         "auto_save_min_score": 3,
@@ -108,11 +118,12 @@ def ensure_home(verbose=False):
             print("  （既に初期化済み）")
 
 
-EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy")
+EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy", "cost_optimization")
 
 
 def config(project=None):
-    cfg = deep_merge(DEFAULTS, load_json(os.path.join(home(), "config.json"), {}) or {})
+    # 既定値の辞書を呼び出し側の変更から守るため、毎回複製する
+    cfg = deep_merge(copy.deepcopy(DEFAULTS), load_json(os.path.join(home(), "config.json"), {}) or {})
     if project:
         cfg = deep_merge(cfg, load_json(os.path.join(project, ".aq-dlc", "config.json"), {}) or {})
     return cfg

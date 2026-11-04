@@ -5,6 +5,7 @@
   終了時（SubagentStop）       … 成果物を検証。不足があれば終了させずに続けさせる。揃えば登録する
   実行中（PreToolUse: Bash / Write / Edit） … 役割ごとに書き込み先とエンジンのコマンドを制限
 """
+import datetime as _dt
 import os
 import re
 import shutil
@@ -184,11 +185,15 @@ def brief(role, ctx, entry=None, sel=None):
         "- 終了時にエンジンが成果物を検証する。不足があると終了できず、理由が返ってくるので直して終える。",
         "",
     ]
-    body = globals()[f"_brief_{role}"](ctx)
+    compact = bool((ctx.cfg.get("cost_optimization") or {}).get("compact_handoff"))
+    if compact:
+        # エージェント定義（agents/*.md、常に読み込まれる）と重複する一般的な決まりは省く。run 固有の情報は残す
+        head = head[:5] + ["- 言語・state.json の扱い・人間への質問・終了時の検証は、エージェント定義の「守ること」のとおり。", ""]
+    body = globals()[f"_brief_{role}"](ctx, compact) if role == "implementer" else globals()[f"_brief_{role}"](ctx)
     if role == "reviewer" and entry:
         body += _reviewer_extra(ctx, entry)
     if sel:
-        body += RL.brief_section(sel)
+        body += RL.brief_section(sel, compact=compact)
     return "\n".join(head + body)
 
 
@@ -283,10 +288,21 @@ def _brief_design(ctx):
     return lines
 
 
-def _brief_implementer(ctx):
+def _brief_implementer(ctx, compact=False):
     s = ctx.state
     sp, dp, ip = doc_path(ctx.rd, "spec"), doc_path(ctx.rd, "design"), doc_path(ctx.rd, "impl")
     kind, items = pending_fix(ctx)
+    if compact:
+        # 手順・禁止事項の一般論はエージェント定義（implementer.md）にある。読む版の指紋と報告の置き場所は残す
+        lines = [
+            "## あなたの仕事",
+            f"承認済みの仕様 `{sp}`（{short(ctx.spec_hash)}）と設計書 `{dp}`（{short(ctx.design_hash)}）に基づいて"
+            "実装とテストを作る。**最初に両方を読む。仕様・設計を独断で変えない。** 手順と禁止事項はエージェント定義のとおり。",
+            f"- 実装報告: `{ip}`。先頭に「設計書: {short(ctx.design_hash)}」「仕様: {short(ctx.spec_hash)}」の行"
+            + ("。「## 指摘への対応」に下の各ラベルごとの対応を書く" if kind else ""),
+            "",
+        ]
+        return lines + _impl_tail(ctx, s, kind, items)
     lines = [
         "## あなたの仕事",
         f"承認済みの仕様 `{sp}`（{short(ctx.spec_hash)}）と設計書 `{dp}`（{short(ctx.design_hash)}）に基づいて"
@@ -307,6 +323,12 @@ def _brief_implementer(ctx):
         "bind やチェックの変更は履歴に残り、独立レビューで確認される。",
         "",
     ]
+    return lines + _impl_tail(ctx, s, kind, items)
+
+
+def _impl_tail(ctx, s, kind, items):
+    """実装担当の引き継ぎのうち run 固有の部分（修正依頼・未設定の検証・要求・チェック）。省略しない。"""
+    lines = []
     if kind:
         what = {"review": f"レビュー#{kind[1]} の重大な指摘", "counterfactual": f"反証テスト {kind[1]} の見逃し",
                 "unowned": "担当外の変更の確認"}.get(kind[0], f"gate {kind[1]} の不合格")
@@ -823,12 +845,30 @@ def on_subagent_stop(payload, project, state, spath):
     return None
 
 
-def transcript_usage(path):
-    """会話記録（JSONL）からトークン使用量を合計する（取得できなければ None）。"""
+def _ts(v):
+    """会話記録の timestamp（ISO 8601、Z 付きを含む）を UNIX 秒に。読めなければ None。"""
+    if not v:
+        return None
+    try:
+        return _dt.datetime.fromisoformat(str(v).replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+
+
+def transcript_usage(path, since=None, until=None):
+    """会話記録（JSONL）からトークン使用量を合計する（取得できなければ None）。
+
+    since / until（ISO 8601）を渡すと、その期間の API 呼び出しだけを数える（同じ会話で複数の run を
+    進めた場合に、別の run の分を混ぜないため）。時刻のない行は期間を判定できないので数え、件数を untimed に残す。
+    同じ API 呼び出し（message.id）が複数行に分かれて記録されても1回として数える。
+    数えるのは会話記録にある使用量だけで、料金には換算しない（課金区分はキーごとに分けて返す）。
+    """
     if not path or not os.path.exists(path):
         return None
     import json
-    seen, tot = set(), {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0}
+    t0, t1 = _ts(since), _ts(until)
+    seen, models, untimed = set(), set(), 0
+    tot = {"input": 0, "output": 0, "cache_read": 0, "cache_create": 0}
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for ln in f:
@@ -837,20 +877,33 @@ def transcript_usage(path):
                 except ValueError:
                     continue
                 msg = obj.get("message") or {}
-                u = msg.get("usage")
+                u = msg.get("usage") if isinstance(msg, dict) else None
                 if not isinstance(u, dict):
+                    continue
+                t = _ts(obj.get("timestamp"))
+                if t is not None and ((t0 is not None and t < t0) or (t1 is not None and t > t1)):
                     continue
                 key = msg.get("id") or obj.get("uuid")
                 if key in seen:
                     continue
                 seen.add(key)
+                if t is None and (t0 is not None or t1 is not None):
+                    untimed += 1
                 tot["input"] += int(u.get("input_tokens") or 0)
                 tot["output"] += int(u.get("output_tokens") or 0)
                 tot["cache_read"] += int(u.get("cache_read_input_tokens") or 0)
                 tot["cache_create"] += int(u.get("cache_creation_input_tokens") or 0)
+                if msg.get("model"):
+                    models.add(str(msg["model"]))
     except OSError:
         return None
-    return tot if seen else None
+    if not seen:
+        return None
+    tot["api_calls"] = len(seen)
+    tot["models"] = sorted(models)
+    if untimed:
+        tot["untimed"] = untimed
+    return tot
 
 
 def _tainted(entry, ctx):
