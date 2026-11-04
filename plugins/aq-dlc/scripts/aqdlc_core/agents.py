@@ -306,6 +306,25 @@ def _brief_implementer(ctx, compact=False):
     s = ctx.state
     sp, dp, ip = doc_path(ctx.rd, "spec"), doc_path(ctx.rd, "design"), doc_path(ctx.rd, "impl")
     kind, items = pending_fix(ctx)
+    from . import workflow as WF
+    wf = WF.effective(s, ctx.cfg)
+    if not wf["stages"]["design"]:
+        lines = [
+            "## あなたの仕事",
+            f"承認済みの仕様 `{sp}`（{short(ctx.spec_hash)}）に基づいて実装とテストを作る。**最初に仕様を読む。仕様を独断で変えない。**",
+            f"この run の工程は {wf['mode']}（{'・'.join(wf['reasons'])}）で、**設計担当はいない**。次もあなたが行う:",
+            "- 既存のコードの構成に合わせて、技術スタックと構成を決める。実装報告の「## 実施内容」に構成と理由を短く書く。",
+            "- Quality Gate のチェックを登録する: `$AQ add-check <名前> \"<コマンド>\" --kind typecheck|lint|build|unit|integration|e2e`"
+            "（少なくとも単体テスト。既存のテスト・Lint があれば含める）",
+            "- 要求と実装ファイルの対応（`$AQ impl-map`）・各検証の実行方法（`$AQ bind`）を設定する。",
+            f"- 実装報告: `{ip}`。先頭に「仕様: {short(ctx.spec_hash)}」の行"
+            + ("。「## 指摘への対応」に下の各ラベルごとの対応を書く" if kind else ""),
+            "- 認証・権限・秘密情報・決済・削除・DB のスキーマ・並行処理に触れる必要が出たら、作業を止めて「## 差し戻し」に書く"
+            "（工程を上げて設計とレビューを加える判断が必要）。",
+            "禁止: テストを通すために検証条件を弱める・重要な検証を消す・テストを skip する。",
+            "",
+        ]
+        return lines + _impl_tail(ctx, s, kind, items)
     if compact:
         # 手順・禁止事項の一般論はエージェント定義（implementer.md）にある。読む版の指紋と報告の置き場所は残す
         lines = [
@@ -501,6 +520,14 @@ def spawn_problem(role, ctx):
     blk = [p for p in probs if p["code"] in ("config_changed", "state_invalid", "forged_human")]
     if blk:
         return blk[0]["msg"] + "。人間の確認が済むまで進めません。"
+    from . import workflow as WF
+    wf = WF.effective(s, ctx.cfg)
+    if role == "design" and not wf["stages"]["design"]:
+        return (f"この run の工程（{wf['mode']}）では設計担当を使いません（実装担当が構成を決め、チェックを登録します）。"
+                "設計が必要なら workflow --set strict で工程を上げてください。")
+    if role == "reviewer" and not wf["stages"]["review"]:
+        return (f"この run の工程（{wf['mode']}）では独立レビューを使いません。"
+                "レビューが必要なら workflow --set standard（または strict）で工程を上げてください。")
     spec_block = {"spec_missing", "graph_incomplete", "spec_unregistered", "questions_open",
                   "answers_unapplied", "spec_unpresented", "spec_unapproved", "dup_ids"}
     blocking = [p for p in probs if p["code"] in spec_block]
@@ -639,7 +666,11 @@ def validate(role, ctx, entry, message):
             mh = missing_headings(md, REQUIRED["implementer"])
             if mh:
                 errs.append("実装報告に必須の見出しがない: " + "、".join(mh))
-            if not hash_line_ok(md, "設計書", ctx.design_hash):
+            from . import workflow as WF
+            # 設計担当を使う工程で、設計が登録済みなら、読んだ版の行を求める（実装中に工程が上がった場合は、
+            # この時点では設計がないので求めない。次に設計担当が呼ばれ、実装は設計に合わせてやり直しになる）
+            if WF.needs(s, ctx.cfg, "design") and s["design"].get("registered_hash") \
+                    and not hash_line_ok(md, "設計書", ctx.design_hash):
                 errs.append(f"実装報告の「設計書: {short(ctx.design_hash)}」の行がない、または古い版を参照している")
             if not hash_line_ok(md, "仕様", ctx.spec_hash):
                 errs.append(f"実装報告の「仕様: {short(ctx.spec_hash)}」の行がない、または古い版を参照している")
@@ -983,7 +1014,7 @@ def deny(reason):
 ENGINE_RE = re.compile(r"aqdlc\.py[\"']?\s+[\"']?([a-z][a-z-]*)")
 COMMON_READ = {"status", "next", "trace", "history", "show", "spec", "checks", "memory", "check", "escalation", "audit",
                "evidence", "roles",
-               "metrics", "report"}
+               "metrics", "report", "workflow"}
 ROLE_COMMANDS = {
     "requirements": COMMON_READ | {"req", "accept", "risk", "verify", "assume", "question", "drop"},
     "design": COMMON_READ | {"design-map", "decision", "add-check", "remove-check", "bind", "holdout"},

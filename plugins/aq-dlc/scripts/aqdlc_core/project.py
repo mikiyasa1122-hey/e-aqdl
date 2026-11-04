@@ -69,6 +69,8 @@ DEFAULTS = {
         "scope_default": "project",
         # 終了時に共通 Memory へ共有するときは、候補ごとに人間の承認が必要（変更できない）
     },
+    # リスクに応じた工程の選択: full（既定。従来どおり全工程）/ auto（要求の文と対象ファイルから選ぶ）/ lite / standard / strict
+    "workflow": {"mode": "full"},
     # 独立レビューの独立性
     "review": {
         # ブラインドレビュー: 実装報告（impl.md）と実装担当のメッセージを渡さず、読ませない
@@ -134,7 +136,7 @@ def ensure_home(verbose=False):
             print("  （既に初期化済み）")
 
 
-EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy", "cost_optimization", "review", "holdout")
+EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy", "cost_optimization", "review", "holdout", "workflow")
 
 
 def config(project=None):
