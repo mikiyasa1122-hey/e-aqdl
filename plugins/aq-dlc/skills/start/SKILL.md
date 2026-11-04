@@ -68,8 +68,8 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 
 ### 1. 要求分析 → 仕様の確認（必ず人間と詰める）
 1. `aq-dlc:requirements` を呼ぶ。prompt には**ユーザーの依頼文をそのまま**含める。
-2. 未回答の質問があれば、`$AQ show <質問ID>` で内容を見て、**AskUserQuestion で最大4問**聞く（選択肢2〜4個、推奨を先頭に「（推奨）」）。回答を `$AQ answer` で記録し、`aq-dlc:requirements` に反映を依頼する。
-3. `$AQ spec --present` で仕様シートを出し、要点（要求・重要な失敗とその扱い・決めたこと・作らないもの）を**短く**見せてから、AskUserQuestion で「この仕様で進めてよいか」を確認する（選択肢は「この仕様で進める（承認 SPEC-…）」「修正したい」）。
+2. **人間への確認は、原則として仕様の提示の1回にまとめる（判断シート）。** 推奨の選択肢がある質問と、人の確認が必要な検証は、仕様シートの「判断シート」に出る。先に聞くのは、推奨のない質問（`next` が「未回答の質問（推奨の選択肢なし）」と言うもの）だけ: `$AQ show <質問ID>` で内容を見て AskUserQuestion で聞き、`$AQ answer` で記録して `aq-dlc:requirements` に反映を依頼する。
+3. `$AQ spec --present` で仕様シートを出し、要点（要求・重要な失敗とその扱い・決めたこと・作らないもの）と**判断シート**（質問ごとの推奨、人の確認が必要な検証）を**短く**見せてから、1回で確認する（選択肢は「この仕様で進める（承認 SPEC-…）」「修正したい」）。質問は推奨でよければ承認だけで決まる。推奨と違う答えは「Q1 は B」のように書いてもらい、その場合は `answer` で記録して仕様を直す（エンジンも承認として扱わない）。人が確認できない検証は、同じ返答に「承認 DEFER-<ID>」を含めてもらい、承認の記録の後に `$AQ defer` で記録する（あとで改めて聞かない）。
 4. 承認されたら `$AQ spec --approve "<人間の返答の要約>"`。修正の要望なら、内容を `aq-dlc:requirements` に渡して直させ、提示からやり直す。
    - エンジンは、**提示の後に、その版の仕様（SPEC-…）を指定した人間の承認が記録されていないと受け付けない**（AskUserQuestion の回答とユーザーの発言は hook が記録する。選ばれなかった選択肢は承認に使わない）。
    - 聞く観点は `references/spec-review.md`。技術的な好みや「この内容で良いですか？」だけの質問はしない。
@@ -94,10 +94,10 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 5. 修正ループが上限（`automation.max_fix_iterations`）に達したら、状況を要約して人間に方針を確認する。
 
 ### 5. Memory 整理
-**aq-dlc:memory Skill** の手順で学びを整理する。終了時の保存先を人間に確認する（「プロジェクト内だけに保存」「共有候補を1件ずつ承認」「保存しない」）。共通 Memory へは直接書けない。共有する候補は `$AQ memory-share propose <ID>` で内容・適用条件・根拠・再利用価値・機密性のリスクを示し、候補ごとの「承認 SHARE-…」/「却下 SHARE-…」を得て `$AQ memory-share decide`。最後に `$AQ memory-done --end project|share|none --saved <ID> --merged <ID> --skipped "<理由>"`。読み込んだ Memory の結果は `$AQ memory-use <ID> --result helped|not_applicable|harmful|unknown` で記録しておく。
+**aq-dlc:memory Skill** の手順で学びを整理する。保存先は既定で「プロジェクト内だけ」（`--end project`）とし、**人間には聞かない**。共通 Memory に共有したい候補があるときだけ、その候補について人間に確認する。共通 Memory へは直接書けない。共有する候補は `$AQ memory-share propose <ID>` で内容・適用条件・根拠・再利用価値・機密性のリスクを示し、候補ごとの「承認 SHARE-…」/「却下 SHARE-…」を得て `$AQ memory-share decide`。最後に `$AQ memory-done --end project|share|none --saved <ID> --merged <ID> --skipped "<理由>"`。読み込んだ Memory の結果は `$AQ memory-use <ID> --result helped|not_applicable|harmful|unknown` で記録しておく。
 
 ### 6. CI と PR
-1. コミットして作業ブランチを push し、`$AQ ci --wait 8`（Bash のタイムアウトは10分）。CI が失敗していたら実装担当に修正を依頼する。
+1. コミットして作業ブランチを push し、`$AQ ci --wait 8`（Bash のタイムアウトは10分）。CI が失敗していたら実装担当に修正を依頼する。リモートがない・gh が使えないときは、人間に聞かずにローカルでコミットして完了とし、報告にその旨を書く。
 2. `$AQ complete`。満たしていない条件が出たら、`next` に従う。
 3. `gh pr create` で PR を作る。本文には `$AQ trace` の表（要求 → 証拠）と `$AQ evidence` の要約（証明済みと、まだ証明できていない範囲）、残った注意点、保存した Memory を書く。通常の gate の合格を「欠陥を検出できることの証明」と書かない。**マージは人間が行う。**
 4. ユーザーへの報告は短く: 作ったもの、確かめた方法、PR の URL、残った注意点、確認待ちの Memory。確かめた範囲は `$AQ report`（1ページの完了報告: 証明済み・合格だが反証なし・未確認・証拠不足・隠しテスト・時間）の内容をもとに書く。`$AQ metrics` の要点（所要時間・gate の不合格・修正ループ・人の介入）も1〜2行で添える。
