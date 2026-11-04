@@ -41,7 +41,7 @@ STRICT_PATHS = ["**/auth/**", "**/*auth*", "**/security/**", "**/permission*", "
                 "**/migrations/**", "**/*.sql", "**/models/**", "**/db/**", "**/schema*", "**/prisma/**",
                 "**/payment*/**", "**/*payment*", "**/billing/**", "**/workers/**", "**/queue*/**", "**/jobs/**",
                 ".github/workflows/**", "**/Dockerfile", "Dockerfile", "**/*.tf", "**/k8s/**"]
-LITE_MAX_REQUIREMENTS = 2
+LITE_MAX_REQUIREMENTS = 3
 
 
 def config_mode(cfg):
@@ -87,14 +87,11 @@ def classify(state):
     words = _word_hits(state)
     if words:
         return "strict", [f"リスクの高い語: {', '.join(words[:6])}"]
-    critical = [r["id"] for r in reqs if r.get("critical")]
-    if len(reqs) <= LITE_MAX_REQUIREMENTS and not critical:
-        return "lite", [f"要求 {len(reqs)} 件・重要な要求なし・リスクの高い語なし"]
-    why = []
-    if critical:
-        why.append(f"重要な要求あり（{', '.join(critical[:4])}）")
-    if len(reqs) > LITE_MAX_REQUIREMENTS:
-        why.append(f"要求 {len(reqs)} 件")
+    # 「重要」の印（critical）は使わない: 要求分析担当は主な要求にほぼ必ず付けるため、使うと lite が選ばれなくなる
+    # （実験11）。危険の判定はリスクの高い語と実装の対象ファイルで行う
+    if len(reqs) <= LITE_MAX_REQUIREMENTS:
+        return "lite", [f"要求 {len(reqs)} 件・リスクの高い語なし"]
+    why = [f"要求 {len(reqs)} 件（lite は {LITE_MAX_REQUIREMENTS} 件まで）"]
     return "standard", why + ["リスクの高い語なし"]
 
 

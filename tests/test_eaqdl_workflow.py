@@ -69,8 +69,10 @@ class ClassifyTest(unittest.TestCase):
     def test_rules(self):
         self.assertEqual(WF.classify({"requirements": []})[0], "strict")  # 情報がなければ安全側
         self.assertEqual(WF.classify(self.st(["メモを追加できる"]))[0], "lite")
-        self.assertEqual(WF.classify(self.st(["メモを追加できる"], critical=True))[0], "standard")
-        self.assertEqual(WF.classify(self.st(["a", "b", "c"]))[0], "standard")
+        # 「重要」の印では工程を上げない（主な要求にはほぼ必ず付くため。実験11）
+        self.assertEqual(WF.classify(self.st(["メモを追加できる"], critical=True))[0], "lite")
+        self.assertEqual(WF.classify(self.st(["a", "b", "c"]))[0], "lite")
+        self.assertEqual(WF.classify(self.st(["a", "b", "c", "d"]))[0], "standard")
         for t in ("ログインできる", "管理者だけが削除できる", "テーブルにマイグレーションを追加", "同時に更新しても壊れない",
                   "決済を行う", "OAuth で認証する"):
             self.assertEqual(WF.classify(self.st([t]))[0], "strict", t)
