@@ -52,6 +52,16 @@
             "timeout": 60
           }
         ]
+      },
+      {
+        "matcher": "Read|Grep|Glob|NotebookRead",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/aqdlc.py\" hook pre-read",
+            "timeout": 15
+          }
+        ]
       }
     ],
     "PostToolUse": [

@@ -65,8 +65,24 @@ DEFAULTS = {
                        "auto_plan": True, "copy_extra": []},
     "memory_policy": {
         # run の開始時の Memory の利用範囲: ask（人間に聞く）/ none / project / all
-        "scope_default": "ask",
+        # 既定は project（プロジェクト内だけ。共通 Memory は使わない）。run ごとに聞くなら ask
+        "scope_default": "project",
         # 終了時に共通 Memory へ共有するときは、候補ごとに人間の承認が必要（変更できない）
+    },
+    # 独立レビューの独立性
+    "review": {
+        # ブラインドレビュー: 実装報告（impl.md）と実装担当のメッセージを渡さず、読ませない
+        # （実装担当の説明に引きずられないため。仕様・設計・コード・テスト・gate の結果で判断する）
+        "blind": True,
+        # レビュー担当だけ別のモデルにする（例: "opus"）。空なら統括と同じ。Agent の呼び出しにエンジンが指定する
+        "model": "",
+    },
+    # 隠し受け入れテスト（holdout）: 設計担当が受け入れ条件ごとのテストを、実装担当から読めない場所に置き、
+    # gate で初めて実行する。既定は無効（効果を測ってから既定を変える）
+    "holdout": {
+        "enabled": False,
+        # 有効なとき、重要な要求の受け入れ条件には holdout を必須にする
+        "require_for_critical": True,
     },
     # 低コスト化（既定はすべて無効＝従来と同じ動き。効果を測ってから有効にする）
     "cost_optimization": {
@@ -118,7 +134,7 @@ def ensure_home(verbose=False):
             print("  （既に初期化済み）")
 
 
-EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy", "cost_optimization")
+EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy", "cost_optimization", "review", "holdout")
 
 
 def config(project=None):
@@ -127,6 +143,17 @@ def config(project=None):
     if project:
         cfg = deep_merge(cfg, load_json(os.path.join(project, ".aq-dlc", "config.json"), {}) or {})
     return cfg
+
+
+def explicit_setting(project, section, key):
+    """全体設定・プロジェクト設定のどちらかに、人が明示的に書いた値があれば返す（既定値なら None）。"""
+    val = None
+    for path in ([os.path.join(home(), "config.json")]
+                 + ([os.path.join(project, ".aq-dlc", "config.json")] if project else [])):
+        sec = (load_json(path, {}) or {}).get(section)
+        if isinstance(sec, dict) and key in sec:
+            val = sec[key]
+    return val
 
 
 def project_config_path(project):

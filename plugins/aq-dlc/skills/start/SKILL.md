@@ -41,7 +41,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 ```
 
 統括が使うコマンド:
-`setup` `doctor` `init` `publish` `new` / `memory-scope none|project|all` / `spec [--present | --approve "<人間の返答の要約>"]` `show <ID>` `answer <質問ID> "<回答>"` / `ask "<質問>"` `resume` / `escalation [<ID> --resolve "<対応>"]` / `gate [--after-merge]` `cf [--plan]` `cf-add` `cf-mark` `ci --wait 8` / `evidence` `roles` `audit` / `memory --tags .. --record` `memory-use` `memory-approve` `memory-share propose|decide` `memory-done --end project|share|none --saved/--merged/--skipped` / `metrics` / `complete` `abort` / `confirm <検証ID> "<人間の確認内容>"` `defer <検証ID>[,…] "<人間の返答の要約>"`（人が確認できない検証を、人間の承認のもとで未確認のまま進める）/ `config-accept "<人間の返答の要約>"`（設定がエンジン以外で変わったとき、人間に確認してから）
+`setup` `doctor` `init` `publish` `new` / `memory-scope none|project|all` / `spec [--present | --approve "<人間の返答の要約>"]` `show <ID>` `answer <質問ID> "<回答>"` / `ask "<質問>"` `resume` / `escalation [<ID> --resolve "<対応>"]` / `gate [--after-merge]` `cf [--plan]` `cf-add` `cf-mark` `ci --wait 8` / `evidence` `roles` `audit` / `memory --tags .. --record` `memory-use` `memory-approve` `memory-share propose|decide` `memory-done --end project|share|none --saved/--merged/--skipped` / `metrics` `report`（1ページの完了報告）/ `holdout <受け入れ条件ID> --command ... | --list | --dir`（設計担当）/ `complete` `abort` / `confirm <検証ID> "<人間の確認内容>"` `defer <検証ID>[,…] "<人間の返答の要約>"`（人が確認できない検証を、人間の承認のもとで未確認のまま進める）/ `config-accept "<人間の返答の要約>"`（設定がエンジン以外で変わったとき、人間に確認してから）
 
 要求・設計・実装の登録コマンド（req, accept, risk, verify, question, assume, drop, design-map, decision, add-check, bind, impl-map）は各担当のもので、**統括は使えない**（hook で止まる）。state.json と config.json は誰も直接編集しない。
 
@@ -56,7 +56,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
    - 「新しいフォルダを作って」と明示されたときだけ `$AQ create "<アプリ名>"`。
 3. `$AQ publish --project P`（公開範囲はユーザーの指定 → 設定の既定値）。gh が使えなければ、その旨を伝えてローカルの git で進める。
 4. `git -C "P" switch -c aq-dlc/<run名>` で作業ブランチを作り、`$AQ new "<run名>" --project P`。
-5. **Memory の利用範囲を人間に選んでもらう**（`next` が求めたときだけ。設定 `memory_policy.scope_default` で決まっていれば聞かず、変えない）。`$AQ ask "Memory の利用範囲"` の後、AskUserQuestion で「プロジェクト内だけ（推奨）」「Memory を使わない」「共通 Memory も使う（承認 MEMSCOPE-…）」を聞き、`$AQ memory-scope project|none|all`。共通 Memory は、人間がその選択肢を選んだときだけ使える（非対話の実行では `memory-scope project`）。続けて `$AQ memory --tags <タグ> --record` で関連する Memory を読む。
+5. **Memory の利用範囲**: 既定は「プロジェクト内だけ」で、聞かずに進める。人間が別の範囲を求めたとき、または `next` が求めたとき（設定 `memory_policy.scope_default` が ask）だけ聞く。人が設定に書いた範囲は変えない。`$AQ ask "Memory の利用範囲"` の後、AskUserQuestion で「プロジェクト内だけ（推奨）」「Memory を使わない」「共通 Memory も使う（承認 MEMSCOPE-…）」を聞き、`$AQ memory-scope project|none|all`。共通 Memory は、人間がその選択肢を選んだときだけ使える（非対話の実行では `memory-scope project`）。続けて `$AQ memory --tags <タグ> --record` で関連する Memory を読む。
 
 ### 人間の承認の書き方（すべての承認で共通）
 エンジンは「返答があった」ことと「対象を承認した」ことを区別する。承認が必要な操作では、エンジンが示す対象 ID を選択肢に入れる:
@@ -100,7 +100,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 1. コミットして作業ブランチを push し、`$AQ ci --wait 8`（Bash のタイムアウトは10分）。CI が失敗していたら実装担当に修正を依頼する。
 2. `$AQ complete`。満たしていない条件が出たら、`next` に従う。
 3. `gh pr create` で PR を作る。本文には `$AQ trace` の表（要求 → 証拠）と `$AQ evidence` の要約（証明済みと、まだ証明できていない範囲）、残った注意点、保存した Memory を書く。通常の gate の合格を「欠陥を検出できることの証明」と書かない。**マージは人間が行う。**
-4. ユーザーへの報告は短く: 作ったもの、確かめた方法、PR の URL、残った注意点、確認待ちの Memory。`$AQ metrics` の要点（所要時間・gate の不合格・修正ループ・人の介入）も1〜2行で添える。
+4. ユーザーへの報告は短く: 作ったもの、確かめた方法、PR の URL、残った注意点、確認待ちの Memory。確かめた範囲は `$AQ report`（1ページの完了報告: 証明済み・合格だが反証なし・未確認・証拠不足・隠しテスト・時間）の内容をもとに書く。`$AQ metrics` の要点（所要時間・gate の不合格・修正ループ・人の介入）も1〜2行で添える。
 
 ### 7. マージ後にしか確かめられないもの
 デプロイ後の公開 URL などは、要求分析で `--after-merge` 付きの検証になっている。
@@ -115,7 +115,11 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 - 仕様を変えて人の確認を自動の検証に置き換える・run を中断する、を提案する前に、まずこの選択肢を示す。
 - 自動の検証（gate のチェック）は対象外。環境の都合で動かない自動の検証は、仕様の変更として人間に確認する。
 
-### 9. 既存のリポジトリで始めるとき
+### 9. 隠し受け入れテスト（holdout）とブラインドレビュー
+- 設定 `holdout.enabled` が true なら、設計担当が受け入れ条件ごとのテストをプロジェクトの外に置き、`holdout` で登録する。実装担当は中身を読めない（hook が止める）。gate で初めて実行し、不合格なら受け入れ条件の ID だけを実装担当に返す。
+- レビューは既定でブラインド（`review.blind`）: レビュー担当には実装報告を渡さず、読ませない。`review.model` を設定すると、レビュー担当だけそのモデルで動く（Agent の呼び出しにエンジンが指定する）。
+
+### 10. 既存のリポジトリで始めるとき
 E-AQDL 未導入の既存リポジトリでは、`$AQ init` で導入してから `new` で run を始める。既存のコード・テスト・README は変更の対象として扱い、要求分析で「変える部分」と「変えない部分（回帰を確かめる）」を分けて仕様にする。
 
 ## 自動で進める
