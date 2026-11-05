@@ -152,13 +152,21 @@ def _gate_items(s, li):
             failed = [("gate中の変更", {"error": f"gate の実行中に変わった: {md.get('summary')}（テスト・ビルドが追跡対象の"
                                               "ファイルを書き換えないようにする）"})] + failed
         hfail = [ac for ac, r in (g["results"].get("holdout") or {}).items() if not r.get("pass")]
-        if failed or vfail or hfail:
+        dc = g["results"].get("diff_coverage")
+        dfail = bool(dc) and not dc.get("pass")
+        if failed or vfail or hfail or dfail:
             kind = ("gate", g["stamp"])
             items = [{"label": n, "text": r.get("skipped") or r.get("error") or f"不合格（ログ: {r.get('log')}）"}
                      for n, r in failed + vfail]
             # 隠しテストは、どの受け入れ条件かだけを返す（テストの中身・出力は見せない）
             items += [{"label": f"隠しテスト {ac}", "text": f"受け入れ条件 {ac} の隠し受け入れテストが不合格。中身は見せない。"
                        f"仕様の {ac} と設計書の契約（名前・入出力・エラー）どおりに動くかを見直す"} for ac in hfail]
+            if dfail:
+                from . import quality as Q
+                unc = "; ".join(f"{f}: {Q.ranges(ls)}" for f, ls in list((dc.get("uncovered") or {}).items())[:6])
+                items.append({"label": "差分カバレッジ", "text": f"{dc.get('error')}。"
+                              + (f"テストで実行されていない変更行: {unc}。" if unc else "")
+                              + "変えた行を確かめるテストを足す（基準・対象外の設定を変えて通さない）"})
     return kind, items
 
 
@@ -257,6 +265,20 @@ def _brief_requirements(ctx):
     return lines
 
 
+def _coverage_lines(ctx):
+    from . import quality as Q
+    c = Q.config_of(ctx.cfg)
+    if not c["enabled"]:
+        return []
+    return ["", "## 差分カバレッジ（この run で変えた行のうち、テストで実行された行の割合）",
+            f"- gate は `{c['report'] or '（未設定）'}` のカバレッジのレポート（coverage.py の JSON か LCOV）を読み、"
+            f"基準 {c['min']:g}% 未満なら不合格にする。変えたファイルがレポートにない場合も不合格。",
+            "- 単体テストのチェックで、このレポートを作るようにする（例: `COVERAGE_FILE=coverage/.coverage python3 -m coverage run"
+            " -m pytest -q && COVERAGE_FILE=coverage/.coverage python3 -m coverage json -o coverage/coverage.json`。"
+            "c8 / nyc / jest なら LCOV）。計測の一時ファイルは coverage/ など gate の指紋の対象外に置く。",
+            "- 基準・対象外の設定は人が決める（変えない）。"]
+
+
 def _brief_design(ctx):
     s = ctx.state
     lines = [
@@ -275,6 +297,9 @@ def _brief_design(ctx):
         "   - E2E はビルドの後に実行され、ビルドが不合格なら実行されない（古い成果物での合格を防ぐ）。",
         "   - Webアプリの E2E は Playwright を候補にする（必須ではない）。",
         "   - テストファイルが0件だと失敗するランナーがある。そのチェックが最初から通るかを実装担当に申し送る。",
+        "   - 静的解析（Lint・型）は、コマンドに `{changed:.拡張子}` を書くと、この run で変えたファイルだけが対象になる"
+        "（例: `ruff check {changed:.py}`、`npx eslint {changed:.js,.ts}`）。既存のコードの古い問題で止めないため。"
+        "変えたファイルに該当がなければ実行せず「対象なし」になる。",
         "5. 検証のテストレベル: `$AQ bind <検証ID> --level unit|integration|e2e`",
         "",
         "方針: 技術スタックは固定しない。対象に対して妥当な構成を選ぶ。過剰な抽象化・不要な依存を避け、"
@@ -292,6 +317,7 @@ def _brief_design(ctx):
         df = [f for f in rv.get("findings", []) if f.get("category") == "設計"]
         if df:
             lines += ["", f"## レビュー#{rv['n']} の設計に関する指摘"] + [f"- [{f['label']}] {f['text']}" for f in df]
+    lines += _coverage_lines(ctx)
     from . import holdout as HO
     if HO.enabled(ctx.cfg):
         d = HO.run_holdout_dir(ctx.project, s.get("run_id"))
@@ -319,13 +345,14 @@ def _brief_implementer(ctx, compact=False):
             f"この run の工程は {wf['mode']}（{'・'.join(wf['reasons'])}）で、**設計担当はいない**。次もあなたが行う:",
             "- 既存のコードの構成に合わせて、技術スタックと構成を決める。実装報告の「## 実施内容」に構成と理由を短く書く。",
             "- Quality Gate のチェックを登録する: `$AQ add-check <名前> \"<コマンド>\" --kind typecheck|lint|build|unit|integration|e2e`"
-            "（少なくとも単体テスト。既存のテスト・Lint があれば含める）",
+            "（少なくとも単体テスト。既存のテスト・Lint があれば含める。Lint は `{changed:.拡張子}` で変えたファイルだけにできる）",
             "- 要求と実装ファイルの対応（`$AQ impl-map`）・各検証の実行方法（`$AQ bind`）を設定する。",
             f"- 実装報告: `{ip}`。先頭に「仕様: {short(ctx.spec_hash)}」の行"
             + ("。「## 指摘への対応」に下の各ラベルごとの対応を書く" if kind else ""),
             "- 認証・権限・秘密情報・決済・削除・DB のスキーマ・並行処理に触れる必要が出たら、作業を止めて「## 差し戻し」に書く"
             "（工程を上げて設計とレビューを加える判断が必要）。",
             "禁止: テストを通すために検証条件を弱める・重要な検証を消す・テストを skip する。",
+        ] + _coverage_lines(ctx) + [
             "",
         ]
         return lines + _impl_tail(ctx, s, kind, items)
@@ -416,7 +443,14 @@ def _cf_lines(ctx):
 
 
 def _reviewer_extra(ctx, entry):
-    lines = _cf_lines(ctx)
+    from . import quality as Q
+    lines = []
+    ql = Q.summary_lines(ctx.state.get("gate"))
+    if ql:
+        lines += ["", "## 機械で確かめた差分の品質（gate の結果。この run で変えた部分だけ）"] + ql + [
+            "→ 静的解析で確かめた書式・Lint の問題は指摘しない（機械に任せる）。あなたは仕様との整合・ロジック・"
+            "テストが本当に確かめているかに集中する。テストで実行されていない変更行は、そこに重要な分岐がないかを見る。"]
+    lines += _cf_lines(ctx)
     lines += ["", "## エンジンが機械的に検出したテストの兆候（判断材料。合否はあなたが判断する）"]
     sig = entry.get("test_signals") or []
     if sig:

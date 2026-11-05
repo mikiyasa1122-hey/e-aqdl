@@ -34,6 +34,8 @@ def source_files(project, cfg):
       ソースのフォルダを誤って外さない）。依存関係・キャッシュのフォルダはどの階層でも外す
     """
     top_ignore = set(cfg["gate"]["ignore_dirs"])
+    from .quality import report_path
+    cov_report = report_path(cfg)  # gate で作り直すカバレッジのレポートは、コードの指紋に含めない
     tracked, others = None, None
     if shutil.which("git") and os.path.isdir(project):
         code, out = sh_run("git rev-parse --is-inside-work-tree", project, 30)
@@ -54,13 +56,14 @@ def source_files(project, cfg):
     for f in tracked:
         rel = f.replace(os.sep, "/").strip()
         parts = rel.split("/")
-        if parts[0] in (".aq-dlc", ".claude", ".git"):
+        if parts[0] in (".aq-dlc", ".claude", ".git") or rel == cov_report:
             continue
         out.add(rel)
     for f in others:
         rel = f.replace(os.sep, "/").strip()
         parts = rel.split("/")
-        if any(p in DEP_DIRS for p in parts[:-1]) or (len(parts) > 1 and parts[0] in top_ignore):
+        if any(p in DEP_DIRS for p in parts[:-1]) or (len(parts) > 1 and parts[0] in top_ignore) \
+                or rel == cov_report:
             continue
         out.add(rel)
     return sorted(out)
@@ -215,7 +218,19 @@ def implicit_needs(c, checks):
     return list(dict.fromkeys(needs))
 
 
-def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merge=False):
+def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merge=False, snap=None):
+    """snap: 実行開始時のスナップショット（{changed} の置き換えに使う）。"""
+    from . import quality as Q
+    scope = {}
+
+    def expand(cmd):
+        # {changed} を使うコマンドがあるときだけ、変えたファイルを求める
+        if not cmd or not Q.CHANGED_RE.search(cmd):
+            return cmd, None
+        if not scope:
+            sn = snap if snap is not None else snapshot(project, cfg)
+            scope.update(changed=Q.changed_files(state, sn), all=sorted(sn))
+        return Q.expand(cmd, scope["changed"], scope["all"])
     checks = cfg.get("checks", [])
     env = gate_env(cfg)
     default_to = int(cfg["gate"]["default_timeout_sec"])
@@ -247,8 +262,16 @@ def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merg
                  "skipped": f"前のチェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）"}
             print(f"  未実行 チェック:{c['name']}（前のチェックが不合格・gate_fail_fast）")
         else:
-            r = record("check", c["name"], c["command"], int(c.get("timeout_sec", default_to)))
-            print(f"  {'合格' if r['pass'] else '不合格'} チェック:{c['name']}（{r['sec']}秒）")
+            cmd, scoped = expand(c["command"])
+            if cmd is None:
+                # 変えたファイルに該当がない（この run で新しく入った問題はない）。実行しなかったことを記録する
+                r = {"pass": True, "no_targets": True, "sec": 0}
+                print(f"  対象なし チェック:{c['name']}（変えたファイルに該当なし）")
+            else:
+                r = record("check", c["name"], cmd, int(c.get("timeout_sec", default_to)))
+                print(f"  {'合格' if r['pass'] else '不合格'} チェック:{c['name']}（{r['sec']}秒"
+                      + (f"、変えたファイル {scoped} 件" if scoped is not None else "") + "）")
+            r["scoped"] = scoped
         r["fp"] = fp
         r["kind"] = c.get("kind", "other")
         results["checks"][c["name"]] = r
@@ -276,8 +299,14 @@ def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merg
                      "skipped": f"チェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）"}
                 print(f"  未実行 検証:{vid}（チェックが不合格・gate_fail_fast）")
             else:
-                r = record("verify", vid, v["command"], int(v.get("timeout_sec", default_to)))
-                print(f"  {'合格' if r['pass'] else '不合格'} 検証:{vid}")
+                cmd, scoped = expand(v["command"])
+                if cmd is None:
+                    r = {"pass": True, "no_targets": True, "scoped": 0}
+                    print(f"  対象なし 検証:{vid}（変えたファイルに該当なし）")
+                else:
+                    r = record("verify", vid, cmd, int(v.get("timeout_sec", default_to)))
+                    r["scoped"] = scoped
+                    print(f"  {'合格' if r['pass'] else '不合格'} 検証:{vid}")
         else:
             missing = [n for n in v["checks"] if n not in results["checks"]]
             ok = not missing and all(results["checks"][n]["pass"] for n in v["checks"])

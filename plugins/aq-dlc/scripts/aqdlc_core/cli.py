@@ -665,12 +665,21 @@ def cmd_gate(args):
         vfp_before = {v["id"]: G.verification_fp(v, cfg) for _r, _p, v in iter_verifications(s)}
         t0 = time.time()
         results, ok = G.run_gate(project, s, cfg, iter_verifications, os.path.join(ctx.rd, "gate"), stamp,
-                                 after_merge)
+                                 after_merge, snap=before)
         from . import holdout as HO
         holdout_fp_before = HO.fingerprint(project, s) if HO.enabled(cfg) else None
         if HO.enabled(cfg) and HO.items(s):
             results["holdout"] = HO.run_all(project, s, cfg, stamp)
             if not all(r["pass"] for r in results["holdout"].values()):
+                ok = False
+        from . import quality as Q
+        dc = Q.diff_coverage(project, s, cfg, before, t0)
+        if dc is not None:
+            results["diff_coverage"] = dc
+            print(f"  {'合格' if dc['pass'] else '不合格'} 差分カバレッジ"
+                  + (f": {dc['percent']}%（基準 {dc['min']:g}%）" if dc.get("percent") is not None else "")
+                  + (f" — {dc['error']}" if dc.get("error") else ""))
+            if not dc["pass"]:
                 ok = False
         dur = round(time.time() - t0, 1)
         cfg_after = config(project)

@@ -309,6 +309,9 @@ def new_run(project, title):
     st = empty_state(rid, title)
     cfg = config(project)
     st["config_fp_registered"] = G.config_fp(cfg, project)
+    # 差分の品質の起点（この run で変えた部分を決める）
+    from . import quality as Q
+    st["baseline"] = Q.capture_baseline(project, G.snapshot(project, cfg, fresh=True))
     default = (cfg.get("memory_policy") or {}).get("scope_default", "ask")
     if default in ("none", "project", "all"):
         from .project import explicit_setting
@@ -721,10 +724,13 @@ def _problems(ctx, stage):
         if not r.get("pass"):
             vfail.append(v["id"])
     hfail = [ac for ac, r in ((g.get("results") or {}).get("holdout") or {}).items() if not r.get("pass")]
-    if failed or vfail or hfail:
+    dc = (g.get("results") or {}).get("diff_coverage")
+    dfail = bool(dc) and not dc.get("pass")
+    if failed or vfail or hfail or dfail:
         what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
                         ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
-                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []))
+                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []) +
+                        ([f"差分カバレッジ（{dc.get('error')}）"] if dfail else []))
         route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
         out.append(P("gate_fail", f"gate が不合格: {what}", route))
         return out
