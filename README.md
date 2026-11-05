@@ -1,4 +1,4 @@
-# E-AQDL（旧 AQ-DLC）
+# E-AQDL
 
 **Evidence-driven Adaptive Quality Development Lifecycle — 証拠駆動の適応型品質開発ライフサイクル**
 
