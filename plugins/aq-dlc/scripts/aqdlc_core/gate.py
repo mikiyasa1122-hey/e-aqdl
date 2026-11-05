@@ -12,6 +12,7 @@ import os
 import shutil
 import time
 
+from .fileclass import CODE_EXT, TEST_FILE  # noqa: F401（gate.TEST_FILE・gate.CODE_EXT の名前を残す）
 from .util import fingerprint, info, run_cmd, sh_run, sha1_file, now_iso
 
 KIND_ORDER = ["typecheck", "lint", "build", "unit", "integration", "other", "e2e"]
@@ -219,8 +220,13 @@ def implicit_needs(c, checks):
 
 
 def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merge=False, snap=None):
-    """snap: 実行開始時のスナップショット（{changed} の置き換えに使う）。"""
+    """チェックと検証を実行し、結果の記録（verdict の契約）を返す。戻り値: (results, checks_pass)
+
+    ここはコマンドの実行と記録だけを行う。合否の規則は verdict.py にある。
+    snap: 実行開始時のスナップショット（{changed} の置き換えに使う）。
+    """
     from . import quality as Q
+    from . import verdict as V
     scope = {}
 
     def expand(cmd):
@@ -232,91 +238,91 @@ def run_gate(project, state, cfg, iter_verifications, log_dir, stamp, after_merg
             scope.update(changed=Q.changed_files(state, sn), all=sorted(sn))
         return Q.expand(cmd, scope["changed"], scope["all"])
     checks = cfg.get("checks", [])
-    env = gate_env(cfg)
+    env = dict(gate_env(cfg), AQDLC_GATE_RUN=str(stamp))
     default_to = int(cfg["gate"]["default_timeout_sec"])
     results = {"checks": {}, "verifications": {}}
     os.makedirs(log_dir, exist_ok=True)
     build_ok = True
     # 低コスト化（既定は無効）: 前のチェックが不合格なら、重いチェック・検証（integration・e2e）を実行しない。
-    # 実行しなかったものは不合格（skipped）として記録し、合格にはしない（gate は前の不合格で不合格のまま）。
+    # 実行しなかったものは未実行（skipped）として記録し、合格にはしない（gate は前の不合格で不合格のまま）。
     fail_fast = bool((cfg.get("cost_optimization") or {}).get("gate_fail_fast"))
     heavy = ("integration", "e2e")
     failed_checks = []
 
-    def record(kind, key, cmd, timeout):
+    def execute(kind, key, template, timeout, kind_of, required):
+        cmd, targets = expand(template)
+        if cmd is None:
+            return V.no_targets(kind_of, template, required)
         code, out, dur = run_cmd(cmd, project, timeout, env)
         log = os.path.join(log_dir, f"{stamp}-{kind}-{key}.log")
         with open(log, "w", encoding="utf-8") as f:
             f.write(f"$ {cmd}\nexit={code}\n\n{out}")
-        return {"pass": code == 0, "exit": code, "sec": dur, "log": os.path.relpath(log, project)}
+        return V.from_run(code, out, dur, os.path.relpath(log, project), template, targets)
+
+    def ran_label(r):
+        st = V.status_of(r)
+        return "合格" if st == V.PASSED else ("実行エラー" if st == V.ERROR else "不合格")
 
     for c in ordered_checks(checks):
         fp = check_fp(c, cfg)
         needs = implicit_needs(c, checks)
-        blocked = [n for n in needs if n not in results["checks"] or not results["checks"][n]["pass"]]
+        blocked = [n for n in needs if n not in results["checks"] or not V.passed(results["checks"][n])]
         if blocked:
-            r = {"pass": False, "skipped": f"前提のチェック（{', '.join(blocked)}）が不合格・未登録のため実行しない"}
+            r = V.skipped(f"前提のチェック（{', '.join(blocked)}）が不合格・未実行・未登録のため実行しない")
             print(f"  中止 チェック:{c['name']}（前提 {', '.join(blocked)} が不合格）")
         elif fail_fast and failed_checks and c.get("kind") in heavy:
-            r = {"pass": False, "fail_fast": True,
-                 "skipped": f"前のチェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）"}
+            r = V.skipped(f"前のチェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）",
+                          fail_fast=True)
             print(f"  未実行 チェック:{c['name']}（前のチェックが不合格・gate_fail_fast）")
         else:
-            cmd, scoped = expand(c["command"])
-            if cmd is None:
-                # 変えたファイルに該当がない（この run で新しく入った問題はない）。実行しなかったことを記録する
-                r = {"pass": True, "no_targets": True, "sec": 0}
-                print(f"  対象なし チェック:{c['name']}（変えたファイルに該当なし）")
+            r = execute("check", c["name"], c["command"], int(c.get("timeout_sec", default_to)),
+                        c.get("kind", "other"), required=False)
+            if V.status_of(r) == V.NOT_APPLICABLE:
+                print(f"  対象なし チェック:{c['name']}（変えたファイルに該当なし"
+                      + ("" if r.get("optional") else "。このチェックは対象なしを合格にできない") + "）")
             else:
-                r = record("check", c["name"], cmd, int(c.get("timeout_sec", default_to)))
-                print(f"  {'合格' if r['pass'] else '不合格'} チェック:{c['name']}（{r['sec']}秒"
-                      + (f"、変えたファイル {scoped} 件" if scoped is not None else "") + "）")
-            r["scoped"] = scoped
+                print(f"  {ran_label(r)} チェック:{c['name']}（{r['sec']}秒"
+                      + (f"、変えたファイル {r['scoped']} 件" if r.get("scoped") is not None else "") + "）")
         r["fp"] = fp
         r["kind"] = c.get("kind", "other")
         results["checks"][c["name"]] = r
-        if not r["pass"]:
+        if not V.check_ok(r):
             failed_checks.append(c["name"])
-        if c.get("kind") == "build" and not r["pass"]:
+        if c.get("kind") == "build" and not V.passed(r):
             build_ok = False
 
     for _req, _parent, v in iter_verifications(state):
         vid = v.get("id", "?")
         vfp = verification_fp(v, cfg)
         if v.get("after_merge") and not after_merge:
-            r = {"pass": False, "pending_after_merge": True}
+            r = V.pending_after_merge()
             print(f"  保留 検証:{vid}（マージ後に gate --after-merge で実行）")
         elif not is_automated(v):
-            r = {"pass": False, "manual": bool(v.get("manual")),
-                 "error": None if v.get("manual") else "実行方法（command / checks）が未設定"}
+            r = V.manual(bool(v.get("manual")))
             print(f"  {'人の確認' if v.get('manual') else '未設定'} 検証:{vid}")
         elif v.get("command"):
             if v.get("level") == "e2e" and not build_ok:
-                r = {"pass": False, "skipped": "ビルドが不合格のため E2E を実行しない（古い成果物での合格を防ぐ）"}
+                r = V.skipped("ビルドが不合格のため E2E を実行しない（古い成果物での合格を防ぐ）")
                 print(f"  中止 検証:{vid}（ビルド不合格）")
             elif fail_fast and failed_checks and v.get("level") in heavy:
-                r = {"pass": False, "fail_fast": True,
-                     "skipped": f"チェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）"}
+                r = V.skipped(f"チェック（{', '.join(failed_checks)}）が不合格のため実行しない（gate_fail_fast）",
+                              fail_fast=True)
                 print(f"  未実行 検証:{vid}（チェックが不合格・gate_fail_fast）")
             else:
-                cmd, scoped = expand(v["command"])
-                if cmd is None:
-                    r = {"pass": True, "no_targets": True, "scoped": 0}
-                    print(f"  対象なし 検証:{vid}（変えたファイルに該当なし）")
+                # 検証は受け入れ条件・リスクに紐づくので、対象なしを合格にしない
+                r = execute("verify", vid, v["command"], int(v.get("timeout_sec", default_to)), v.get("level"),
+                            required=True)
+                if V.status_of(r) == V.NOT_APPLICABLE:
+                    print(f"  対象なし 検証:{vid}（変えたファイルに該当なし。検証は対象なしを合格にできない）")
                 else:
-                    r = record("verify", vid, cmd, int(v.get("timeout_sec", default_to)))
-                    r["scoped"] = scoped
-                    print(f"  {'合格' if r['pass'] else '不合格'} 検証:{vid}")
+                    print(f"  {ran_label(r)} 検証:{vid}")
         else:
-            missing = [n for n in v["checks"] if n not in results["checks"]]
-            ok = not missing and all(results["checks"][n]["pass"] for n in v["checks"])
-            r = {"pass": ok, "via_checks": v["checks"], "missing_checks": missing}
-            print(f"  {'合格' if ok else '不合格'} 検証:{vid}（チェック {', '.join(v['checks'])}）")
+            r = V.via_checks(v["checks"], results["checks"])
+            print(f"  {'合格' if V.passed(r) else '不合格'} 検証:{vid}（チェック {', '.join(v['checks'])}）")
         r["fp"] = vfp
         results["verifications"][vid] = r
 
-    checks_pass = bool(checks) and all(r["pass"] for r in results["checks"].values())
-    return results, checks_pass
+    return results, V.checks_pass(results["checks"], checks)
 
 
 # ------------------------------------------------------------------ CI
@@ -358,18 +364,12 @@ def print_ci(rec):
 
 
 # ------------------------------------------------------------------ テストの兆候（判断材料。合否は決めない）
-TEST_FILE = re.compile(r"(^|/)(tests?|__tests__|spec|specs|e2e)/|(_test|\.test|\.spec|Test|Tests)\.[A-Za-z]+$"
-                       r"|(^|/)test_[^/]+\.py$")
 SKIP_RE = re.compile(r"\.skip\s*\(|\bxit\s*\(|\bxdescribe\s*\(|\bxtest\s*\(|@(unittest\.)?skip|pytest\.mark\.(skip|xfail)"
                      r"|\bt\.Skip\(|#\[ignore\]|@Disabled\b|@Ignore\b|\.todo\s*\(|\.fixme\s*\(")
 ONLY_RE = re.compile(r"\b(it|test|describe)\.only\s*\(|\bfit\s*\(|\bfdescribe\s*\(")
 ASSERT_RE = re.compile(r"assert|expect\s*\(|\.should\b|\.to(Be|Equal|Have|Contain|Match|Throw)|require\.|"
                        r"\bt\.(Error|Fatal|Fail)|XCTAssert|check\s*\(|verify\s*\(", re.I)
 TEST_DEF_RE = re.compile(r"\bdef\s+test_|\b(it|test)\s*\(|\bfunc\s+Test|#\[test\]|@Test\b|\bfn\s+test_")
-CODE_EXT = (".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".rs", ".java", ".kt", ".swift", ".rb",
-            ".php", ".cs", ".vue", ".svelte")
-
-
 def test_signals(project, files):
     """skip・.only・アサーションのないテストファイルを機械的に検出する（意味の判断はレビュー担当が行う）。"""
     out = []

@@ -659,59 +659,28 @@ def cmd_gate(args):
     if os.path.exists(lock) and time.time() - os.path.getmtime(lock) < 3600 and not force:
         die("別の gate が実行中です（終わってから再実行。前回が異常終了した場合は --force）。")
     write_text(lock, str(os.getpid()))
+    from . import gate_service as GS
     try:
         stamp = _dt.datetime.now().strftime("%Y%m%d-%H%M%S")
         info(f"gate {stamp}  ({project})")
-        # 実行開始時のコード・チェック定義・検証条件（gate の結果はこれに紐付ける）
-        before = G.snapshot(project, cfg, fresh=True)
-        checks_fp_before = G.checks_fp(cfg)
-        config_fp_before = G.config_fp(cfg, project)
-        vfp_before = {v["id"]: G.verification_fp(v, cfg) for _r, _p, v in iter_verifications(s)}
-        t0 = time.time()
-        results, ok = G.run_gate(project, s, cfg, iter_verifications, os.path.join(ctx.rd, "gate"), stamp,
-                                 after_merge, snap=before)
-        from . import holdout as HO
-        holdout_fp_before = HO.fingerprint(project, s) if HO.enabled(cfg) else None
-        if HO.enabled(cfg) and HO.items(s):
-            results["holdout"] = HO.run_all(project, s, cfg, stamp)
-            if not all(r["pass"] for r in results["holdout"].values()):
-                ok = False
-        from . import quality as Q
-        dc = Q.diff_coverage(project, s, cfg, before, t0)
-        if dc is not None:
-            results["diff_coverage"] = dc
-            print(f"  {'合格' if dc['pass'] else '不合格'} 差分カバレッジ"
-                  + (f": {dc['percent']}%（基準 {dc['min']:g}%）" if dc.get("percent") is not None else "")
-                  + (f" — {dc['error']}" if dc.get("error") else ""))
-            if not dc["pass"]:
-                ok = False
-        dur = round(time.time() - t0, 1)
-        cfg_after = config(project)
-        after = G.snapshot(project, cfg, fresh=True)
+        out = GS.run(project, s, cfg, ctx.rd, stamp, iter_verifications, after_merge, lambda: config(project))
+        for ln in out["lines"]:
+            print(ln)
     finally:
         try:
             os.remove(lock)
         except OSError:
             pass
     s, spath = load_state(project)  # gate 実行中に他の記録が入っていてもよいように読み直す
-    c, a, r = G.snapshot_diff(before, after)
-    changed_defs = []
-    if G.checks_fp(cfg_after) != checks_fp_before:
-        changed_defs.append("チェックの定義")
-    if G.config_fp(cfg_after, project) != config_fp_before:
-        changed_defs.append("設定")
-    vfp_after = {v["id"]: G.verification_fp(v, cfg_after) for _r, _p, v in iter_verifications(s)}
-    if vfp_after != vfp_before:
-        changed_defs.append("検証条件")
-    modified = None
-    if c or a or r or changed_defs:
-        modified = {"files": c + a + r, "changed": c, "added": a, "removed": r, "definitions": changed_defs,
-                    "summary": G.describe_diff(before, after) or "、".join(changed_defs)}
+    before, after, results, ok, dur = out["before"], out["after"], out["results"], out["ok"], out["sec"]
+    modified = GS.modified_during(before, after, out["fps"], out["cfg_after"], project,
+                                  [v for _r, _p, v in iter_verifications(s)])
+    if modified:
         ok = False  # 検証したものと結果を紐付けるものが一致しないため不合格
     s["gate"] = {"seq": bump(s), "stamp": stamp, "ran_at": now_iso(), "after_merge": after_merge, "sec": dur,
                  "code_fp": G.code_fp(before), "code_fp_after": G.code_fp(after), "snapshot": before,
-                 "checks_fp": checks_fp_before, "config_fp": config_fp_before, "graph_fp": ctx.graph_fp, "checks_pass": ok, "results": results,
-                 "holdout_fp": holdout_fp_before,
+                 "checks_fp": out["fps"]["checks"], "config_fp": out["fps"]["config"], "graph_fp": ctx.graph_fp,
+                 "checks_pass": ok, "results": results, "holdout_fp": out["holdout_fp"],
                  "modified_during_gate": modified}
     s.setdefault("gate_history", []).append({"stamp": stamp, "pass": ok, "sec": dur, "after_merge": after_merge,
                                              "modified": bool(modified)})
@@ -728,8 +697,9 @@ def cmd_gate(args):
               "テストやビルドが追跡対象のファイルを書き換えていないか確認してください。")
         log_dir = os.path.join(ctx.rd, "gate")
         write_text(os.path.join(log_dir, f"{stamp}-modified.log"),
-                   "\n".join(["gate の実行中に変わったもの"] + [f"変更: {x}" for x in c] + [f"追加: {x}" for x in a]
-                             + [f"削除: {x}" for x in r] + [f"定義: {x}" for x in changed_defs]) + "\n")
+                   "\n".join(["gate の実行中に変わったもの"] + [f"変更: {x}" for x in modified["changed"]]
+                             + [f"追加: {x}" for x in modified["added"]] + [f"削除: {x}" for x in modified["removed"]]
+                             + [f"定義: {x}" for x in modified["definitions"]]) + "\n")
     info(f"gate 結果: {'合格' if ok else '不合格'}")
 
 

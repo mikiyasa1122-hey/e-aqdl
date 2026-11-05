@@ -15,6 +15,7 @@ import re
 import time
 
 from . import gate as G
+from . import verdict as V
 from .decision_sheet import fingerprint_items as _sheet_fp_items
 from .decision_sheet import other_options, recommended_option  # noqa: F401（判断シートの規則。cli からも使う）
 from .project import config, register_active
@@ -204,7 +205,7 @@ def validate_state(state):
     if g:
         res = g.get("results") or {}
         if g.get("checks_pass") and (not res.get("checks") or
-                                     not all(r.get("pass") for r in (res.get("checks") or {}).values())):
+                                     not all(V.check_ok(r) for r in (res.get("checks") or {}).values())):
             errs.append("gate が合格になっているが、不合格・未実行のチェックがある")
         if g.get("checks_pass") and g.get("modified_during_gate"):
             errs.append("gate の実行中に変更があったのに合格になっている")
@@ -720,22 +721,21 @@ def _problems(ctx, stage):
         out.append(P("gate_modified", f"gate の実行中に変更があった（{md.get('summary')}）。この gate の結果は使えない",
                      "gate" if li["seq"] > g["seq"] else fix_route("implementer")))
         return out
-    failed = [n for n, r in g["results"]["checks"].items() if not r["pass"]]
+    fl = V.failures(g.get("results"))
+    failed = [n for n, _r in fl["checks"]]
     vfail = []
     for _r, _p, v in iter_verifications(s):
         r = vres.get(v["id"], {})
         if v.get("after_merge") or (not G.is_automated(v) and v.get("manual")):
             continue
-        if not r.get("pass"):
+        if not V.passed(r):
             vfail.append(v["id"])
-    hfail = [ac for ac, r in ((g.get("results") or {}).get("holdout") or {}).items() if not r.get("pass")]
-    dc = (g.get("results") or {}).get("diff_coverage")
-    dfail = bool(dc) and not dc.get("pass")
-    if failed or vfail or hfail or dfail:
+    hfail, dc = fl["holdout"], fl["diff_coverage"]
+    if failed or vfail or hfail or dc:
         what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
                         ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
                         ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []) +
-                        ([f"差分カバレッジ（{dc.get('error')}）"] if dfail else []))
+                        ([f"差分カバレッジ（{V.reason_of(dc)}）"] if dc else []))
         route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
         out.append(P("gate_fail", f"gate が不合格: {what}", route))
         return out

@@ -12,6 +12,7 @@ import shutil
 import time
 
 from . import gate as G
+from . import verdict as V
 from . import counterfactual as CF
 from . import roles as RL
 from .project import config, engine_cmd
@@ -144,27 +145,23 @@ def _gate_items(s, li):
     kind, items = None, []
     g = s.get("gate")
     if g and (not li or li["seq"] < g["seq"]):
-        failed = [(n, r) for n, r in g["results"]["checks"].items() if not r["pass"]]
-        vfail = [(n, r) for n, r in g["results"]["verifications"].items()
-                 if not r.get("pass") and not r.get("pending_after_merge") and not r.get("manual")]
+        fl = V.failures(g.get("results"))
+        failed, vfail = fl["checks"], fl["verifications"]
         md = g.get("modified_during_gate")
         if md:
             failed = [("gate中の変更", {"error": f"gate の実行中に変わった: {md.get('summary')}（テスト・ビルドが追跡対象の"
                                               "ファイルを書き換えないようにする）"})] + failed
-        hfail = [ac for ac, r in (g["results"].get("holdout") or {}).items() if not r.get("pass")]
-        dc = g["results"].get("diff_coverage")
-        dfail = bool(dc) and not dc.get("pass")
-        if failed or vfail or hfail or dfail:
+        hfail, dc = fl["holdout"], fl["diff_coverage"]
+        if failed or vfail or hfail or dc:
             kind = ("gate", g["stamp"])
-            items = [{"label": n, "text": r.get("skipped") or r.get("error") or f"不合格（ログ: {r.get('log')}）"}
-                     for n, r in failed + vfail]
+            items = [{"label": n, "text": V.reason_of(r)} for n, r in failed + vfail]
             # 隠しテストは、どの受け入れ条件かだけを返す（テストの中身・出力は見せない）
             items += [{"label": f"隠しテスト {ac}", "text": f"受け入れ条件 {ac} の隠し受け入れテストが不合格。中身は見せない。"
                        f"仕様の {ac} と設計書の契約（名前・入出力・エラー）どおりに動くかを見直す"} for ac in hfail]
-            if dfail:
+            if dc:
                 from . import quality as Q
                 unc = "; ".join(f"{f}: {Q.ranges(ls)}" for f, ls in list((dc.get("uncovered") or {}).items())[:6])
-                items.append({"label": "差分カバレッジ", "text": f"{dc.get('error')}。"
+                items.append({"label": "差分カバレッジ", "text": f"{V.reason_of(dc)}。"
                               + (f"テストで実行されていない変更行: {unc}。" if unc else "")
                               + "変えた行を確かめるテストを足す（基準・対象外の設定を変えて通さない）"})
     return kind, items
@@ -442,14 +439,45 @@ def _cf_lines(ctx):
     return lines
 
 
-def _reviewer_extra(ctx, entry):
+def quality_summary_lines(g):
+    """機械で確かめた差分の品質を、担当への文章にする（gate の結果の記録だけを読む。合否は計算しない）。"""
     from . import quality as Q
+    res = (g or {}).get("results") or {}
     lines = []
-    ql = Q.summary_lines(ctx.state.get("gate"))
+    for n, r in (res.get("checks") or {}).items():
+        if (r.get("scope") or {}).get("mode") != "changed" and r.get("scoped") is None:
+            continue
+        st = V.status_of(r)
+        if st == V.NOT_APPLICABLE:
+            lines.append(f"- チェック {n}（変えたファイルだけ）: 対象なし（該当する変更がない。実行していない）")
+        else:
+            lines.append(f"- チェック {n}（変えたファイル {r.get('scoped')} 件だけ）: {V.LABEL[st]}")
+    dc = res.get("diff_coverage")
+    if dc:
+        st = V.status_of(dc)
+        if dc.get("total"):
+            lines.append(f"- 差分カバレッジ: {dc['percent']}%（{dc['covered']}/{dc['total']} 行）、基準 {dc['min']:g}%"
+                         f" → {V.LABEL[st]}")
+        else:
+            lines.append(f"- 差分カバレッジ: {V.LABEL[st]}")
+        if not V.passed(dc) and dc.get("reason"):
+            lines.append(f"  - {dc['reason']}")
+        for f, ls in list((dc.get("uncovered") or {}).items())[:10]:
+            lines.append(f"  - テストで実行されていない変更行: {f}: {Q.ranges(ls)}")
+        if dc.get("approx"):
+            lines.append(f"  - 起点の内容を取り出せず、全行を変更として数えたファイル: {', '.join(dc['approx'][:5])}")
+    return lines
+
+
+def _reviewer_extra(ctx, entry):
+    lines = []
+    ql = quality_summary_lines(ctx.state.get("gate"))
     if ql:
         lines += ["", "## 機械で確かめた差分の品質（gate の結果。この run で変えた部分だけ）"] + ql + [
-            "→ 静的解析で確かめた書式・Lint の問題は指摘しない（機械に任せる）。あなたは仕様との整合・ロジック・"
-            "テストが本当に確かめているかに集中する。テストで実行されていない変更行は、そこに重要な分岐がないかを見る。"]
+            "→ 静的解析が出す書式・Lint の個々の警告は指摘しない（機械に任せる）。あなたは仕様との整合・ロジック・"
+            "テストが本当に確かめているかに集中する。テストで実行されていない変更行は、そこに重要な分岐がないかを見る。"
+            "ただし、チェック・検証の対象や条件を、仕様の承認なしに狭めた・外した変更は、これまでどおり指摘する"
+            "（機械の確認の範囲そのものは機械では確かめられない）。"]
     lines += _cf_lines(ctx)
     lines += ["", "## エンジンが機械的に検出したテストの兆候（判断材料。合否はあなたが判断する）"]
     sig = entry.get("test_signals") or []

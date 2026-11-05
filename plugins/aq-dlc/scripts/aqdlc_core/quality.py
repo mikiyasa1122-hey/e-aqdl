@@ -10,17 +10,20 @@
 """
 import difflib
 import fnmatch
+import hashlib
+import json
 import os
 import re
 import shlex
 import subprocess
-import json
 
+from .fileclass import is_code, is_test
 from .util import now_iso, sh_run
 
+# 依存の向き: gate → quality → fileclass / util。quality は gate・verdict を import しない
+# （合否の判定は verdict.diff_coverage、文章への整形は agents が行う）。
+
 CHANGED_RE = re.compile(r"\{changed(?::([^{}]*))?\}")
-DEFAULT_CODE_EXT = (".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".rs", ".java", ".kt", ".swift",
-                    ".rb", ".php", ".cs", ".vue", ".svelte")
 
 
 def config_of(cfg):
@@ -112,7 +115,6 @@ def changed_lines(project, state, rel):
     起点に無いファイルは全行。起点で git の HEAD と同じ内容だったファイルは、HEAD の内容と比べた差分の行。
     起点の内容が取り出せないときは全行（近似。厳しい側）。
     """
-    import hashlib
     path = os.path.join(project, rel)
     try:
         with open(path, "rb") as f:
@@ -185,37 +187,48 @@ def parse_report(project, path):
     return out
 
 
-def _is_test(rel):
-    from .gate import TEST_FILE
-    return bool(TEST_FILE.search(rel))
+def invalidate_report(project, cfg):
+    """gate の実行の前に、前回のレポートを消す（このあとにあれば、この gate のチェックが作ったもの）。
+
+    戻り値: (消したか, エラーの文字列)。消せなければエラー（安全側に倒し、差分カバレッジを不合格にする）。
+    """
+    rel = report_path(cfg)
+    if not rel:
+        return False, None
+    p = os.path.join(project, rel)
+    if not os.path.lexists(p):
+        return False, None
+    try:
+        os.remove(p)
+    except OSError as e:
+        return False, f"前回のカバレッジのレポート {rel} を消せない（{e}）。この gate で作られたものか確かめられない"
+    return True, None
 
 
-def diff_coverage(project, state, cfg, snap, started_at):
-    """差分カバレッジ。無効なら None。戻り値は gate の結果に記録する。"""
+def measure_diff_coverage(project, state, cfg, snap, invalidation_error=None):
+    """差分カバレッジの測定（ファイル・git を読む）。合否は verdict.diff_coverage が決める。
+
+    戻り値: {"total", "covered", "files", "uncovered", "unmeasured", "approx"} か {"error": ...}、と証拠。
+    レポートは gate の前に invalidate_report で消してあるので、あればこの gate のチェックが作ったもの。
+    """
     c = config_of(cfg)
-    if not c["enabled"]:
-        return None
-    res = {"pass": False, "min": c["min"], "report": c["report"]}
+    if invalidation_error:
+        return {"error": invalidation_error}, None
     if not c["report"]:
-        res["error"] = "quality.diff_coverage.report（カバレッジのレポートの場所）が未設定"
-        return res
+        return {"error": "quality.diff_coverage.report（カバレッジのレポートの場所）が未設定"}, None
     rp = os.path.join(project, c["report"])
     if not os.path.isfile(rp):
-        res["error"] = f"カバレッジのレポート {c['report']} がない（gate のチェックで作られていない）"
-        return res
-    if os.path.getmtime(rp) < started_at - 1:
-        res["error"] = f"カバレッジのレポート {c['report']} がこの gate で作られていない（古いレポートは使わない）"
-        return res
+        return {"error": f"カバレッジのレポート {c['report']} がこの gate で作られていない（gate のチェックで作る）"}, None
     try:
+        with open(rp, "rb") as fh:
+            ev = {"report": c["report"], "sha1": hashlib.sha1(fh.read()).hexdigest()}
         rep = parse_report(project, rp)
     except (OSError, ValueError) as e:
-        res["error"] = f"カバレッジのレポートを読めない: {e}"
-        return res
+        return {"error": f"カバレッジのレポートを読めない: {e}"}, None
     changed = changed_files(state, snap)
     if changed is None:
-        res["error"] = "run の開始時点のコードが記録されていない（旧版で始めた run）。差分を決められない"
-        return res
-    targets = [f for f in changed if f.endswith(DEFAULT_CODE_EXT) and not _is_test(f)
+        return {"error": "run の開始時点のコードが記録されていない（旧版で始めた run）。差分を決められない"}, ev
+    targets = [f for f in changed if is_code(f) and not is_test(f)
                and not any(fnmatch.fnmatch(f, g) for g in c["exclude"])]
     covered = total = 0
     uncovered, unmeasured, approx = {}, [], []
@@ -233,17 +246,8 @@ def diff_coverage(project, state, cfg, snap, started_at):
         total += len(exe)
         if exe - hit:
             uncovered[f] = sorted(exe - hit)
-    pct = round(covered * 100.0 / total, 1) if total else None
-    res.update({"percent": pct, "covered": covered, "total": total, "files": len(targets),
-                "uncovered": {k: v[:50] for k, v in uncovered.items()}, "unmeasured": unmeasured,
-                "approx": approx})
-    if unmeasured:
-        res["error"] = (f"変えたファイルがカバレッジのレポートにない（テストで一度も読み込まれていない・計測の対象外）: "
-                        f"{', '.join(unmeasured[:5])}（対象外にするなら quality.diff_coverage.exclude）")
-    elif total and pct < c["min"]:
-        res["error"] = f"差分カバレッジ {pct}% が基準 {c['min']:g}% 未満（変えた行 {total} 行のうち {covered} 行）"
-    res["pass"] = "error" not in res
-    return res
+    return {"total": total, "covered": covered, "files": len(targets), "uncovered": uncovered,
+            "unmeasured": unmeasured, "approx": approx}, ev
 
 
 def ranges(nums, limit=8):
@@ -260,27 +264,3 @@ def ranges(nums, limit=8):
     if start is not None:
         out.append(f"{start}-{prev}" if start != prev else str(start))
     return ", ".join(out[:limit]) + (" …" if len(out) > limit else "")
-
-
-def summary_lines(g):
-    """レビュー担当・実装担当に渡す、機械の確認の要約（gate の結果から）。"""
-    res = (g or {}).get("results") or {}
-    lines = []
-    scoped = [(n, r) for n, r in (res.get("checks") or {}).items() if r.get("scoped") is not None]
-    for n, r in scoped:
-        if r.get("no_targets"):
-            lines.append(f"- チェック {n}（変えたファイルだけ）: 対象なし（該当する変更がない）")
-        else:
-            lines.append(f"- チェック {n}（変えたファイル {r['scoped']} 件だけ）: {'合格' if r.get('pass') else '不合格'}")
-    dc = res.get("diff_coverage")
-    if dc:
-        if dc.get("percent") is not None or dc.get("total") == 0:
-            pct = "対象の行なし" if not dc.get("total") else f"{dc['percent']}%（{dc['covered']}/{dc['total']} 行）"
-            lines.append(f"- 差分カバレッジ: {pct}、基準 {dc['min']:g}% → {'合格' if dc.get('pass') else '不合格'}")
-        if dc.get("error"):
-            lines.append(f"  - {dc['error']}")
-        for f, ls in list((dc.get("uncovered") or {}).items())[:10]:
-            lines.append(f"  - テストで実行されていない変更行: {f}: {ranges(ls)}")
-        if dc.get("approx"):
-            lines.append(f"  - 起点の内容を取り出せず、全行を変更として数えたファイル: {', '.join(dc['approx'][:5])}")
-    return lines
