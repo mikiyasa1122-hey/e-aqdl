@@ -15,6 +15,8 @@ import re
 import time
 
 from . import gate as G
+from .decision_sheet import fingerprint_items as _sheet_fp_items
+from .decision_sheet import other_options, recommended_option  # noqa: F401（判断シートの規則。cli からも使う）
 from .project import config, register_active
 from .util import (FileLock, die, fingerprint, load_json, now_iso, read_text, save_json, sha1_text,
                    short, slugify)
@@ -411,6 +413,9 @@ def spec_hash(state, rd):
                 for r in state.get("requirements", [])],
         "assume": [[a["id"], a.get("text")] for a in state.get("assumptions", [])],
         "out": [[o["id"], o.get("text")] for o in state.get("out_of_scope", [])],
+        # 判断シートで決める（決めた）質問と推奨。提示の後に推奨を変えたら、提示し直さないと承認できない。
+        # 該当がなければ鍵ごと入れない（判断シートを使わない run の指紋を変えないため）
+        **({"sheet": items} if (items := _sheet_fp_items(state.get("questions", []))) else {}),
     })
 
 
@@ -573,9 +578,10 @@ def _problems(ctx, stage):
     if spec.get("registered_hash") != ctx.spec_hash:
         out.append(P("spec_unregistered", "仕様が要求整理の完了後に変更された（aq-dlc:requirements で整理し直す）",
                      "requirements"))
-    openq = [q["id"] for q in s["questions"] if q.get("status") != "answered"]
+    # 推奨の選択肢がある質問は、仕様の承認（判断シート）で一緒に決められるので、提示を止めない
+    openq = [q["id"] for q in s["questions"] if q.get("status") != "answered" and not recommended_option(q)]
     if openq:
-        out.append(P("questions_open", f"未回答の質問: {', '.join(openq)}", "human"))
+        out.append(P("questions_open", f"未回答の質問（推奨の選択肢なし）: {', '.join(openq)}", "human"))
     unapplied = [q["id"] for q in s["questions"]
                  if q.get("status") == "answered" and q.get("answered_seq", 0) > spec.get("registered_seq", 0)]
     if unapplied and not openq:
@@ -952,6 +958,15 @@ def instruction(p, ctx):
 
 
 # ------------------------------------------------------------------ display helpers
+def pending_by_sheet(state):
+    """判断シートで一緒に決める項目: 推奨のある未回答の質問、人の確認が必要な検証。"""
+    qs = [q for q in state.get("questions", []) if q.get("status") != "answered" and recommended_option(q)]
+    manual = [v for _r, _p, v in iter_verifications(state) if not G.is_automated(v)
+              and (v.get("manual") or v.get("after_merge")) and v.get("confirmed_by") != "human"
+              and not v.get("deferred")]
+    return qs, manual
+
+
 def spec_sheet(state):
     lines = [f"# 仕様の確認: {state.get('title')}", ""]
     for kind, label in (("functional", "機能要件"), ("nonfunctional", "非機能要件")):
@@ -973,11 +988,24 @@ def spec_sheet(state):
         lines += ["## こちらで決めたこと（仮定）"] + [f"- {a['id']} {a['text']}" for a in state["assumptions"]] + [""]
     if state.get("out_of_scope"):
         lines += ["## 今回は作らないもの"] + [f"- {o['id']} {o['text']}" for o in state["out_of_scope"]] + [""]
-    qs = state.get("questions", [])
-    if qs:
+    answered = [q for q in state.get("questions", []) if q.get("status") == "answered"]
+    if answered:
         lines += ["## 質問と回答"]
-        for q in qs:
-            lines.append(f"- {q['id']} {q['text']} → {q.get('answer') or '（未回答）'}")
+        for q in answered:
+            lines.append(f"- {q['id']} {q['text']} → {q.get('answer')}")
+        lines.append("")
+    open_q, manual = pending_by_sheet(state)
+    if open_q or manual:
+        lines += ["## 判断シート（この仕様の承認と一緒に、1回の返答で決められます）"]
+        for q in open_q:
+            others = other_options(q)
+            lines.append(f"- {q['id']} {q['text']} → **推奨: {recommended_option(q)}**"
+                         + (f"（ほかの選択肢: {' / '.join(others)}）" if others else ""))
+        for v in manual:
+            how = v.get("manual") or v.get("method", "")
+            lines.append(f"- {v['id']} 人の確認が必要: {v.get('method', '')}（手順: {how}）"
+                         f" → 後で確認する（返答不要）／確認しないで進める（承認 DEFER-{v['id']}。合格にはならず、未確認として報告）")
+        lines.append("")
     return "\n".join(lines).rstrip() + "\n"
 
 

@@ -193,6 +193,10 @@ def cmd_question(args):
         qid, text = a[0], " ".join(a[1:])
         q = ensure_new_id(s, qid, ("question", None))
         opts = [x.strip() for x in (options or "").split("|") if x.strip()]
+        from .decision_sheet import options_error
+        err = options_error(opts)
+        if err:
+            die(f"選択肢を登録できません: {err}")
         if q:
             q.update(text=text, options=opts or q.get("options", []))
         else:
@@ -437,8 +441,16 @@ def cmd_spec(args):
         sp["presented_seq"] = bump(s)
         save_state(spath, s)
         t = AP.target_id("SPEC", ctx.spec_hash)
+        from .state import pending_by_sheet
+        open_q, manual = pending_by_sheet(s)
+        sheet = ""
+        if open_q or manual:
+            sheet = ("判断シートの項目も同じ返答で決めてもらう。質問は推奨でよければ何も書かなくてよい（承認で推奨に決まる）。"
+                     "変える質問は「Q1 は B」のように書いてもらう（そのときは承認ではなく修正として扱う）。"
+                     + (f"確認しないで進める検証は「承認 DEFER-<ID>」を同じ返答に含めてもらい、承認の記録の後に defer で記録する。" if manual else ""))
         print(f"\n（仕様 {t} を提示として記録。人間に「この仕様で進める（承認 {t}）」/「修正したい」を選んでもらい、"
-              f"承認の返答を得たら spec --approve \"<返答の要約>\"）")
+              f"承認の返答を得たら spec --approve \"<返答の要約>\"。{sheet}"
+              "人間への確認は、この1回にまとめる）")
         return
     if sp.get("presented_hash") != ctx.spec_hash:
         die("この版の仕様はまだ人間に提示されていません。spec --present で提示してから確認してください。")
@@ -455,7 +467,19 @@ def cmd_spec(args):
         AP.record(s, target, "reject", ev, ctx.rd, approve, "spec")
         save_state(spath, s)
         die(f"人間は仕様（{target}）を却下しました。修正の要望を aq-dlc:requirements に依頼してください。")
+    from .state import pending_by_sheet, recommended_option
+    open_q, _manual = pending_by_sheet(s)
+    from .decision_sheet import reply_conflicts
+    conflicts = reply_conflicts((ev or {}).get("text") or "", open_q)
+    if conflicts:
+        die("承認の返答が、判断シートの推奨と違う回答かもしれないため、承認として扱いません（"
+            + "；".join(conflicts) + "）。answer で回答を記録し、aq-dlc:requirements に反映を依頼してから、提示し直してください。")
     AP.record(s, target, "approve", ev, ctx.rd, approve, "spec")
+    for q in open_q:
+        # 判断シートの質問は、仕様の承認で推奨に決まる（仕様は推奨を前提に書かれているので、反映済みとして扱う）
+        q.update(status="answered", answer=recommended_option(q), answered_by="spec_approval",
+                 answered_seq=sp.get("registered_seq", 0), answered_at=now_iso())
+        log(s, project, "answer", {"id": q["id"], "answer": q["answer"], "by": "spec_approval"})
     sp.update({"approved_hash": ctx.spec_hash, "approved_seq": bump(s), "approved_at": now_iso(), "note": approve,
                "approval_target": target})
     s["awaiting_human"] = False
@@ -542,8 +566,10 @@ def cmd_defer(args):
             die('使い方: defer <検証ID>[,<検証ID>...] "<人間の返答の要約>"')
         ids = [x for x in re.split(r"[,、\s]+", a[0]) if x]
         note = " ".join(a[1:]).strip()
-        if not s.get("asked_seq") or last_human_seq(s) <= s["asked_seq"]:
-            die("ask の後に人間の返答が記録されていません。ask を実行して人間に確認してから記録してください。")
+        # 確認の起点: ask、または仕様の提示（判断シートで人の確認も一緒に聞く）のうち新しいほう
+        base = max(int(s.get("asked_seq") or 0), int((s.get("spec") or {}).get("presented_seq") or 0))
+        if not base or last_human_seq(s) <= base:
+            die("ask（または仕様の提示）の後に人間の返答が記録されていません。人間に確認してから記録してください。")
         cfg = config(project)
         todo = []
         for vid in ids:
@@ -554,7 +580,7 @@ def cmd_defer(args):
             if v.get("confirmed_by") == "human":
                 die(f"{vid} はすでに人間の確認済みです。")
             target = f"DEFER-{vid}"
-            decision, ev, _f = AP.find_decision(s, target, s["asked_seq"])
+            decision, ev, _f = AP.find_decision(s, target, base)
             if decision != "approve":
                 die(f"ask の後の人間の返答に、{vid} を未確認のまま進めることへの明示的な承認（「承認 {target}」）がありません"
                     + ("（却下の返答があります）" if decision == "reject" else "") + "。")
