@@ -15,6 +15,8 @@ import re
 import time
 
 from . import gate as G
+from .decision_sheet import fingerprint_items as _sheet_fp_items
+from .decision_sheet import other_options, recommended_option  # noqa: F401（判断シートの規則。cli からも使う）
 from .project import config, register_active
 from .util import (FileLock, die, fingerprint, load_json, now_iso, read_text, save_json, sha1_text,
                    short, slugify)
@@ -414,6 +416,9 @@ def spec_hash(state, rd):
                 for r in state.get("requirements", [])],
         "assume": [[a["id"], a.get("text")] for a in state.get("assumptions", [])],
         "out": [[o["id"], o.get("text")] for o in state.get("out_of_scope", [])],
+        # 判断シートで決める（決めた）質問と推奨。提示の後に推奨を変えたら、提示し直さないと承認できない。
+        # 該当がなければ鍵ごと入れない（判断シートを使わない run の指紋を変えないため）
+        **({"sheet": items} if (items := _sheet_fp_items(state.get("questions", []))) else {}),
     })
 
 
@@ -959,14 +964,6 @@ def instruction(p, ctx):
 
 
 # ------------------------------------------------------------------ display helpers
-def recommended_option(q):
-    """質問の選択肢のうち「（推奨）」が付いたもの（なければ None）。"""
-    for o in q.get("options") or []:
-        if "推奨" in o:
-            return re.sub(r"[（(]\s*推奨\s*[)）]", "", o).strip() or o
-    return None
-
-
 def pending_by_sheet(state):
     """判断シートで一緒に決める項目: 推奨のある未回答の質問、人の確認が必要な検証。"""
     qs = [q for q in state.get("questions", []) if q.get("status") != "answered" and recommended_option(q)]
@@ -1007,7 +1004,7 @@ def spec_sheet(state):
     if open_q or manual:
         lines += ["## 判断シート（この仕様の承認と一緒に、1回の返答で決められます）"]
         for q in open_q:
-            others = [o for o in q.get("options") or [] if "推奨" not in o]
+            others = other_options(q)
             lines.append(f"- {q['id']} {q['text']} → **推奨: {recommended_option(q)}**"
                          + (f"（ほかの選択肢: {' / '.join(others)}）" if others else ""))
         for v in manual:

@@ -193,6 +193,10 @@ def cmd_question(args):
         qid, text = a[0], " ".join(a[1:])
         q = ensure_new_id(s, qid, ("question", None))
         opts = [x.strip() for x in (options or "").split("|") if x.strip()]
+        from .decision_sheet import options_error
+        err = options_error(opts)
+        if err:
+            die(f"選択肢を登録できません: {err}")
         if q:
             q.update(text=text, options=opts or q.get("options", []))
         else:
@@ -465,11 +469,11 @@ def cmd_spec(args):
         die(f"人間は仕様（{target}）を却下しました。修正の要望を aq-dlc:requirements に依頼してください。")
     from .state import pending_by_sheet, recommended_option
     open_q, _manual = pending_by_sheet(s)
-    said = (ev or {}).get("text") or ""
-    named = [q["id"] for q in open_q if re.search(rf"(?<![A-Za-z0-9]){re.escape(q['id'])}(?![0-9])", said)]
-    if named:
-        die(f"承認の返答に、判断シートの質問（{', '.join(named)}）への指定があります。推奨と違う回答かもしれないため、"
-            "承認として扱いません。answer で回答を記録し、aq-dlc:requirements に反映を依頼してから、提示し直してください。")
+    from .decision_sheet import reply_conflicts
+    conflicts = reply_conflicts((ev or {}).get("text") or "", open_q)
+    if conflicts:
+        die("承認の返答が、判断シートの推奨と違う回答かもしれないため、承認として扱いません（"
+            + "；".join(conflicts) + "）。answer で回答を記録し、aq-dlc:requirements に反映を依頼してから、提示し直してください。")
     AP.record(s, target, "approve", ev, ctx.rd, approve, "spec")
     for q in open_q:
         # 判断シートの質問は、仕様の承認で推奨に決まる（仕様は推奨を前提に書かれているので、反映済みとして扱う）
