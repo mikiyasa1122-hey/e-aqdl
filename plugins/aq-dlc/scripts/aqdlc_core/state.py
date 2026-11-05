@@ -15,6 +15,7 @@ import re
 import time
 
 from . import gate as G
+from . import verdict as V
 from .decision_sheet import fingerprint_items as _sheet_fp_items
 from .decision_sheet import other_options, recommended_option  # noqa: F401（判断シートの規則。cli からも使う）
 from .project import config, register_active
@@ -204,8 +205,12 @@ def validate_state(state):
     if g:
         res = g.get("results") or {}
         if g.get("checks_pass") and (not res.get("checks") or
-                                     not all(r.get("pass") for r in (res.get("checks") or {}).values())):
+                                     not all(V.check_ok(r) for r in (res.get("checks") or {}).values())):
             errs.append("gate が合格になっているが、不合格・未実行のチェックがある")
+        bad = [k for part in ("checks", "verifications", "holdout") for k, r in (res.get(part) or {}).items()
+               if V.inconsistent(r)]
+        if bad:
+            errs.append(f"gate の結果の記録が食い違っている（status と pass）: {', '.join(bad[:5])}")
         if g.get("checks_pass") and g.get("modified_during_gate"):
             errs.append("gate の実行中に変更があったのに合格になっている")
         if g.get("seq", 0) > seq:
@@ -311,6 +316,9 @@ def new_run(project, title):
     st = empty_state(rid, title)
     cfg = config(project)
     st["config_fp_registered"] = G.config_fp(cfg, project)
+    # 差分の品質の起点（この run で変えた部分を決める）
+    from . import quality as Q
+    st["baseline"] = Q.capture_baseline(project, G.snapshot(project, cfg, fresh=True))
     default = (cfg.get("memory_policy") or {}).get("scope_default", "ask")
     if default in ("none", "project", "all"):
         from .project import explicit_setting
@@ -717,19 +725,21 @@ def _problems(ctx, stage):
         out.append(P("gate_modified", f"gate の実行中に変更があった（{md.get('summary')}）。この gate の結果は使えない",
                      "gate" if li["seq"] > g["seq"] else fix_route("implementer")))
         return out
-    failed = [n for n, r in g["results"]["checks"].items() if not r["pass"]]
+    fl = V.failures(g.get("results"))
+    failed = [n for n, _r in fl["checks"]]
     vfail = []
     for _r, _p, v in iter_verifications(s):
         r = vres.get(v["id"], {})
         if v.get("after_merge") or (not G.is_automated(v) and v.get("manual")):
             continue
-        if not r.get("pass"):
+        if not V.passed(r):
             vfail.append(v["id"])
-    hfail = [ac for ac, r in ((g.get("results") or {}).get("holdout") or {}).items() if not r.get("pass")]
-    if failed or vfail or hfail:
+    hfail, qfail = fl["holdout"], fl["quality"]
+    if failed or vfail or hfail or qfail:
         what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
                         ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
-                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []))
+                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []) +
+                        [f"{label}（{V.reason_of(r)}）" for _k, label, r in qfail])
         route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
         out.append(P("gate_fail", f"gate が不合格: {what}", route))
         return out
@@ -780,8 +790,8 @@ def _problems(ctx, stage):
         if rv.get("design_hash") != ctx.design_hash:
             rs.append("設計")
         if rv.get("role_fp"):
-            from .agents import role_selection
-            if role_selection("reviewer", ctx)["fp"] != rv["role_fp"]:
+            from .roles import select_for
+            if select_for("reviewer", ctx.state, ctx.cfg)["fp"] != rv["role_fp"]:
                 rs.append("レビューの役割の定義（Role Profile）")
         if cc["mode"] != "off" and rv.get("cf_fp") != CF.record_fp(s):
             rs.append("反証テストの結果")
@@ -922,8 +932,8 @@ def instruction(p, ctx):
             return (head + "\n→ audit で内容を確認し、人間に状況を報告する。ask を実行してから、人間が確認したら"
                     f"「承認 {ids[0]}」の返答を得て audit --resolve {ids[0]}。取り消された承認は、人間に聞き直して取り直す。")
         if c == "memory_scope":
-            from .memory import scope_target
-            t = scope_target(ctx.state)
+            from .approval import memscope_target
+            t = memscope_target(ctx.state)
             return (head + "\n→ ask を実行してから AskUserQuestion で、この run の Memory の利用範囲を聞く。選択肢は"
                     f"「プロジェクト内だけ（推奨）」「Memory を使わない」「共通 Memory も使う（承認 {t}）」。"
                     "返答に合わせて memory-scope project|none|all を実行する（all は「承認 …」の返答が必要）。"

@@ -302,8 +302,11 @@ if __name__ == "__main__":
 '''
 
 
-def build_to_review(e, with_question=True, config=None):
-    """仕様承認 → 設計 → 実装 → gate 合格まで進める（各テストの前提）。config: プロジェクト設定に足す項目。"""
+def build_to_review(e, with_question=True, config=None, memo_src=None):
+    """仕様承認 → 設計 → 実装 → gate 合格まで進める（各テストの前提）。config: プロジェクト設定に足す項目。
+
+    memo_src: 実装する src/memo.py（既定は MEMO_V1）。
+    """
     py = f'"{sys.executable}"'
     e.aq("init", "メモ")
     if config:
@@ -345,7 +348,7 @@ def build_to_review(e, with_question=True, config=None):
     assert e.stop("design", "設計完了") is None
     assert not denied(e.spawn("implementer"))
     e.start("implementer")
-    implement(e, MEMO_V1)
+    implement(e, memo_src or MEMO_V1)
     assert e.stop("implementer", "実装完了") is None
     e.aq("gate")
 

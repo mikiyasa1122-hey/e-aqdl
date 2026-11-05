@@ -95,6 +95,14 @@ DEFAULTS = {
         # （実行しなかったものは「未実行（前のチェックの不合格）」で、合格にはしない。gate は不合格のまま）
         "gate_fail_fast": False,
     },
+    # 差分の品質（Codacy を参考に、この run で変えた部分だけを機械で確かめる）
+    # チェックのコマンドの {changed} / {changed:.py} は設定なしで使える（変えたファイルに置き換わる）
+    "quality": {
+        # 差分カバレッジ: 変えた行のうち、テストで実行された行の割合。既定は無効（レポートの場所が必要）
+        # report: gate のチェックで作られるカバレッジのレポート（coverage.py の JSON か LCOV。例: coverage/coverage.json）
+        # exclude: 対象外にするファイルの glob（例: "scripts/*"）。テストファイルは最初から対象外
+        "diff_coverage": {"enabled": False, "report": "", "min": 80, "exclude": []},
+    },
     "memory": {
         "max_loaded_per_run": 10,
         "auto_save_min_score": 3,
@@ -136,7 +144,8 @@ def ensure_home(verbose=False):
             print("  （既に初期化済み）")
 
 
-EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy", "cost_optimization", "review", "holdout", "workflow")
+EAQDL_SECTIONS = ("roles", "counterfactual", "memory_policy", "cost_optimization", "review", "holdout", "workflow",
+                  "quality")
 
 
 def config(project=None):

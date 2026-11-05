@@ -13,6 +13,7 @@ import os
 import time
 
 from . import gate as G
+from . import verdict as V
 from .project import home
 from .util import now_iso
 
@@ -86,7 +87,7 @@ def run_all(project, state, cfg, stamp):
         code, text, _dur = G.run_cmd(expand(it["command"], d), project, default_to, env)
         with open(os.path.join(log_dir, f"{stamp}-{it['ac']}.log"), "w", encoding="utf-8") as f:
             f.write(f"$ {it['command']}\nexit={code}\n\n{text}")
-        out[it["ac"]] = {"pass": code == 0, "exit": code, "sec": round(time.time() - t0, 2)}
+        out[it["ac"]] = V.from_holdout(code, round(time.time() - t0, 2))
         print(f"  {'合格' if code == 0 else '不合格'} 隠しテスト:{it['ac']}")
     return out
 
