@@ -1,0 +1,214 @@
+[
+ {
+  "run": "before-1",
+  "replies": 4,
+  "cost": 4.47,
+  "sec": 648,
+  "status": "closed",
+  "lint_cmd": [
+   "ruff check inventory/export.py inventory/client.py tests/test_export.py tests/test_client.py"
+  ],
+  "diff_cov_cfg": false,
+  "gate_runs": null,
+  "gate_fails": 1,
+  "review_rounds": null,
+  "reviewer_tokens": 227637,
+  "implementer_tokens": 1132518,
+  "pre_existing_modified": [],
+  "lint_changed": [],
+  "report_py_lint": 5,
+  "diff_cov": 100.0,
+  "uncovered": {},
+  "hidden_failed": [],
+  "hidden_ran": 7,
+  "visible_ok": true,
+  "test_live_unchanged": true,
+  "rework": {
+   "gate_failures": 1,
+   "review_retries": 2,
+   "fix_iterations": 3,
+   "agent_reruns": {
+    "requirements": 2,
+    "implementer": 3,
+    "reviewer": 2
+   }
+  }
+ },
+ {
+  "run": "before-2",
+  "replies": 3,
+  "cost": 2.12,
+  "sec": 375,
+  "status": "closed",
+  "lint_cmd": [
+   "ruff check inventory/low_stock.py inventory/__init__.py inventory/client.py tests/test_low_stock.py tests/test_client.py"
+  ],
+  "diff_cov_cfg": false,
+  "gate_runs": null,
+  "gate_fails": 1,
+  "review_rounds": null,
+  "reviewer_tokens": 95578,
+  "implementer_tokens": 671019,
+  "pre_existing_modified": [
+   "inventory/__init__.py"
+  ],
+  "lint_changed": [],
+  "report_py_lint": 5,
+  "diff_cov": 100.0,
+  "uncovered": {},
+  "hidden_failed": [],
+  "hidden_ran": 7,
+  "visible_ok": true,
+  "test_live_unchanged": true,
+  "rework": {
+   "gate_failures": 1,
+   "review_retries": 0,
+   "fix_iterations": 1,
+   "agent_reruns": {
+    "requirements": 0,
+    "implementer": 1,
+    "reviewer": 0
+   }
+  }
+ },
+ {
+  "run": "before-3",
+  "replies": 4,
+  "cost": 2.79,
+  "sec": 323,
+  "status": "closed",
+  "lint_cmd": [
+   "ruff check inventory/export.py inventory/client.py inventory/__init__.py tests/test_export.py tests/test_client.py"
+  ],
+  "diff_cov_cfg": false,
+  "gate_runs": null,
+  "gate_fails": 0,
+  "review_rounds": null,
+  "reviewer_tokens": 64477,
+  "implementer_tokens": 436254,
+  "pre_existing_modified": [],
+  "lint_changed": [],
+  "report_py_lint": 5,
+  "diff_cov": 100.0,
+  "uncovered": {},
+  "hidden_failed": [],
+  "hidden_ran": 7,
+  "visible_ok": true,
+  "test_live_unchanged": true,
+  "rework": {
+   "gate_failures": 0,
+   "review_retries": 0,
+   "fix_iterations": 0,
+   "agent_reruns": {
+    "requirements": 1,
+    "implementer": 1,
+    "reviewer": 0
+   }
+  }
+ },
+ {
+  "run": "after-1",
+  "replies": 1,
+  "cost": 1.15,
+  "sec": 265,
+  "status": "closed",
+  "lint_cmd": [
+   "python3 -m ruff check {changed:.py}"
+  ],
+  "diff_cov_cfg": false,
+  "gate_runs": null,
+  "gate_fails": 0,
+  "review_rounds": null,
+  "reviewer_tokens": 76736,
+  "implementer_tokens": 586821,
+  "pre_existing_modified": [],
+  "lint_changed": [],
+  "report_py_lint": 5,
+  "diff_cov": 100.0,
+  "uncovered": {},
+  "hidden_failed": [],
+  "hidden_ran": 7,
+  "visible_ok": true,
+  "test_live_unchanged": true,
+  "rework": {
+   "gate_failures": 0,
+   "review_retries": 0,
+   "fix_iterations": 0,
+   "agent_reruns": {
+    "requirements": 0,
+    "implementer": 0,
+    "reviewer": 0
+   }
+  }
+ },
+ {
+  "run": "after-2",
+  "replies": 1,
+  "cost": 0.97,
+  "sec": 284,
+  "status": "closed",
+  "lint_cmd": [
+   "python3 -m ruff check inventory/export.py inventory/client.py tests/test_export.py tests/test_client.py"
+  ],
+  "diff_cov_cfg": false,
+  "gate_runs": null,
+  "gate_fails": 0,
+  "review_rounds": null,
+  "reviewer_tokens": 64877,
+  "implementer_tokens": 404998,
+  "pre_existing_modified": [],
+  "lint_changed": [],
+  "report_py_lint": 5,
+  "diff_cov": 100.0,
+  "uncovered": {},
+  "hidden_failed": [],
+  "hidden_ran": 7,
+  "visible_ok": true,
+  "test_live_unchanged": true,
+  "rework": {
+   "gate_failures": 0,
+   "review_retries": 0,
+   "fix_iterations": 0,
+   "agent_reruns": {
+    "requirements": 0,
+    "implementer": 0,
+    "reviewer": 0
+   }
+  }
+ },
+ {
+  "run": "after-3",
+  "replies": 1,
+  "cost": 1.32,
+  "sec": 348,
+  "status": "closed",
+  "lint_cmd": [
+   "ruff check {changed:.py}"
+  ],
+  "diff_cov_cfg": false,
+  "gate_runs": null,
+  "gate_fails": 0,
+  "review_rounds": null,
+  "reviewer_tokens": 95003,
+  "implementer_tokens": 694445,
+  "pre_existing_modified": [],
+  "lint_changed": [],
+  "report_py_lint": 5,
+  "diff_cov": 100.0,
+  "uncovered": {},
+  "hidden_failed": [],
+  "hidden_ran": 7,
+  "visible_ok": true,
+  "test_live_unchanged": true,
+  "rework": {
+   "gate_failures": 0,
+   "review_retries": 0,
+   "fix_iterations": 1,
+   "agent_reruns": {
+    "requirements": 0,
+    "implementer": 1,
+    "reviewer": 1
+   }
+  }
+ }
+]
