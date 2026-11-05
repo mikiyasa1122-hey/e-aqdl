@@ -89,13 +89,21 @@ def expand(command, changed, all_files):
 
 
 # ------------------------------------------------------------------ changed lines
-def _git_show(project, head, rel):
-    try:
-        p = subprocess.run(["git", "show", f"{head}:{rel}"], cwd=project, stdout=subprocess.PIPE,
-                           stderr=subprocess.DEVNULL, timeout=60)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return p.stdout if p.returncode == 0 else None
+def _git_versions(project, head, rel):
+    """起点の HEAD にあるファイルの内容の候補。
+
+    作業ツリーと同じ形（改行コードの変換などを適用した形。Windows の core.autocrlf など）を先に、
+    リポジトリに保存された形を後に返す。
+    """
+    out = []
+    for cmd in (["git", "cat-file", "--filters", f"{head}:{rel}"], ["git", "show", f"{head}:{rel}"]):
+        try:
+            p = subprocess.run(cmd, cwd=project, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, timeout=60)
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        if p.returncode == 0:
+            out.append(p.stdout)
+    return out
 
 
 def changed_lines(project, state, rel):
@@ -117,8 +125,10 @@ def changed_lines(project, state, rel):
     bsnap = base.get("snapshot") or {}
     if rel not in bsnap:
         return all_lines, False
-    old = _git_show(project, base["git_head"], rel) if base.get("git_head") else None
-    if old is None or hashlib.sha1(old).hexdigest() != bsnap[rel][2]:
+    cands = _git_versions(project, base["git_head"], rel) if base.get("git_head") else []
+    # 起点のスナップショットと同じ内容のものだけを使う（起点で HEAD から変わっていたファイルは使えない）
+    old = next((c for c in cands if hashlib.sha1(c).hexdigest() == bsnap[rel][2]), None)
+    if old is None:
         return all_lines, True
     sm = difflib.SequenceMatcher(None, old.decode("utf-8", "replace").splitlines(), new_lines, autojunk=False)
     out = set()

@@ -114,6 +114,12 @@ def write(e, rel, text):
         f.write(text)
 
 
+def _mk(e, rel):
+    p = os.path.join(e.project, rel)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    return p
+
+
 def py():
     return f'"{sys.executable}"'
 
@@ -203,9 +209,21 @@ class DiffCoverageTest(unittest.TestCase):
 
     def test_only_changed_lines_count(self):
         """起点（git の HEAD）からの差分の行だけを数える。テストのない古い関数では止めない。"""
+        self.changed_lines_case(crlf=False)
+
+    def test_only_changed_lines_count_with_crlf_checkout(self):
+        """作業ツリーの改行が CRLF（Windows の core.autocrlf）でも、起点の内容と対応づけられる。"""
+        self.changed_lines_case(crlf=True)
+
+    def changed_lines_case(self, crlf):
         self.e = e = Env(git=True)
         write(e, "tools/cov.py", COV_TOOL)
-        write(e, "src/memo.py", MEMO_BASE)
+        if crlf:
+            e.git("config", "core.autocrlf", "true")
+            with open(_mk(e, "src/memo.py"), "wb") as f:
+                f.write(MEMO_BASE.replace("\n", "\r\n").encode("utf-8"))
+        else:
+            write(e, "src/memo.py", MEMO_BASE)
         write(e, ".gitignore", "coverage/\n__pycache__/\n.aq-dlc/\n")
         e.git("add", "-A")
         e.git("commit", "-q", "-m", "base")
