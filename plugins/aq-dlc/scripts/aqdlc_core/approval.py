@@ -23,6 +23,12 @@ CONFIDENTIAL_OK = "機密確認済み"
 
 
 # ------------------------------------------------------------------ 対象 ID
+def memscope_target(state):
+    """共通 Memory の利用（memory-scope all）の承認の対象 ID。memory.scope_target から移した（state → memory の循環をなくす）。"""
+    import hashlib
+    return target_id("MEMSCOPE", hashlib.sha1(str(state.get("run_id")).encode()).hexdigest())
+
+
 def target_id(prefix, value):
     """prefix-xxxxxxxx（value がハッシュならその先頭8文字、ID ならそのまま）。"""
     v = str(value or "")

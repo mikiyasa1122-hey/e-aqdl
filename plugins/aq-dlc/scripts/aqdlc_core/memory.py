@@ -411,7 +411,7 @@ def cmd_memory(args):
 
 # ------------------------------------------------------------------ コマンド: 利用範囲（開始時の同意）
 def scope_target(state):
-    return AP.target_id("MEMSCOPE", hashlib.sha1(str(state.get("run_id")).encode()).hexdigest())
+    return AP.memscope_target(state)  # 規則は approval にある（state からも使う）
 
 
 def cmd_memory_scope(args):

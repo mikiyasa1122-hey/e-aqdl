@@ -165,14 +165,8 @@ def _gate_items(s, li):
 
 # ------------------------------------------------------------------ briefs
 def role_selection(role, ctx, kind=None, prompt=""):
-    """この担当に今回適用する Role Profile（決定論的）。kind は pending_fix の種類。"""
-    extra = []
-    mode = (ctx.cfg.get("counterfactual") or {}).get("mode", "off")
-    if role == "reviewer" and mode in ("advisory", "enforce"):
-        extra.append("adversarial-tester")
-    if role == "implementer" and kind and kind[0] == "counterfactual":
-        extra.append("adversarial-tester")
-    return RL.select(role, ctx.state, ctx.cfg, prompt=prompt, extra_stage=extra)
+    """この担当に今回適用する Role Profile（決定論的。規則は roles.select_for にある）。"""
+    return RL.select_for(role, ctx.state, ctx.cfg, kind, prompt)
 
 
 def brief(role, ctx, entry=None, sel=None):

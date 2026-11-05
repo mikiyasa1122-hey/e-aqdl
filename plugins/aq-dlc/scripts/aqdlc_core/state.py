@@ -790,8 +790,8 @@ def _problems(ctx, stage):
         if rv.get("design_hash") != ctx.design_hash:
             rs.append("設計")
         if rv.get("role_fp"):
-            from .agents import role_selection
-            if role_selection("reviewer", ctx)["fp"] != rv["role_fp"]:
+            from .roles import select_for
+            if select_for("reviewer", ctx.state, ctx.cfg)["fp"] != rv["role_fp"]:
                 rs.append("レビューの役割の定義（Role Profile）")
         if cc["mode"] != "off" and rv.get("cf_fp") != CF.record_fp(s):
             rs.append("反証テストの結果")
@@ -932,8 +932,8 @@ def instruction(p, ctx):
             return (head + "\n→ audit で内容を確認し、人間に状況を報告する。ask を実行してから、人間が確認したら"
                     f"「承認 {ids[0]}」の返答を得て audit --resolve {ids[0]}。取り消された承認は、人間に聞き直して取り直す。")
         if c == "memory_scope":
-            from .memory import scope_target
-            t = scope_target(ctx.state)
+            from .approval import memscope_target
+            t = memscope_target(ctx.state)
             return (head + "\n→ ask を実行してから AskUserQuestion で、この run の Memory の利用範囲を聞く。選択肢は"
                     f"「プロジェクト内だけ（推奨）」「Memory を使わない」「共通 Memory も使う（承認 {t}）」。"
                     "返答に合わせて memory-scope project|none|all を実行する（all は「承認 …」の返答が必要）。"

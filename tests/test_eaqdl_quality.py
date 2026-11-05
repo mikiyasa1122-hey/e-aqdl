@@ -527,10 +527,29 @@ class DependencyTest(unittest.TestCase):
             self.assertEqual(self.imports(m), set(), m)
         self.assertEqual(self.imports("quality"), {"fileclass", "util"})
 
+    def test_no_import_cycle_in_package(self):
+        """パッケージ全体に import の循環がない（関数内の遅延 import も数える）。"""
+        d = os.path.join(ROOT, "plugins", "aq-dlc", "scripts", "aqdlc_core")
+        mods = [f[:-3] for f in os.listdir(d) if f.endswith(".py") and f != "__init__.py"]
+        graph = {m: {x for x in self.imports(m) if x in mods} for m in mods}
+        state = {}
+
+        def visit(m, path):
+            state[m] = 1
+            for n in graph[m]:
+                if state.get(n) == 1:
+                    self.fail("import の循環: " + " → ".join(path[path.index(n):] + [n]))
+                if not state.get(n):
+                    visit(n, path + [n])
+            state[m] = 2
+        for m in sorted(mods):
+            if not state.get(m):
+                visit(m, [m])
+
     def test_modules_import_alone(self):
         import subprocess
         scripts = os.path.join(ROOT, "plugins", "aq-dlc", "scripts")
-        for m in ("quality", "gate", "verdict", "gate_service"):
+        for m in ("quality", "gate", "verdict", "gate_service", "state", "agents", "memory", "roles", "approval"):
             r = subprocess.run([sys.executable, "-c", f"import aqdlc_core.{m}"], cwd=scripts, capture_output=True,
                                text=True)
             self.assertEqual(r.returncode, 0, r.stderr)

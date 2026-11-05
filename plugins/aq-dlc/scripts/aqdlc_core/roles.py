@@ -271,6 +271,20 @@ def select(role, state, cfg, prompt="", extra_stage=()):
             "_bodies": _merge({p["id"]: p["body"] for p in stage}, {c["p"]["id"]: c["p"]["body"] for c in domain})}
 
 
+def select_for(role, state, cfg, kind=None, prompt=""):
+    """この担当に今回適用する Role Profile（決定論的）。kind は pending_fix の種類。
+
+    agents.role_selection から移した（state もレビューの鮮度の判定で使うため。state → agents の循環をなくす）。
+    """
+    extra = []
+    mode = (cfg.get("counterfactual") or {}).get("mode", "off")
+    if role == "reviewer" and mode in ("advisory", "enforce"):
+        extra.append("adversarial-tester")
+    if role == "implementer" and kind and kind[0] == "counterfactual":
+        extra.append("adversarial-tester")
+    return select(role, state, cfg, prompt=prompt, extra_stage=extra)
+
+
 def _merge(a, b):
     out = dict(a)
     out.update(b)

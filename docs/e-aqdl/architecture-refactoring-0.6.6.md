@@ -22,7 +22,7 @@ AST で相対 import を数えました（関数内の遅延 import も含む）
 
 | | 変更前（#10 の元のコード） | 変更後 |
 |---|---|---|
-| 相互 import | `gate ↔ quality`、`agents ↔ state`、`memory ↔ state` | `agents ↔ state`、`memory ↔ state`（どちらも以前からある） |
+| import の循環 | `gate ↔ quality`、`agents → memory → state → agents`（強連結成分 agents・memory・state） | なし（パッケージ全体） |
 | `quality` → | `gate`、`util` | `fileclass`、`util` |
 | `gate` → | `project`、`quality`、`util` | `fileclass`、`project`、`quality`、`util`、`verdict` |
 | `cli` → `quality` | あり（`cmd_gate` が差分カバレッジを直接呼ぶ） | なし（`gate_service` 経由） |
@@ -54,6 +54,7 @@ flowchart TD
 | P0-2 推奨の厳密な解析 | `decision_sheet.py` に推奨の解析と返答の検査を分けた（純粋関数）。推奨は「（推奨）」「(推奨)」の印だけ。印が2つ以上の質問は登録できない（既存のデータでは「推奨なし」）。判断シートの質問と推奨を仕様の指紋に入れた | 「非推奨の案」が推奨として承認で決まることがなくなった。提示の後に推奨が変わったら、提示し直すまで承認できない。「Q1 は推奨で。承認 SPEC-…」は承認になる（実験14 で6回中3回、余分な往復を生んでいた）。推奨以外の選択肢・「ではなく」「変えたい」などを含む返答は、これまでどおり承認にしない |
 | P0-3 差分カバレッジの証拠の鮮度 | gate の前に前回のレポートを消す（`quality.invalidate_report`）。あれば、この gate のチェックが作ったもの。レポートの sha1 と gate の実行 ID を `evidence` に残す。消せない・ない・壊れている・未計測のファイルがある、はすべて不合格 | 「開始時刻の1秒前まで許す」時刻の比較をやめた。gate の直前に置かれたレポートは使われない |
 | P1-1 循環依存 | `TEST_FILE`・`CODE_EXT` を `fileclass.py` に移した（`gate.py` にあった定義をそのまま。`gate.TEST_FILE` の名前も残す） | なし |
+| 以前からの循環（追加の対応） | `state` が使っていた2つの関数を、規則の持ち主に移した。Role Profile の選び方（`agents.role_selection`）は `roles.select_for` に、共通 Memory の承認の対象 ID（`memory.scope_target`）は `approval.memscope_target` に移した。元の名前は薄い入口として残す | なし（`role_selection`・`scope_target` はこれまでどおり呼べる） |
 | P1-2 結果の契約 | `verdict.py` に記録を作る関数（`from_run`・`no_targets`・`via_checks`・`diff_coverage` など）と判定（`status_of`・`check_ok`・`failures`・`overall`）を置いた。旧版の記録（status なし）は `status_of` が読み替える | なし（旧版の state.json はそのまま読める） |
 | P1-3 cli・state の責務 | `cmd_gate` の実行手順を `gate_service.run` に移した。`cmd_gate` は前提条件・ロック・保存・表示だけ。担当への文章（`quality_summary_lines`）は `quality` から `agents` に移した | なし（表示の文言はこれまでどおり） |
 | AC-06 共通の結果からの引き継ぎ | `state` の問題の表示、`agents` の修正依頼、状態の検証は、すべて `verdict.failures()`・`check_ok()` を使う。品質の検査は `verdict.QUALITY_KEYS` で共通に扱う | なし |
@@ -101,7 +102,7 @@ flowchart TD
   - 必須のテストの正常実行、対象ありの Lint の不合格、タイムアウト・コマンドなし
   - 直前のレポート・壊れたレポート・証拠の sha1 と実行 ID
   - 合否の規則の単体テスト、旧版の記録の読み替え、status と pass の食い違い
-  - 循環がないこと・規則のモジュールが葉であること・各モジュールの単独 import
+  - パッケージ全体に import の循環がないこと（修正前のコードでは state → memory → state で失敗することを確認）・規則のモジュールが葉であること・各モジュールの単独 import
 
 制約:
 - Windows の CRLF は、#10 の既存のテスト（`core.autocrlf=true` の作業ツリー）と CI の Windows ジョブで確かめる。
@@ -110,8 +111,7 @@ flowchart TD
 ## 6. 残る課題
 
 **必須ではないが、早めに対応したほうがよいもの**
-- `agents ↔ state`・`memory ↔ state` の相互 import（以前からある。関数内の遅延 import）。
-  - 解消するには `role_selection`・`scope_target` などの置き場所を変える必要があり、影響が広い。今回は行っていない。
+- （解消済み）以前からあった `agents`・`memory`・`state` の import の循環は、追加の対応でなくした（上の表）。パッケージ全体に循環がないことをテストで確かめている。
 - 判断シートの返答の検査は、言葉による規則（「ではなく」「変えたい」など）で、安全側（承認しない側）に倒している。
   - 想定外の言い方では承認されず、往復が1回増えることがある。誤って承認する方向の誤りは、推奨以外の選択肢の文字列と否定の言葉で防いでいる。
 - 「仕様書の本文が推奨を前提に書かれているか」は機械では確かめていない。
