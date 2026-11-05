@@ -46,6 +46,9 @@ def status_of(r):
         return FAILED
     st = r.get("status")
     if st in STATUSES:
+        # status と pass が食い違う記録（手での書き換えなど）は、合格として扱わない（安全側）
+        if (st == PASSED) != (r.get("pass") is True):
+            return FAILED
         return st
     if r.get("no_targets"):
         return NOT_APPLICABLE
@@ -60,6 +63,12 @@ def status_of(r):
     if r.get("error"):
         return ERROR
     return FAILED
+
+
+def inconsistent(r):
+    """status と pass が食い違っているか（状態の検証で使う）。"""
+    st = (r or {}).get("status")
+    return st in STATUSES and (st == PASSED) != ((r or {}).get("pass") is True)
 
 
 def passed(r):
@@ -163,6 +172,11 @@ def diff_coverage(measure, min_pct, report, evidence=None):
 
 
 # ------------------------------------------------------------------ 判定
+# チェック・検証・holdout 以外の品質の検査（results のキーと表示名）。新しい検査はここに足す
+# （state の問題の表示・agents の修正依頼は、この一覧を見て同じ形で扱う）
+QUALITY_KEYS = {"diff_coverage": "差分カバレッジ"}
+
+
 def checks_pass(check_results, has_checks):
     return bool(has_checks) and all(check_ok(r) for r in check_results.values())
 
@@ -174,12 +188,13 @@ def failures(results):
     vers = [(v, r) for v, r in (res.get("verifications") or {}).items()
             if status_of(r) not in (PASSED, PENDING, MANUAL)]
     hold = [ac for ac, r in (res.get("holdout") or {}).items() if not passed(r)]
-    dc = res.get("diff_coverage")
-    dc_bad = dc if dc and status_of(dc) not in (PASSED, NOT_APPLICABLE) else None
-    return {"checks": checks, "verifications": vers, "holdout": hold, "diff_coverage": dc_bad}
+    quality = [(key, label, res[key]) for key, label in QUALITY_KEYS.items()
+               if res.get(key) and status_of(res[key]) not in (PASSED, NOT_APPLICABLE)]
+    dc_bad = next((r for k, _l, r in quality if k == "diff_coverage"), None)
+    return {"checks": checks, "verifications": vers, "holdout": hold, "quality": quality, "diff_coverage": dc_bad}
 
 
 def overall(results, has_checks):
     """gate 全体の合否（実行中の変更は呼び出し側で別に判定する）。"""
     f = failures(results)
-    return checks_pass((results or {}).get("checks") or {}, has_checks) and not f["holdout"] and not f["diff_coverage"]
+    return checks_pass((results or {}).get("checks") or {}, has_checks) and not f["holdout"] and not f["quality"]

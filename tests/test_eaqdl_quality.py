@@ -478,6 +478,15 @@ class VerdictTest(unittest.TestCase):
         self.assertFalse(V.check_ok({"pass": True, "no_targets": True}))  # optional の印がなければ止める（安全側）
         self.assertTrue(V.check_ok({"pass": True}))
 
+    def test_inconsistent_record_is_not_passed(self):
+        """status と pass が食い違う記録（書き換え）は合格にしない。"""
+        forged = dict(V.from_run(0, "", 1, "l", "c"), **{"pass": False})
+        self.assertEqual(V.status_of(forged), "failed")
+        self.assertFalse(V.check_ok(forged))
+        self.assertTrue(V.inconsistent(forged))
+        self.assertTrue(V.inconsistent(dict(V.from_run(1, "", 1, "l", "c"), **{"pass": True})))
+        self.assertFalse(V.inconsistent(V.no_targets("lint", "c", required=False)))
+
     def test_diff_coverage_rules(self):
         m = {"total": 10, "covered": 9, "files": 1, "uncovered": {"a.py": [3]}, "unmeasured": [], "approx": []}
         self.assertEqual(V.diff_coverage(m, 80, "r")["status"], "passed")

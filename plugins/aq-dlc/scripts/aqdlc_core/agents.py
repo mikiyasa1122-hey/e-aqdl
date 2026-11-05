@@ -151,19 +151,15 @@ def _gate_items(s, li):
         if md:
             failed = [("gate中の変更", {"error": f"gate の実行中に変わった: {md.get('summary')}（テスト・ビルドが追跡対象の"
                                               "ファイルを書き換えないようにする）"})] + failed
-        hfail, dc = fl["holdout"], fl["diff_coverage"]
-        if failed or vfail or hfail or dc:
+        hfail, qfail = fl["holdout"], fl["quality"]
+        if failed or vfail or hfail or qfail:
             kind = ("gate", g["stamp"])
             items = [{"label": n, "text": V.reason_of(r)} for n, r in failed + vfail]
             # 隠しテストは、どの受け入れ条件かだけを返す（テストの中身・出力は見せない）
             items += [{"label": f"隠しテスト {ac}", "text": f"受け入れ条件 {ac} の隠し受け入れテストが不合格。中身は見せない。"
                        f"仕様の {ac} と設計書の契約（名前・入出力・エラー）どおりに動くかを見直す"} for ac in hfail]
-            if dc:
-                from . import quality as Q
-                unc = "; ".join(f"{f}: {Q.ranges(ls)}" for f, ls in list((dc.get("uncovered") or {}).items())[:6])
-                items.append({"label": "差分カバレッジ", "text": f"{V.reason_of(dc)}。"
-                              + (f"テストで実行されていない変更行: {unc}。" if unc else "")
-                              + "変えた行を確かめるテストを足す（基準・対象外の設定を変えて通さない）"})
+            for key, label, r in qfail:
+                items.append({"label": label, "text": f"{V.reason_of(r)}。" + _quality_fix_hint(key, r)})
     return kind, items
 
 
@@ -437,6 +433,16 @@ def _cf_lines(ctx):
         lines.append("→ survived の各 ID について、テストの不足か等価な変異かを「### 指摘」か「### 確認したこと」に書く"
                      "（ID を必ず書く）。重要な要求のテスト不足は重大な指摘にする。")
     return lines
+
+
+def _quality_fix_hint(key, r):
+    """品質の検査ごとの、修正の手がかり（なくてもよい）。"""
+    if key == "diff_coverage":
+        from . import quality as Q
+        unc = "; ".join(f"{f}: {Q.ranges(ls)}" for f, ls in list((r.get("uncovered") or {}).items())[:6])
+        return ((f"テストで実行されていない変更行: {unc}。" if unc else "")
+                + "変えた行を確かめるテストを足す（基準・対象外の設定を変えて通さない）")
+    return "基準・設定を変えて通さない"
 
 
 def quality_summary_lines(g):

@@ -207,6 +207,10 @@ def validate_state(state):
         if g.get("checks_pass") and (not res.get("checks") or
                                      not all(V.check_ok(r) for r in (res.get("checks") or {}).values())):
             errs.append("gate が合格になっているが、不合格・未実行のチェックがある")
+        bad = [k for part in ("checks", "verifications", "holdout") for k, r in (res.get(part) or {}).items()
+               if V.inconsistent(r)]
+        if bad:
+            errs.append(f"gate の結果の記録が食い違っている（status と pass）: {', '.join(bad[:5])}")
         if g.get("checks_pass") and g.get("modified_during_gate"):
             errs.append("gate の実行中に変更があったのに合格になっている")
         if g.get("seq", 0) > seq:
@@ -730,12 +734,12 @@ def _problems(ctx, stage):
             continue
         if not V.passed(r):
             vfail.append(v["id"])
-    hfail, dc = fl["holdout"], fl["diff_coverage"]
-    if failed or vfail or hfail or dc:
+    hfail, qfail = fl["holdout"], fl["quality"]
+    if failed or vfail or hfail or qfail:
         what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
                         ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
                         ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []) +
-                        ([f"差分カバレッジ（{V.reason_of(dc)}）"] if dc else []))
+                        [f"{label}（{V.reason_of(r)}）" for _k, label, r in qfail])
         route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
         out.append(P("gate_fail", f"gate が不合格: {what}", route))
         return out
