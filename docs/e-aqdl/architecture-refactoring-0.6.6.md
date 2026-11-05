@@ -87,7 +87,7 @@ flowchart TD
 | #9 の修正後（e66d6a4）: `python3 -m unittest discover -s tests -q`（Linux、Python 3.13） | 208 件合格 |
 | #9 の修正後: GitHub Actions（Ubuntu・Windows・macOS × Python 3.8・3.12 ほか、10 ジョブ） | 10 件すべて合格 |
 | #10 の修正後: `python3 -m unittest discover -s tests -q`（Linux、Python 3.13） | 235 件合格（修正の途中の1回で、gate の合格の偽装の検出のテストが1件失敗。原因を直して再実行） |
-| #10 の修正後: GitHub Actions | CI_RESULT_10 |
+| #10 の修正後: GitHub Actions | この PR のチェックを参照（報告を書いた時点では未実行。結果は PR の本文に書く） |
 
 追加したテストは次のとおり。
 - `test_eaqdl_decision_sheet.py`（11 件）
