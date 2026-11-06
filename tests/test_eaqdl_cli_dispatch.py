@@ -47,16 +47,16 @@ class DispatchTest(unittest.TestCase):
         """移した処理は cli を読み込まずに使える（逆向きの依存がない）。"""
         code = ("import sys; import aqdlc_core.hook_handlers, aqdlc_core.commands.gate, aqdlc_core.commands.spec, "
                 "aqdlc_core.commands.metrics; print('aqdlc_core.cli' in sys.modules)")
-        r = subprocess.run([sys.executable, "-c", code], cwd=SCRIPTS, capture_output=True, text=True)
+        r = subprocess.run([sys.executable, "-c", code], cwd=SCRIPTS, capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout.strip(), "False")
 
     def test_unknown_command_and_hook(self):
-        r = subprocess.run([sys.executable, ENGINE, "no-such-command"], capture_output=True, text=True)
+        r = subprocess.run([sys.executable, ENGINE, "no-such-command"], capture_output=True, text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 2)  # 従来どおり: 使い方を出して 2
         self.assertIn("E-AQDL エンジン", r.stdout)
         r = subprocess.run([sys.executable, ENGINE, "hook", "no-such-hook"], input="{}", capture_output=True,
-                           text=True)
+                           text=True, encoding="utf-8")
         self.assertEqual(r.returncode, 0)  # 知らない hook は何もしない（Claude Code を止めない）
 
 
