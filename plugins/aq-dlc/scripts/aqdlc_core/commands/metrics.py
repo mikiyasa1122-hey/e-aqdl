@@ -41,7 +41,9 @@ def _add_tokens(acc, t):
 
 
 def _engine_version():
-    here = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    # このファイルは aqdlc_core/commands/ にある。プラグインのフォルダは aqdlc_core の2つ上（scripts の上）
+    pkg = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    here = os.path.dirname(os.path.dirname(pkg))
     return (load_json(os.path.join(here, ".claude-plugin", "plugin.json"), {}) or {}).get("version")
 
 
