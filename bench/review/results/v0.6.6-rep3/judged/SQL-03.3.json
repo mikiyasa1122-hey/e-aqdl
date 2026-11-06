@@ -1,0 +1,48 @@
+{
+ "case": "SQL-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0700717,
+ "judge_raw": "各指摘を一つずつコードと照らして分類した。\n\n- **重大1**: `list_notes` の `SORT_COLUMNS.get(sort, sort)` で、許可しない sort をそのまま ORDER BY に入れている。これは埋め込んだ欠陥と同じ箇所で、原因も影響(任意の式が通る)も一致する。\n- **重大2**: `TAG_RE` に `$` と `.match` を使っているため、末尾が改行のタグが通る。仕様に反する実在のバグで、埋め込んだ欠陥ではない。\n- **重大3**: テストの不足だけを指摘している。\n- **重大4**: 並行実行のテストがないという指摘で、テストの不足にあたる。\n- **重大5**: 実装の指摘の形だが、本人が「重大とは断定しない」と述べ、実害も小さいとしている。version が古い削除済みメモで Conflict になる点は、仕様が決めていない挙動に当たる。実在する欠陥とは言い切れないため、判断を保留して ambiguous にした。\n- **軽微1**: 先頭ゼロのリンクが通る点は、仕様の「10進の数字だけ」の範囲内で、欠陥とは言いにくい。ただ、同じメモを指す別表記のリンクが複数できるのは事実なので、堅牢性の提案として style にした。\n- **軽微2**: 仕様の対象外である、呼び出し側を信用する前提への指摘で、欠陥ではない。本人も許容範囲と認めている。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の SORT_COLUMNS.get(sort, sort) で未検証の sort を ORDER BY に入れる点を、原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match により末尾改行のタグが通る実在のバグで、埋め込んだ欠陥とは別。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"並行実行のテストがないという指摘で、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大5\", \"class\": \"ambiguous\", \"reason\": \"version が古い削除済みメモで NotFound か Conflict かが仕様に決まっていない点で、欠陥と断定できず、本人も断定していない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロのリンク表記を拒否する堅牢性の提案で、仕様違反とは言えない。\"},\n{\"label\": \"軽微2\", \"class\": \"false_positive\", \"reason\": \"呼び出し側の dict を信用するのは仕様の対象外で、欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ SQL 差し込みの欠陥を、箇所・原因・影響とも正しく指摘した。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の SORT_COLUMNS.get(sort, sort) で未検証の sort を ORDER BY に入れる点を、原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match により末尾改行のタグが通る実在のバグで、埋め込んだ欠陥とは別。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "並行実行のテストがないという指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大5",
+    "class": "ambiguous",
+    "reason": "version が古い削除済みメモで NotFound か Conflict かが仕様に決まっていない点で、欠陥と断定できず、本人も断定していない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロのリンク表記を拒否する堅牢性の提案で、仕様違反とは言えない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "false_positive",
+    "reason": "呼び出し側の dict を信用するのは仕様の対象外で、欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ SQL 差し込みの欠陥を、箇所・原因・影響とも正しく指摘した。"
+ }
+}

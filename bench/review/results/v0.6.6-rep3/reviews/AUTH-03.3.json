@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-03",
+ "rep": 3,
+ "sec": 30.0,
+ "exit": 0,
+ "cost_usd": 0.09436050000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12332,
+  "cache_read_input_tokens": 110865,
+  "output_tokens": 3393,
+  "output_tokens_details": {
+   "thinking_tokens": 595
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12332,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2298,
+    "cache_read_input_tokens": 34050,
+    "cache_creation_input_tokens": 2380,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2380
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 73cf7484\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1 / 内容: 認可の欠陥。`_can_modify` が「公開メモなら誰でも可」になっている。同じ組織の一般メンバー(作成者でも管理者でもない人)が、他人の公開メモを更新・削除できる。仕様は作成者と同じ組織の管理者だけで、それ以外は Forbidden。 / 根拠: notes/service.py:75-77 の `or not row[\"private\"]`。再現として、alice が作成したメモを bob(member、同じ組織)が `update_note` で version 2 に更新でき、`delete_note` も成功した(`python3` で実行して確認)。 / 提案: `_can_modify` を `row[\"owner_id\"] == user[\"id\"] or (user[\"role\"] == \"admin\" and row[\"org_id\"] == user[\"org_id\"])` にする。一般メンバーの更新・削除が Forbidden になるテストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, R1〜R10 / 内容: 検証が空洞に近い。テストは正常系中心で12件しかない。次の項目は未検証。\n  - 非公開メモの NotFound、他の組織のメモ。\n  - 閲覧数の同時加算。\n  - 更新の Conflict(古い version、競合)。\n  - 更新・削除の Forbidden。\n  - 管理者による更新・削除と、非公開メモ。\n  - 作成や移管の途中失敗のロールバック(`hooks.before_write` が使われていない)。\n  - 入力の境界値(題名100/101文字、タグ5/6個、タグの書式、tags に文字列を渡す)。\n  - 一覧の範囲外と sort。\n  - 検索の `%` `_` と SQL 風の入力、タグの OR。\n  - 他人の非公開メモが一覧・検索に出ないこと。\n  - 監査ログの api_key のマスク(8文字未満・ちょうど8文字、AC6)。現在の `test_export_audit` はマスクを確認していない。\n  - レート制限の枠の境界(ちょうど window 秒)とスレッド同時実行。\n  - 共有リンクの期限ちょうど、形の崩れ、署名の改ざん。\n  - ログへの機密情報の出力(AC9)。\n  - 例外の後に接続を使い続けられること(AC10)。\n  \n  このため、重大1の認可の欠陥もテストをすり抜けている。 / 根拠: tests/test_notes.py 全体(90行)。 / 提案: 上の項目をすべて決定論的に追加する。同時実行は `RateLimiter.hook` や `hooks.before_write` と、別々の接続・スレッドで再現する。\n- [重大3] 区分: 実装 / 対象: R4, K3 / 内容: 更新の存在確認・権限確認がトランザクションの外にある(競合は version 条件で防がれており、これ自体は問題ない)。ただし、更新はメモの非公開フラグや所有者の移管(R5)と競合しうる。移管で owner_id が変わった後、古い権限判定のまま更新が通る余地がある。version は移管で増えるため、多くの場合 Conflict になるが、呼び出し側が最新 version を渡せば通る。 / 根拠: notes/service.py:141-146 と 160-163。 / 提案: 権限確認を `BEGIN IMMEDIATE` の中で再読込して行う。削除も同様にする。\n\n  補足: 重大3は重大1・2ほど確実ではない(実害の再現は未確認)。ただし K3/K1 に関わる設計上の隙なので、修正時に併せて直すこと。\n- [軽微1] 区分: 実装 / 対象: R3 / 内容: `search_notes` の tags 検証が `_validate` と重複している。共通化すると保守しやすい。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V は正常系1件と空題名1件だけ。上限・下限、タグ規則、ロールバック(hooks)がなく不十分。\n- AC2: 閲覧の正常系のみ。NotFound の3パターン、閲覧数の加算と同時実行がなく不十分。\n- AC3: 一覧の1ページ目と検索1件のみ。範囲外、`%` `_`、SQL インジェクション、タグ OR、他人の非公開メモの除外がなく不十分。\n- AC4: 作成者の更新と削除のみ。Conflict、Forbidden、管理者、非公開メモがなく不十分。そのため認可の欠陥(重大1)を見逃した。\n- AC5: 件数が返ることだけ確認している。所有者が実際に移ったか、他の組織の拒否、途中失敗のロールバックがなく不十分。\n- AC6: マスクを検証していない(action と actor だけ)。不十分。\n- AC7: 上限超過と枠のリセット(61秒)はあるが、ちょうど60秒の境界とスレッド同時実行がなく不十分。\n- AC8: 往復と改ざん1件のみ。期限ちょうど、期限切れ、形の崩れがなく不十分。\n- AC9: テストなし。\n- AC10: テストなし。\n- エンジンが検出したテストの兆候: なし。skip や `.only` もなし。\n\n### E2E の要否\n- 不要(HTTP や UI のないライブラリ)。ただし sqlite の別々の接続とスレッドによる同時実行テストは必要。\n\n### 不足しているリスク\n- K1: 重大1のとおり、同じ組織の一般メンバーが他人の公開メモを変更できる。\n- K3: 閲覧数・更新・レート制限の同時実行が未検証。\n- K4: 作成・更新・削除・移管の途中失敗が未検証。\n- K5/K7: マスクが未検証。\n- K8: リンクの境界が未検証。\n- K2: SQL インジェクションが未検証。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` → 12件OK。ただし内容が薄いため、この結果はバグがないことの証明にならない。\n- 一時 DB で、同じ組織の一般メンバーが他人の公開メモを更新して version 2 になり、削除も成功することを再現した(重大1)。\n- notes/ の全ソースを精読した。`git status` では未コミットで、履歴比較は対象外。",
+ "files_changed": [],
+ "valid": true
+}

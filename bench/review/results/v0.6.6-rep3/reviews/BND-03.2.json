@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 2,
+ "sec": 40.0,
+ "exit": 0,
+ "cost_usd": 0.1294084,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19312,
+  "cache_read_input_tokens": 106744,
+  "output_tokens": 4147,
+  "output_tokens_details": {
+   "thinking_tokens": 842
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19312,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2710,
+    "cache_read_input_tokens": 34482,
+    "cache_creation_input_tokens": 3936,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3936
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7 / 内容: 枠の境界が仕様と違う。仕様は「枠の開始からちょうど window 秒たったら新しい枠」。実装は `now - start > self.window` なので、ちょうど window 秒の時点ではまだ古い枠のままになり、正当なリクエストが RateLimited になる。 / 根拠: notes/ratelimit.py:21。limit=1、window=60、t=0 で hit、t=60 で hit すると、新しい枠になるはずなのに RateLimited になる。 / 提案: `>=` に直す。境界（window-ε は拒否、ちょうど window は許可）のテストを足す。\n- [重大2] 区分: テスト / 対象: AC7, K3, V7, VK3 / 内容: 並行の検証がない。設計は `RateLimiter.hook` と `service.hooks.before_write` を差し込み口にするとしている。しかしテストでは `hook` も `before_write` も使っていない。複数スレッドから同時に呼ぶテストも、閲覧数の数え漏れのテストもない。RateLimiter のテストは t=61 の一例だけで、境界を確かめないため重大1も見逃している。 / 根拠: tests/test_notes.py 全体（12件）。「hook」「Thread」の使用がない。 / 提案: 複数スレッドで N 回 hit して成功が limit 回以下になることを確かめる。ファイルDBの別接続で get_note を並行に呼び、views が正確に増えることを確かめる。Lock を外すと失敗する形にする。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC10, K1, K2, K4, K6, V1〜V5, V10 / 内容: 異常系・認可・失敗時の巻き戻しをほとんど検証していない。次のものがない。(a) 他の組織や他人の非公開メモが NotFound になること。(b) Forbidden（member による他人メモの更新・削除、組織またぎの移管）。(c) Conflict（古い version、間に入った更新）。(d) 途中の失敗で何も残らないこと（`hooks.before_write` で例外を起こす）。(e) 例外の後も接続を使えること。(f) LIKE の `%` `_` とインジェクション文字列。(g) 各入力検証の境界（タイトル100文字、空白のみ、タグ6個、不正タグ、page/per_page/sort の範囲外）。(h) 移管の全部移すか何も移さないか。 / 根拠: tests/test_notes.py。ValidationError は空タイトルの1件だけ、Forbidden は member による移管の1件だけ。 / 提案: 上記を網羅するテストを足す。認可の条件を外すと失敗する形にする。\n- [重大4] 区分: テスト / 対象: AC6, AC8, AC9, K5, K7, K8, V6, V8, V9 / 内容: api_key の伏せ字を一切確認していない。test_export_audit は action と actor しか見ていない。共有リンクは、期限ちょうど・期限切れ・形の崩れ・署名違いのテストがない。tampered は note_id を書き換える1例だけ。ログや例外に本文・署名・api_key が出ないことのテスト（AC9）もない。 / 根拠: tests/test_notes.py:43-47、80-89。 / 提案: 8文字未満・8文字以上の鍵の伏せ字、期限の境界（now==expires で Forbidden）、形の崩れ（改行を含む、桁数違い）、ログの内容確認を足す。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 内容: delete_note と update_note の認可判定が、トランザクションの外で読んだ行に基づいている。間に移管で owner が変わると、旧 owner の削除が通る。update は version の増加で Conflict になるが、delete は version を見ない。 / 根拠: notes/service.py:158-166。 / 提案: トランザクション内で再読込して再判定する。\n- [軽微2] 区分: 実装 / 対象: R8 / 内容: `007.…` のような先頭ゼロの note_id でも、int 化後の署名と一致すれば検証が通る。リンクの形が正規ではなくなる。 / 根拠: notes/share.py:11, 33-35。 / 提案: 先頭ゼロを拒否するか、署名対象を元の文字列にする。\n- [軽微3] 区分: 実装 / 対象: R3 / 内容: 検索の tags 検査が `_validate` と重複している。動作に影響はない。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空タイトル1件だけ。境界・タグ・トランザクションの巻き戻しがなく不十分。\n- AC2: V2 は閲覧の正常系だけ。閲覧数の増加も、見えない場合の NotFound も、並行の数え漏れも確かめておらず不十分。\n- AC3: V3 は一覧の1ページ目と検索の正常系だけ。範囲外、`%` `_`、タグの OR、他人の非公開メモの除外、インジェクションがなく不十分。\n- AC4: V4 は作成者による更新・削除の正常系だけ。Conflict、Forbidden、管理者、非公開メモ、削除の失敗が全部ない。不十分。\n- AC5: V5 は件数だけで、移管後の所有者も組織またぎの拒否も途中の失敗も確かめていない。不十分。\n- AC6: V6 は伏せ字を確認しておらず、検証が空洞になっている。\n- AC7: V7 は1例だけ。境界とスレッドの並行がなく、実装にも境界のバグがある（重大1）。不十分。\n- AC8: V8 は正常系と改ざん1例だけ。期限の境界・期限切れ・形の崩れがなく不十分。\n- AC9: V9 の専用テストがない。\n- AC10: V10 の専用テストがない。\n- エンジンが検出したテストの兆候: なし。skip や弱体化は見つからなかった。ただし history を見ると、検証は実装担当が全部 `unit` に一括で紐づけている。実質はこの12件だけで、リスクの網羅にはなっていない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、単体テストと並行テストで足りる。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモのテストがない。\n- K2: インジェクションと LIKE エスケープのテストがない。\n- K3: 並行の閲覧・更新・RateLimiter のテストがない。\n- K4: 途中の失敗で何も残らないことのテストがない。\n- K5: ログに機密が出ないことのテストがない。\n- K6: 移管の組織またぎ・一部だけ移るケースのテストがない。\n- K7: 伏せ字のテストがない。\n- K8: 期限切れ・形の崩れのテストがない。\n\n### 確認したこと\n- 仕様、設計、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った（ただし上記のとおり、境界と異常系を確かめていない）。\n- `aqdlc history --since 0` を確認した。検証条件が弱められた形跡はなく、bind は新規のものだけだった。\n- RateLimiter の境界バグはコードの読解で確認した（実行はしていない）。",
+ "files_changed": [],
+ "valid": true
+}

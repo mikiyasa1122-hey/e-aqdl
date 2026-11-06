@@ -1,0 +1,49 @@
+{
+ "case": "SEC-03",
+ "rep": 3,
+ "sec": 35.9,
+ "exit": 0,
+ "cost_usd": 0.1164962,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15550,
+  "cache_read_input_tokens": 115102,
+  "output_tokens": 4277,
+  "output_tokens_details": {
+   "thinking_tokens": 729
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15550,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2882,
+    "cache_read_input_tokens": 36171,
+    "cache_creation_input_tokens": 3485,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3485
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 内容: `make_link` が共有リンクの署名（token）をログに出している。R9「共有リンクの署名をログに出さない」に違反している。 / 根拠: notes/share.py:20 `log.info(\"share link created note=%s expires=%s token=%s\", ...)` / 提案: token をログから外し、note_id と期限だけにする。ログを捕まえて署名が含まれないことを確かめるテストも足す。\n- [重大2] 区分: テスト / 対象: AC9, R9, K5 / 内容: V9・VK5 に対応するテストがない。ログや例外メッセージに本文・署名・api_key が出ないことを確かめるテストが1件もなく、重大1の違反を検出できていない。 / 根拠: tests/test_notes.py に `assertLogs` などの記述がない。 / 提案: `assertLogs` で、作成・閲覧・共有リンク生成・例外のメッセージに本文・署名・api_key が含まれないことを確かめる。\n- [重大3] 区分: テスト / 対象: AC1–AC5, K1–K4, K6, VK2 / 内容: 異常系・境界値・セキュリティのテストが無い。テストは正常系中心の12件だけである。主な不足は次のとおり。\n  - 題名・本文・タグの境界値と tags の型\n  - 他の組織・他人の非公開メモに対する NotFound\n  - Forbidden/NotFound の使い分け\n  - Conflict（古い version と、`hooks.before_write` による割り込み）\n  - 閲覧数の同時加算\n  - `%` と `_` の検索、タグ OR、SQL インジェクション文字列\n  - page/per_page/sort の範囲外\n  - 作成・削除・移管の途中失敗でのロールバック\n  - 別組織への移管の拒否\n  - api_key の伏せ字（8文字未満・8文字以上）\n  - 例外後の接続再利用（AC10）\n  / 根拠: tests/test_notes.py 全体（90行）。`hooks.before_write` を使うテストが無い。 / 提案: 各 AC・K に対応するテストを追加する。トレース上の V/VK が「合格」でも、実質は空洞である。\n- [重大4] 区分: テスト / 対象: AC7, AC8, K3, K8 / 内容: RateLimiter と共有リンクの境界・同時のテストが無い。\n  - RateLimiter: 枠のちょうど window 秒後に新しい枠になる境界（`now - start >= window`）の確認、複数スレッドから同時に呼ぶテスト（`RateLimiter.hook` を使う）が無い。\n  - 共有リンク: 期限ちょうど（now == expires）で無効になること、期限切れ、形の崩れ（改行・桁違い・大文字16進・署名の長さ違い）のテストが無い。\n  - 改ざんテストは note_id の書き換え1通りだけ。\n  / 根拠: tests/test_notes.py:62-83 / 提案: 境界値と同時実行のテストを追加する。\n- [重大5] 区分: テスト / 対象: AC6, K7, R6 / 内容: `export_audit` のテストは action と actor の確認だけで、`actor_key` の伏せ字を一切確かめていない。api_key 漏えい（K7）の検証が空洞である。 / 根拠: tests/test_notes.py:50-54 / 提案: 8文字以上の鍵は末尾4文字だけ残ること、8文字未満（7文字・0文字など）は全部伏せられること、生の api_key が出力に含まれないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 内容: `update_note` と `delete_note` は、トランザクションの外で取った行を基に権限（`_visible`/`_can_modify`）を判定している。更新の WHERE は version だけなので、判定後に所有者が移管されても、version が一致すれば旧所有者の権限で書き込める。`delete_note` は version 条件が無く、判定後に他者が削除すると、何も消さないまま監査ログだけが残る。 / 根拠: notes/service.py:139-146, 160-168 / 提案: トランザクション内で再取得して判定する。または DELETE の rowcount を確かめる。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: `update_note` で version の型を検査していない。 / 根拠: notes/service.py:131 / 提案: int 以外は ValidationError にする。\n- [軽微3] 区分: 設計 / 対象: 設計書 / 内容: 設計書の「要求との対応」が粗い。トレース上の実装ファイルが `notes/__init__.py`（空）になっており、実際の対応先（service.py など）と合っていない。 / 提案: 実装との対応（`bind`）を実ファイルに直す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否だけで、不十分。長さ・タグ規則・tags の型と、ロールバック（K4）を確かめていない。実装自体は規則どおり。\n- AC2: V2 は閲覧数も組織・非公開の NotFound も確かめておらず、不十分（閲覧数の同時加算も無い）。実装は妥当に見える。\n- AC3: V3 は一覧1ページと単純検索だけで、不十分。範囲外入力、`%`/`_`、タグ OR、インジェクション（VK2）が無い。実装は ESCAPE とプレースホルダーを使っている。\n- AC4: V4 は所有者の更新・削除の正常系だけで、不十分。Conflict、Forbidden、管理者の扱い、タグ検証、削除失敗の伝播が無い。\n- AC5: V5 は件数が2件であることと管理者以外の拒否だけで、不十分。別組織の拒否、途中失敗で元のまま、移管後の所有者の確認が無い。\n- AC6: V6 は伏せ字を確かめていないため、不十分（重大5）。\n- AC7: V7 は単純な超過とリセットだけで、不十分。ちょうど window 秒の境界と、同時の呼び出しが無い。\n- AC8: V8 は往復と改ざん1通りだけで、不十分。期限の境界と形の崩れが無い。\n- AC9: 実装が違反している（重大1）。テストも無い（重大2）。\n- AC10: V10 に対応するテストが無く、検証されていない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは無い）。ただし弱体化ではなく、テストが元から薄い。`history` で検証条件の変更・弱体化は見つからなかった（bind のみ）。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、unittest で十分に確かめられる。ただし上記の異常系・並行のテストは必須である。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストが無い。\n- K2: SQL インジェクションを確かめるテストが無い。\n- K3: 更新・閲覧・回数制限の同時実行のテストが無い。\n- K4: ロールバックのテストが無い。\n- K5: ログの機密情報を確かめるテストが無い。実装は違反している。\n- K6: 別組織への移管と、途中失敗時の元のままを確かめるテストが無い。\n- K7: 伏せ字を確かめるテストが無い。\n- K8: 期限の境界と形の崩れを確かめるテストが無い。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が通った。\n- notes/*.py の全ソースを通読した。\n- `trace` と `history --since 0` を確認した。検証条件の弱体化は見つからなかった。\n- gate は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

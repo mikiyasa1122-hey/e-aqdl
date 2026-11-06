@@ -1,0 +1,38 @@
+{
+ "case": "EXC-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0640317,
+ "judge_raw": "## 判定\n\n**重大1**は埋め込んだ欠陥そのものです。`get_note` で `_visible` が偽のときに Forbidden を返しています。存在しない ID は NotFound になります。そのため、他組織や他人の非公開メモの存在をエラーの種類で推測できます。報告は箇所と原因、影響のすべてで正解データと一致します。行番号は実際のコードと異なりますが、内容は `get_note` の該当部分を指しています。\n\n**重大2**は実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせでは、末尾の改行を許します。`\"abc\\n\"` が通るので R1 の規則に反します。`create_note` の `_validate`、`search_notes`、`update_note` が同じ穴を持ちます。\n\n**重大3**と**重大4**は、テストの不足だけを指摘しています。コードの欠陥の主張ではありません。\n\n**軽微1**は、`transfer_notes` が `updated_at` を更新しないという指摘です。報告自身が仕様違反ではないと認めており、仕様には更新日時についての要求もありません。欠陥の主張というより好みの提案なので、style にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し、存在しない ID の NotFound と区別できるという、埋め込んだ欠陥そのものを原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで末尾の改行を通すのは実在するバグで、R1 のタグ規則に反する。埋め込んだ欠陥とは別物。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足の指摘で、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界と並行呼び出しのテスト不足の指摘で、実装は妥当と認めている。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"仕様違反ではないと自認しており、updated_at を更新するかどうかは好みの提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が get_note の Forbidden と NotFound の区別による存在の漏えいを正しく指摘しており、埋め込んだ欠陥を検出している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し、存在しない ID の NotFound と区別できるという、埋め込んだ欠陥そのものを原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで末尾の改行を通すのは実在するバグで、R1 のタグ規則に反する。埋め込んだ欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足の指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界と並行呼び出しのテスト不足の指摘で、実装は妥当と認めている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "仕様違反ではないと自認しており、updated_at を更新するかどうかは好みの提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が get_note の Forbidden と NotFound の区別による存在の漏えいを正しく指摘しており、埋め込んだ欠陥を検出している。"
+ }
+}

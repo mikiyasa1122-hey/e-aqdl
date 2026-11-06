@@ -1,0 +1,38 @@
+{
+ "case": "VAL-01",
+ "rep": 1,
+ "judge_cost_usd": 0.0654897,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`_validate`(service.py:57)に `strip` の判定がなく、空白だけの題名が保存されると指摘しています。箇所・原因・影響のすべてが正解データと一致します。\n- **重大2**: 実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせで、末尾に改行が付いたタグを通してしまいます。埋め込んだ欠陥とは別物です。\n- **重大3**: 実在する別の欠陥です。`delete_note` の認可判定がトランザクションの外にあり、判定と削除の間にずれが生じます。ただし成立条件は狭く、`transfer_notes` と競合した場合に限られます。\n- **重大4**: テストの不足だけを指摘しているので、test_gap です。\n- **軽微1**: `update_note` の認可をトランザクション内に揃える提案です。version の条件があるので実害はなく、保守性・一貫性の提案として style にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"service.py:57 の _validate に strip の判定がなく空白だけの題名が通るという、埋め込んだ欠陥そのものを指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により末尾改行付きのタグが通るという、別の実在する欠陥を指摘している。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note の認可判定がトランザクション外にあり、transfer_notes と競合すると権限のない削除が通りうるという、実在する別の欠陥を指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"update_note は version の条件で守られているため、一貫性を揃える改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、埋め込んだ空白題名の欠陥を箇所・原因・影響まで一致させて指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "service.py:57 の _validate に strip の判定がなく空白だけの題名が通るという、埋め込んだ欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により末尾改行付きのタグが通るという、別の実在する欠陥を指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note の認可判定がトランザクション外にあり、transfer_notes と競合すると権限のない削除が通りうるという、実在する別の欠陥を指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "update_note は version の条件で守られているため、一貫性を揃える改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、埋め込んだ空白題名の欠陥を箇所・原因・影響まで一致させて指摘している。"
+ }
+}

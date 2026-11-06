@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 3,
+ "sec": 38.6,
+ "exit": 0,
+ "cost_usd": 0.11338680000000001,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13097,
+  "cache_read_input_tokens": 120228,
+  "output_tokens": 4896,
+  "output_tokens_details": {
+   "thinking_tokens": 983
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13097,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3360,
+    "cache_read_input_tokens": 36747,
+    "cache_creation_input_tokens": 2517,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2517
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` が1件ごとに別のトランザクションでコミットしている。途中で失敗すると、移管済みのメモだけ新しい持ち主に移り、残りは元のままになる。 / 成立条件: 移管対象が2件以上あり、2件目以降の UPDATE が失敗する場合（ロック待ちの5秒超過、ディスクエラー、プロセス中断など）。`hooks.before_write(\"transfer:<id>\")` で例外を出す方法でも再現できる。 / 影響: R5 の「全部移すか、何も移さないか（途中で失敗したら元のまま）」に違反する。一部だけ移った状態が残り、監査ログにも記録されない。 / 根拠: notes/service.py の `transfer_notes` で `for i in ids:` の中に `with transaction(conn):` がある。対象 ID の取得（SELECT）もトランザクションの外にある。呼び出し元・DB の制約・既存テストのどれもこれを防いでいない。 / 提案: `BEGIN IMMEDIATE` を1回だけ開き、その中で対象 ID の取得・全件の UPDATE・監査ログの INSERT を行う。失敗時は全体をロールバックする。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC6, AC7, AC8, AC9, AC10 / 対応区分: 証拠不足 / 内容: テストは正常系が中心で、受け入れ条件の多くを確かめていない。重大1もこのせいで見逃されている。 / 成立条件: tests/test_notes.py は12件のみ。以下の検証がない。 / 影響: 仕様の中核の規則（権限・競合・原子性・境界）を壊しても、gate は通ってしまう。 / 根拠: 欠けている検証は次のとおり。 / 提案: 下記の検証を追加する。いずれも `hooks` と `RateLimiter.hook` の差し込み口を使って決定論的に書ける（sleep は使わない）。\n  - AC1: タグ・監査ログの途中で失敗させて何も残らないこと（`hooks.before_write(\"create:tags\")` が使える）。題名・本文・タグの境界値（空白だけ、101文字、タグ6個、不正なタグ、タグに文字列そのものを渡す）。\n  - AC2: 他組織・他人の非公開・存在しないメモが同じ NotFound になること。閲覧数の加算。別スレッド・別接続で同時に閲覧しても数え漏れがないこと。\n  - AC3: ページ・件数・並び順の範囲外が ValidationError になること。`%`・`_` を普通の文字として探せること。タグの OR 絞り込み。SQL インジェクション文字列。他人の非公開メモが含まれないこと。\n  - AC4: Forbidden（他人のメモを member が更新・削除）。管理者が他人の非公開メモを扱うと NotFound。古い version と、hook で間に更新を割り込ませたときの Conflict。更新時のタグ検証。削除が失敗したら例外が伝わりロールバックされること。\n  - AC5: 他組織への移管が Forbidden になること。途中で失敗したら元のまま残ること（重大1の回帰テスト）。\n  - AC6: api_key の伏せ字（8文字未満は全部、8文字以上は末尾4文字だけ残す）。\n  - AC7: 枠の境界（ちょうど window 秒で新しい枠になる）。`hook` を使った複数スレッドの同時呼び出しで、上限を超えないこと。\n  - AC8: 期限ちょうどが Forbidden であること。形の崩れたリンク（改行付き、全角数字、署名の長さ違い、文字列以外）。期限や署名の改ざん。\n  - AC9: ログ・例外に本文・署名・api_key が出ないこと。\n  - AC10: 例外の後も、同じ接続で次の操作ができること。\n- [重大3] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、可視性・権限の判定をトランザクションの外で行っている。UPDATE の WHERE 条件にも、owner や org の確認がない。 / 成立条件: 判定の後、書き込みの前に、別の接続が `transfer_notes` でメモの持ち主を変えた場合。ただし、移管は `version` を増やすので、UPDATE は Conflict になって安全側に倒れる。このため更新は致命的ではない。 / 影響: `delete_note` には version の条件がなく、判定後に持ち主が変わっても、判定時点の権限で削除できてしまう。 / 根拠: `delete_note` は `_row` と `_can_modify` をトランザクションの前に実行している。DELETE は `WHERE id = ?` だけである。 / 提案: `BEGIN IMMEDIATE` の中で行を読み直して判定し直すか、DELETE の条件に `owner_id` と `org_id` を加えて rowcount を確認する。この指摘は、確認できた範囲では他組織への漏えいにはならず、同じ組織内の権限判定の競合に限られる。\n\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: リンク形式が先頭ゼロを許すため、`01.…` と `1.…` が同じ署名で通る（正規化の違い）。 / 提案: 先頭ゼロを拒否する（`0|[1-9][0-9]*`）か、文字列そのものを署名する。\n- [軽微2] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` で、`version` が整数かどうかを検査していない。 / 提案: 整数以外は ValidationError にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成の正常系と空題名の拒否だけ。ロールバックと境界値の検証がなく不十分。\n- AC2: 作成者本人が見られることだけ。NotFound の統一、閲覧数、同時閲覧の検証がなく不十分。実装は `UPDATE views = views + 1` を BEGIN IMMEDIATE の中で行っており、妥当に見える（未実行）。\n- AC3: 一覧の1ページ目と単純な検索1件だけ。範囲外の拒否、`%`・`_`、タグ、インジェクションの検証がなく不十分。\n- AC4: 作成者による更新・削除の正常系だけ。Conflict、Forbidden、非公開、検証、削除失敗の検証がなく不十分。\n- AC5: 正常系と、member による拒否だけ。原子性の検証がなく不十分。しかも実装が AC5 を満たしていない（重大1）。\n- AC6: 監査ログの action と actor だけで、api_key の伏せ字は未検証。不十分。\n- AC7: 上限と枠の再開を1回確認しているだけ。ちょうど window 秒の境界と、スレッドの同時呼び出しがなく不十分。\n- AC8: 往復と note_id の改ざんだけ。期限ちょうど、期限切れ、形の崩れがなく不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし（skip・.only なし）。テストの改ざん・弱体化は確認できなかった。ただしテストはもともと薄い。\n\n### E2E の要否\n- 不要。標準ライブラリだけの Python ライブラリで、UI や HTTP がない。必要なのは SQLite の実接続を使う単体・統合テストと、決定論的な並行テスト。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモが NotFound になることのテストがない。\n- K2: インジェクション入力のテストがない。\n- K3: 同時閲覧・同時更新・RateLimiter の同時呼び出しのテストがない。\n- K4: 作成・削除・移管の途中失敗のテストがない（移管は実装も未達）。\n- K5, K7: api_key の伏せ字とログの検証がない。\n- K6: 移管先が他組織の場合のテストがない。\n- K8: 期限ちょうど・形の崩れたリンクのテストがない。\n\n### 確認したこと\n- spec.md・design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が成功した。\n- 差分・履歴の確認: `git ls-files` では追跡対象が README.md のみで、実装はすべて未追跡のため、`git diff` で見る差分がなかった。`$AQ history` と `$AQ trace` は実行していない。\n- 重大1・3は、コードの経路から判断した。実際に失敗を注入した再現は行っていない。",
+ "files_changed": [],
+ "valid": true
+}

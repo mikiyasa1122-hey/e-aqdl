@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-05",
+ "rep": 1,
+ "sec": 36.6,
+ "exit": 0,
+ "cost_usd": 0.14981899999999998,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22865,
+  "cache_read_input_tokens": 118130,
+  "output_tokens": 4653,
+  "output_tokens_details": {
+   "thinking_tokens": 1007
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22865,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2758,
+    "cache_read_input_tokens": 39056,
+    "cache_creation_input_tokens": 3942,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3942
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e52d0cbc\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査用の正規表現 `TAG_RE = ^[a-z0-9-]{1,20}$` に `.match` を使っているため、末尾の改行を通してしまう。`\"abc\\n\"` が有効なタグとして保存・検索される。 / 成立条件: create_note、update_note、search_notes の tags に末尾が `\\n` の文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に違反する。改行入りのタグが DB に入る。 / 根拠: notes/service.py:14, 64, 150。`create_note(c,u,'t','b',['abc\\n'])` が成功し、`get_note` の tags が `['abc\\n']` になった（実行して確認）。share.py は同じ問題を `fullmatch` で避けているが、service.py は避けていない。 / 提案: `TAG_RE.fullmatch(t)` に変える。`\\Z` を使ってもよい。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが12件しかなく、ほぼ正常系だけである。仕様が求める検証が欠けている。欠けているのは次のものである。 (a) 閲覧数の同時加算（R2・K3）。 (b) 楽観的ロックの Conflict（古い version、読み出しと書き込みの間の割り込み）。 (c) 作成・削除・移管の途中失敗によるロールバックと、例外後に接続を使い続けられること（`hooks.before_write` を差し込み口として用意しながら、一度も使っていない）。 (d) 他の組織・他人の非公開メモが NotFound になること、一般利用者が他人のメモを更新・削除すると Forbidden になること（K1）。 (e) 移管で別の組織が混ざったときの Forbidden（K6）。 (f) 検索の `%` と `_`、SQL インジェクション文字列、タグの OR 絞り込み（K2）。 (g) api_key の伏せ字（AC6・K7）。test_export_audit は action と actor しか見ていない。 (h) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し（AC7）。 (i) 共有リンクの期限ちょうど、形の崩れ、期限切れ（AC8）。 (j) 機密情報がログに出ないこと（AC9）。入力検証の境界値（101文字の題名、タグ6個、per_page=51 など）もない。 / 成立条件: 該当する条件を外しても、現在のテストは通る。 / 影響: 重要なリスクの検証が空洞である。gate が合格でも、その条件の実装が正しいことの証拠にならない。重大1のバグも、境界テストがないために見逃された。 / 根拠: tests/test_notes.py 全体。`trace` でも各検証 V*/VK* は `unit` を指すだけで、個別のテストと対応していない。 / 提案: 上の (a)〜(j) をテストに追加する。同時実行は `hooks.before_write` と `RateLimiter.hook` で決定論的に再現し、sleep に頼らない。\n\n- [重大3] 区分: 実装 / 対象: R4, K1, K3 / 対応区分: 修正必須 / 内容: update_note と delete_note は、認可（`_visible`・`_can_modify`）を BEGIN IMMEDIATE の外側で読んだ行で判定している。トランザクションの中で再確認しない（get_note は再確認している）。 / 成立条件: 認可の判定の後、書き込みの前に、管理者が `transfer_notes` でメモの持ち主を変える。その後、元の持ち主が、update_note では以前に読んだ version で、delete_note では version に関係なく、書き込む。 / 影響: update_note は、移管で version が上がるので Conflict になり、安全である。delete_note は version を取らず、WHERE が `id` だけなので、もう権限のない元の持ち主が、移管されたメモを削除できる。 / 根拠: notes/service.py:181-191。認可の読み出しは183行目、`BEGIN IMMEDIATE` は187行目で、その間に `hooks.before_write` もない。DELETE の条件は `id = ?` のみ。 / 提案: `transaction` の中でメモを読み直して `_visible` と `_can_modify` を再判定するか、DELETE の WHERE に `owner_id` と `org_id` を入れて rowcount を確認する。移管と削除が競合する決定論的なテストも追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: update_note の `version` の型（bool や文字列）を検査していない。 / 提案: 整数かどうかを検査する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで不十分。上限・境界値・タグの規則（改行を含む）・失敗時に何も残らないことを確かめていない。実装にもタグのバグがある（重大1）。\n- AC2: 閲覧数の増加も同時閲覧も確かめておらず、不十分。他の組織・非公開メモが NotFound になることも確かめていない。\n- AC3: 一覧の1ページ目と日本語の検索1件だけで不十分。範囲外の入力、`%` と `_`、SQL インジェクション、タグの OR、他人の非公開メモの除外を確かめていない。\n- AC4: 作成者による更新と削除の正常系だけで不十分。Conflict、Forbidden、管理者の操作、非公開メモ、削除の失敗時の巻き戻しがない。\n- AC5: 件数が2であることと、管理者以外が拒否されることしか確かめていない。他の組織、途中失敗での元の状態への復帰、メモの持ち主が実際に変わったことを確かめておらず、不十分。\n- AC6: api_key の伏せ字を一切確かめておらず、空洞。\n- AC7: 上限超過と枠の更新（61秒）だけで不十分。ちょうど window 秒の境界と、複数スレッドの同時呼び出しがない。\n- AC8: 往復と改ざんの1例だけで不十分。期限ちょうど、期限切れ、形の崩れがない。\n- AC9: 検証がなく、空洞。\n- AC10: 検証がなく、空洞。\n- エンジンが検出したテストの兆候: なし。skip や弱いアサーションの改ざんも、history 上は見られなかった。ただし、そもそも検証が薄い。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite に対する単体・結合テストで足りる。ただし並行実行のテストは必要で、重大2に含めた。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8 の各リスクに、個別の検証がない（重大2）。\n- 移管と削除が競合したときの認可の再確認（重大3）。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。12件が通った。\n- `python3 -B -c` で、末尾が改行のタグ `'abc\\n'` が作成と検索で通ることを再現した。\n- `aqdlc trace` と `history --since 0` を確認した。検証条件が弱められた形跡はなかった。",
+ "files_changed": [],
+ "valid": true
+}

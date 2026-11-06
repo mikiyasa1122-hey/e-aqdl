@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-01",
+ "rep": 3,
+ "sec": 37.7,
+ "exit": 0,
+ "cost_usd": 0.1261862,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17689,
+  "cache_read_input_tokens": 121042,
+  "output_tokens": 4331,
+  "output_tokens_details": {
+   "thinking_tokens": 771
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17689,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2690,
+    "cache_read_input_tokens": 39136,
+    "cache_creation_input_tokens": 2659,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2659
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 55ea07b9\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R4, K1, AC2, AC4 / 内容: `_visible` が組織を確認していない。他の組織の公開メモを閲覧でき、本文まで返る。更新・削除では NotFound ではなく Forbidden になり、存在が分かる。仕様は、他の組織のメモはどれも NotFound で存在を明かさない、としている。 / 根拠: notes/service.py の `_visible`（row の org_id と user の org_id を比べていない）。再現手順: 組織1の利用者がメモ「secret body」を作成する。組織2の管理者が `get_note` を呼ぶと本文が返った。同じ管理者の `update_note` と `delete_note` は Forbidden になった。 / 提案: `_visible` に `row[\"org_id\"] == user[\"org_id\"]` を加える。閲覧・更新・削除それぞれに他の組織が NotFound になるテストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, V1〜V10, VK1〜VK8 / 内容: テストは12件で、ほとんどが正常系の1回確認だけ。仕様の規則と各リスクを確かめていないため、重大1の漏えいも検出できなかった。次の項目にテストがない。\n  - 入力検証の境界値（題名100/101文字、タグ5/6個、タグの重複と書式、tags に文字列を渡す、本文10000文字）\n  - 閲覧数の増加と同時閲覧\n  - 他の組織・他人の非公開メモに対する NotFound\n  - 一覧の範囲外（page、per_page、sort）\n  - `%` と `_` の検索、タグの OR 絞り込み、SQL インジェクション\n  - 楽観的ロックの Conflict（古い version、読み出しと書き込みの間の割り込み）、管理者と非作成者の Forbidden\n  - 作成・削除・移管の途中失敗でのロールバック（hooks を使っていない）\n  - 移管で別の組織に渡す場合の Forbidden\n  - api_key の伏せ方（8文字未満、8文字、`export_audit` の戻り値の `actor_key` を見る）\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドからの同時呼び出し\n  - 共有リンクの期限ちょうど、形の崩れ、改ざん\n  - ログに本文・署名・api_key が出ないこと\n  - 例外の後の接続再利用（AC10）\n  \n  `test_tampered` も note_id を書き換えるだけで、署名の改ざんや期限の改ざんは確かめていない。 / 根拠: tests/test_notes.py 全体（90行）。`trace` は全部「合格」だが、V・VK の中身は「AC を単体テストで確かめる」だけ。 / 提案: 上の項目ごとに決定論的なテストを足す。同時実行は hooks と `RateLimiter.hook` で再現し、sleep に頼らない。\n- [重大3] 区分: 実装 / 対象: R4, AC4 / 内容: `update_note` の `version` を検証していない。`None` や文字列などの不正な型は、そのまま SQL の比較に入る。比較に失敗するので、更新されるのは安全側ではある。ただし ValidationError ではなく Conflict になり、`version + 1` を返す箇所で型エラーの可能性がある。さらに重要な点として、更新時に `private` の変更手段がなく、タグ検証は `tags=None` と `[]` の区別だけに依存している。ここは仕様と矛盾しないので、重大としては version の入力型の扱いだけを挙げる。 / 根拠: notes/service.py の `update_note`。 / 提案: `version` が bool 以外の int であることを検査し、違えば ValidationError にする。テストを足す。\n- [重大4] 区分: 実装 / 対象: R4, K3 / 内容: 更新の認可と可視性の確認がトランザクションの外にあり、確認の後に所有者や組織が変わる余地がある（移管など）。version を条件にした UPDATE で更新の取り違えは防げる。ただし移管は version を上げるので、競合すれば Conflict になる。実害は小さい。同時実行のテストが無いので、安全性は未検証である。 / 根拠: notes/service.py の `update_note`（`_row` から `transaction` までの間）。 / 提案: 認可の確認をトランザクション内で再読み込みして行うか、同時の移管と更新の競合テストで Conflict になることを確かめる。\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 内容: 共有リンクが先頭ゼロ付きの note_id を受け付ける（例 `007.…` は int 化してから署名と照合する）。署名は正しい値でなければ通らないが、同じメモに対する別表記のリンクが有効になる。 / 根拠: notes/share.py の `LINK_RE` と `verify_link`。 / 提案: 正規の表記と一致するかを検査する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 / VK4 は正常系1件と空の題名だけで不十分。境界値、タグの規則、ロールバック（`create:tags` フック）を確かめていない。\n- AC2: V2 / VK1 は不十分。他の組織・非公開の NotFound も、閲覧数も確かめていない。実装にも漏えいがある（重大1）。\n- AC3: V3 / VK2 は不十分。範囲外、`%` と `_`、タグ絞り込み、インジェクションがない。\n- AC4: V4 / VK3 は不十分。Conflict、Forbidden、管理者による更新、削除の失敗がない。\n- AC5: V5 / VK6 は不十分。正常な移管の件数と非管理者の拒否だけ。他の組織、部分失敗の巻き戻しがない。\n- AC6: V6 / VK7 は不十分。`actor_key` を一切確かめていない。\n- AC7: V7 は不十分。枠の境界（ちょうど window 秒）と同時の呼び出しがない。枠が明けた後の1回しか見ていない。\n- AC8: V8 / VK8 は不十分。期限ちょうど、期限切れ、形の崩れがない。\n- AC9: V9 / VK5 は検証なし。\n- AC10: V10 は検証なし。\n- エンジンが検出したテストの兆候: なし（skip、`.only`、アサーションなしは無い）。\n\n### E2E の要否\n- 不要（ライブラリで HTTP や画面が無い）。代わりに、SQLite を使う結合テストとして、別々の接続・スレッドからの同時実行と途中失敗の再現を足すこと。\n\n### 不足しているリスク\n- K1: 実装に欠陥があり、テストも無い（重大1）。\n- K2, K3, K4, K5, K6, K7, K8: 実装は大筋で正しく見えるが、検証が不足している（重大2）。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py と tests/test_notes.py を全て読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件が OK。\n- 他の組織の管理者による閲覧・更新・削除を実際に呼んで、漏えいと Forbidden を確認した（重大1）。\n- `trace` と `history` を確認した。検証条件の弱体化は見つからなかった。\n- `gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

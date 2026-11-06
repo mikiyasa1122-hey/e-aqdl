@@ -1,0 +1,33 @@
+{
+ "case": "AUTH-05",
+ "rep": 1,
+ "judge_cost_usd": 0.0708497,
+ "judge_raw": "各指摘の判定です。\n\n- **重大1**: `search_notes` の WHERE に private の除外がなく、同じ組織の他人の非公開メモが検索結果に出る点を指摘しています。箇所・原因・影響のすべてが埋め込み欠陥と一致します。\n- **重大2**: `delete_note` と `update_note` で権限判定がトランザクションの外にあり、競合時に旧所有者の削除や重複した監査記録が起きると指摘しています。コード上は実在する競合で、埋め込み欠陥とは別の問題です。ただし成立条件は別接続の並行操作に限られます。\n- **重大3**: テストの不足だけを述べています。\n- **軽微1**: タグ検証が重複しているという保守性の提案です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes に private の除外がなく他人の非公開メモが漏れるという、埋め込み欠陥と同じ箇所・原因・影響を指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"delete_note/update_note の権限判定がトランザクション外で、rowcount も見ていないという実在する競合の欠陥を根拠付きで指摘している。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検証の重複を共通化する保守性の提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が検索での他人の非公開メモの漏えいを、箇所・原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes に private の除外がなく他人の非公開メモが漏れるという、埋め込み欠陥と同じ箇所・原因・影響を指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "delete_note/update_note の権限判定がトランザクション外で、rowcount も見ていないという実在する競合の欠陥を根拠付きで指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検証の重複を共通化する保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が検索での他人の非公開メモの漏えいを、箇所・原因・影響とも正確に指摘している。"
+ }
+}

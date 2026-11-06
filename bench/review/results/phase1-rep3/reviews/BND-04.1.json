@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 1,
+ "sec": 33.0,
+ "exit": 0,
+ "cost_usd": 0.1337471,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 20090,
+  "cache_read_input_tokens": 154071,
+  "output_tokens": 3796,
+  "output_tokens_details": {
+   "thinking_tokens": 696
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20090,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2306,
+    "cache_read_input_tokens": 40052,
+    "cache_creation_input_tokens": 171,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 171
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 期限の時刻ちょうどのリンクが有効になる。仕様は「期限の時刻ちょうど以降は無効」。 / 成立条件: `now == expires` のとき。 / 影響: 期限切れのリンクが、期限の1秒分だけ通る。 / 根拠: `notes/share.py` の `verify_link` は `int(now ...) > expires` で判定している（`>=` が正しい）。同じ関数の docstring は「期限の時刻ちょうどを含む」と書いていて、コードと食い違う。実行して確認した。`make_link('s',7,ttl_sec=60,now=1000)` を `now=1060` で検証すると 7 が返り、Forbidden にならない。 / 提案: 判定を `>=` に直す。`expires-1` は有効、`expires` は無効という境界のテストを足す。\n\n- [重大2] 区分: テスト / 対象: AC1〜AC10、K1〜K8 のほぼすべて / 対応区分: 証拠不足 / 内容: 検証が正常系の薄い確認にとどまり、仕様が求める異常系・境界値・並行・失敗時の巻き戻し・機密情報の検証がほとんどない。tests/test_notes.py は12件で、すべて通った。 / 成立条件: テストにない部分で欠陥が出ても、全件が通ったままになる。重大1がその実例。 / 影響: 次の部分は、現状の検証では欠陥を検出できない。 / 根拠: 次のとおり。\n  - AC1: 長さ・タグ・tags が文字列の場合の拒否と、`hooks.before_write` による途中失敗でロールバックされることを確かめていない。\n  - AC2: 他の組織・非公開・存在しないメモが NotFound になることと、閲覧数の増加・同時閲覧を確かめていない。\n  - AC3: ページ・並べ替えの範囲外、`%` と `_`、タグの OR、SQL インジェクションを確かめていない。\n  - AC4: Conflict、Forbidden、管理者の扱い、更新時の検証、削除の失敗を確かめていない。\n  - AC5: 組織をまたぐ移管と、途中失敗でも元のままになることを確かめていない。\n  - AC6: `test_export_audit` は `action` と `actor` だけを見ていて、api_key の伏せ字は一度も検証していない。\n  - AC7: 枠の境界（ちょうど window 秒）と、複数スレッドの同時呼び出しがない。\n  - AC8: 期限の境界・形の崩れたリンクがない。\n  - AC9: ログ・例外に本文・署名・api_key が出ないことを確かめていない。\n  - AC10: 例外の後で接続を使い続けられることを確かめていない。\n  `$AQ history` では検証条件が弱められた形跡は見つからなかった（全件が bind の追加）。 / 提案: 正しい実装は書き換えない。下記のテストを追加する。\n  - 各 AC の異常系と境界値。\n  - `hooks.before_write` と `RateLimiter.hook` を使った、決定論的な並行・途中失敗のテスト。\n  - 伏せ字の長さ（7文字・8文字・長い鍵）。\n  - 例外の後に同じ接続を再利用できること。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の認可は、トランザクションの外で読んだ行で判定している。読み出しと書き込みの間にメモの所有者が `transfer_notes` で変わっても、version が最新なら古い認可で更新が通る。version は移管で上がるため Conflict になり、実害はほとんどない。 / 提案: 認可の確認を `transaction` の中に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名だけで不十分（上記のとおり）。実装は、検証・タグ重複の除去・1つのトランザクションという点では仕様どおりに読めた。\n- AC2: 不十分（隠し方・閲覧数・並行のテストなし）。実装は `BEGIN IMMEDIATE` 内で加算していて、数え漏れは起きない設計。\n- AC3: 不十分。実装は LIKE の ESCAPE とプレースホルダーを使っていて問題は見つからなかった。\n- AC4: 不十分（Conflict・Forbidden のテストなし）。\n- AC5: 不十分（正常系と非管理者の拒否だけ）。\n- AC6: 不十分（伏せ字を検証していない）。実装は仕様どおり。\n- AC7: 不十分（枠の境界とスレッドなし）。実装は Lock を使い、`>=` で新しい枠に入る。\n- AC8: 不十分。境界のテストがなく、実装に欠陥がある（重大1）。\n- AC9: 検証なし。実装は ID だけをログに出していて、問題は見つからなかった。\n- AC10: 検証なし。`transaction()` は ROLLBACK して例外を伝える。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要（ライブラリで UI・HTTP がない）。ただし、SQLite のファイルを使い、別々の接続・スレッドで行う並行テストは必要。\n\n### 不足しているリスク\n- K3: 閲覧数・更新・RateLimiter の同時実行を確かめる検証がない。\n- K4: 途中の失敗でロールバックされることを確かめる検証がない。\n- K1・K6: 組織をまたぐ漏えいと移管を確かめる検証がない。\n- K5・K7: 機密情報と api_key の伏せ字を確かめる検証がない。\n- K8: 期限の境界・改ざん・形の崩れを確かめる検証がない。\n\n### 確認したこと\n- 仕様・設計・全ソースを読み、突き合わせた。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が通った。\n- `verify_link` の期限境界を直接実行した。`now == expires` で有効と判定された（欠陥を再現）。\n- `$AQ history --since 0` を確認した。検証条件を弱める変更はなかった。\n- gate は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

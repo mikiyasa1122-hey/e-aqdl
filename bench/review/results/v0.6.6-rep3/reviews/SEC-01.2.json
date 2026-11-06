@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 2,
+ "sec": 31.2,
+ "exit": 0,
+ "cost_usd": 0.1069716,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 6,
+  "cache_creation_input_tokens": 16661,
+  "cache_read_input_tokens": 72056,
+  "output_tokens": 3311,
+  "output_tokens_details": {
+   "thinking_tokens": 418
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16661,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2887,
+    "cache_read_input_tokens": 28016,
+    "cache_creation_input_tokens": 7751,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7751
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 内容: メモ作成時のログにメモの本文を出している。R9 は本文をログに出さないことを求めており、違反している。 / 根拠: notes/service.py:237 `log.info(\"note created id=%s owner=%s body=%r\", ..., body)` / 提案: body をログから外し、ID だけを出す（設計書の「ログには ID だけを出す」に合わせる）。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 全般, K1〜K8 / 内容: テストが 12 件（tests/test_notes.py）しかなく、ほぼ正常系だけで、仕様の主要なリスクを検証していない。設計書が用意した差し込み口の `hooks.before_write` と `RateLimiter.hook` を使うテストが 1 件もない。次のものがない。\n  - 他組織・他人の非公開メモが NotFound になること（K1）\n  - 管理者に非公開メモが見えないこと\n  - 更新の Conflict と、読み出し後に他の更新が入った場合の競合\n  - 閲覧数の同時加算\n  - 作成・削除・移管の途中失敗でのロールバック（K4）\n  - 例外後に接続が使えること（AC10）\n  - 移管の組織またぎ\n  - 入力検証の境界値（題名 100/101 文字、タグ 5/6 個、per_page 0/51）\n  - 検索の `%` `_` と SQL インジェクション（K2）\n  - 検索のタグ絞り込み（OR）\n  - 回数制限の枠の境界と同時呼び出し\n  - 共有リンクの期限ちょうど・形の崩れ\n  - api_key の伏せ字の 8 文字未満・境界\n  - ログに機密が出ないこと\n  / 根拠: `grep \"def test\"` の結果。test_limit と test_tampered も単純な確認だけ。 / 提案: 上の各項目について、認可や条件を外すと失敗するテストを追加する。同時実行は sleep ではなく hooks で決定論的に再現する。\n- [重大3] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 内容: タグの検査が `^...$` と `re.match` の組み合わせになっている。`$` は末尾の改行の直前にも一致するため、\"abc\\n\" のような規則違反のタグが通り、保存される。作成・更新・検索のすべてで起きる。共有リンクの正規表現が fullmatch を使っているのと対照的。 / 根拠: notes/service.py:158 の TAG_RE と、同:208・同:294 の `TAG_RE.match(t)` / 提案: `TAG_RE.fullmatch` を使うか、`\\Z` に変える。この入力を拒否するテストも加える。\n- [軽微1] 区分: 実装 / 対象: R1, R4 / 内容: 検証の重複と不整合がある。search_notes は `_validate` を使わずタグの検査を重複して持つ。また `_tag_list` は str を拒否するが、タグ内の `len(tags)` 検査と別の場所にある。 / 提案: タグ検査を共通関数にまとめる。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: 移管の to_user / from_user は呼び出し側の dict を信用し、DB の実在や org_id を確認しない。仕様の対象外（呼び出し側が確かめる）とも読めるが、移管先が実在しない場合は外部キー違反で例外になるだけで、メッセージが不明瞭になる。 / 提案: 任意。実在確認を加えるか、前提を設計書に明記する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected のみ。タグ・本文・題名の境界、保存時の重複除去、途中失敗でのロールバックを確かめておらず、不十分。\n- AC2: 閲覧数が増えることも、同時閲覧も、他組織・非公開・存在しないメモの NotFound も確かめておらず、不十分。\n- AC3: test_list_first_page と test_search のみ。範囲外の拒否、`%` `_`、タグの OR、SQL インジェクション、他人の非公開メモの除外が未検証で、不十分。\n- AC4: test_update_by_owner と test_delete_by_owner のみ。Conflict、Forbidden、管理者の扱い、削除失敗の伝播が未検証で、不十分。\n- AC5: test_transfer と test_transfer_requires_admin のみ。組織またぎの拒否と途中失敗時のロールバックが未検証で、不十分。\n- AC6: test_export_audit があるが、8 文字未満と境界の確認の有無が不明確。不十分と判断する。\n- AC7: test_limit のみ。枠の境界とスレッド同時呼び出しが未検証で、不十分。\n- AC8: test_roundtrip と test_tampered のみ。期限ちょうど・形の崩れ・期限切れが未検証で、不十分。\n- AC9: テストなし。実際にログに本文が出ている（重大1）。\n- AC10: テストなし。\n- エンジンが検出したテストの兆候: なし。skip や弱いアサーションの検出はなかった。ただしテストの量が根本的に足りない。\n\n### E2E の要否\n- 不要。HTTP やブラウザの層がないライブラリのため。代わりに、SQLite を使った並行実行と障害注入の結合テストが必要。\n\n### 不足しているリスク\n- K1: 認可の網羅テストがない。\n- K2: インジェクションの確認がない。実装はプレースホルダーと ESCAPE を使っており、コード上は問題なし。\n- K3: 同時実行の再現テストがない。\n- K4: ロールバックの確認がない。\n- K5: 実際にログへ本文が漏れている（重大1）。\n- K6: 移管の組織またぎ・途中失敗のテストがない。\n- K7: 8 文字未満の鍵などの境界テストがない。\n- K8: 期限ちょうど・形の崩れ・長さの不正のテストがない。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py を全行読んだ。実装は設計どおりの構造。transaction()、楽観的ロック（`WHERE version`+rowcount）、LIKE の ESCAPE、RateLimiter の lock、共有リンクの fullmatch と compare_digest はコード上は妥当。\n- `python3 -m unittest discover -s tests -t .` → 12 件すべて OK。ただし上記のとおり検証が薄い。\n- `git status` で、notes/ と tests/ が未追跡であることを確認した。\n- history と trace は実行していない。テストファイルが 90 行しかなく、弱体化の対象になる既存の検証がほぼないため。",
+ "files_changed": [],
+ "valid": true
+}

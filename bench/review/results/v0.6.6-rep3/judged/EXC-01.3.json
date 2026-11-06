@@ -1,0 +1,48 @@
+{
+ "case": "EXC-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0686457,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `get_note` が見えないメモに Forbidden を返し、存在しない id の NotFound と区別できます。埋め込んだ欠陥と箇所も原因も影響も一致するので、matches_defect です。\n- **重大2**: `re.match` と `$` の組み合わせでは、末尾に改行のあるタグ \"ab\\n\" が通ります。仕様違反の実在する欠陥ですが、埋め込んだ欠陥とは別なので real_other です。\n- **重大3**: テストの不足だけを指摘しているので test_gap です。\n- **重大4**: `update_note` は読み出しと権限判定をトランザクションの外で行っています。ただし UPDATE の `version` 条件があり、移管では version が増えます。呼び出し側の version が最新なら、読み出し後に移管が入っても旧 owner の更新が通る余地は確かにあります。そのため実在する競合の指摘として real_other とします。ただし「tags だけの更新で title と body が古い値で上書きされる」という主張は、version 条件で Conflict になるため弱いです。\n- **重大5**: メッセージに id が含まれることが漏えいだという主張です。実際の問題は Forbidden と NotFound の型の違いで、重大1と同一の原因です。重大1に含まれる重複した指摘で、独立した欠陥ではありません。ただし get_note の不一致への言及は欠陥箇所と重なります。重複なので ambiguous ではなく、重大1の言い換えとして matches_defect にする案もあります。しかし R9 の対象は本文・署名・api_key で、id は対象外のため、その部分は誤読です。判定は false_positive とします。\n- **軽微1**: 先頭 0 を許すことは仕様上許容される形で、実害もありません。保守性の提案なので style です。\n- **軽微2**: 仕様の対象外であることを自認しており、README に明記する提案なので style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し、NotFound と区別できる点が埋め込み欠陥そのもの。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と re.match により改行つきタグが通る、実在する仕様違反。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"update_note の読み出しと権限判定がトランザクション外にあり、移管後に旧 owner の更新が通る余地があるのは実在する競合。\"},\n{\"label\": \"重大5\", \"class\": \"false_positive\", \"reason\": \"メッセージに id が含まれることを R9 違反とするのは誤読で、実際の問題は重大1と同一。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭 0 を許す点は実害がなく、仕様違反でもない提案。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"対象外の前提を README に書く提案で、欠陥の主張ではない。\"}\n], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が get_note の Forbidden による存在漏えいを正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し、NotFound と区別できる点が埋め込み欠陥そのもの。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と re.match により改行つきタグが通る、実在する仕様違反。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "update_note の読み出しと権限判定がトランザクション外にあり、移管後に旧 owner の更新が通る余地があるのは実在する競合。"
+   },
+   {
+    "label": "重大5",
+    "class": "false_positive",
+    "reason": "メッセージに id が含まれることを R9 違反とするのは誤読で、実際の問題は重大1と同一。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭 0 を許す点は実害がなく、仕様違反でもない提案。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "対象外の前提を README に書く提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が get_note の Forbidden による存在漏えいを正しく指摘している。"
+ }
+}

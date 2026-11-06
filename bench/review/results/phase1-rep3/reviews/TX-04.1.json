@@ -1,0 +1,49 @@
+{
+ "case": "TX-04",
+ "rep": 1,
+ "sec": 40.0,
+ "exit": 0,
+ "cost_usd": 0.13727840000000002,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19711,
+  "cache_read_input_tokens": 113084,
+  "output_tokens": 4711,
+  "output_tokens_details": {
+   "thinking_tokens": 568
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19711,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3709,
+    "cache_read_input_tokens": 36097,
+    "cache_creation_input_tokens": 3747,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3747
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a7130b66\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R10, R1, R4, R5, AC10, K4 / 対応区分: 修正必須 / 内容: `notes/service.py` の `transaction()` は、本体で例外が起きたときに ROLLBACK しない。`except BaseException: raise` と書かれているだけである。設計書の「例外のときに ROLLBACK して例外をそのまま伝える」と R10 に反する。 / 成立条件: `transaction()` を使う書き込み操作（作成・更新・削除・移管・閲覧）の途中で例外が出る。例は、Conflict、NotFound、DB エラー、`hooks.before_write` の障害。接続は `isolation_level=None` なので、自動の巻き戻しもない。 / 影響: 次の2つが起きる。(a) 接続がトランザクション中のまま残り、次の操作が `cannot start a transaction within a transaction` で失敗する。AC10 の未達。(b) 失敗するまでに書いた行が残り、その接続で次に COMMIT したときに確定する。AC1、AC5 の「失敗したら何も残らない・元のまま」も破れる。 / 確認した保証: `db.connect` に自動の巻き戻しはない。呼び出し元にも ROLLBACK はない。 / 根拠: 実行して確認した。`hooks.before_write` が RuntimeError を出す状態で `create_note` を呼ぶと、`conn.in_transaction` が True のまま残った。続けて `create_note` を呼ぶと上記のエラーになった。その接続の notes テーブルには、失敗した作成分の行が1件残っていた。`get_note` に存在しない ID を渡して NotFound になった場合は、巻き戻しが必要な書き込みがまだないため、この確認では再現していない。 / 提案: `except BaseException:` の中で `if conn.in_transaction: conn.execute(\"ROLLBACK\")` を実行してから `raise` する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` の12件はほぼ正常系だけで、受け入れ条件とリスクを確かめていない。次の検証がない。 / 成立条件: 該当なし。必須の検証が存在しない。 / 影響: 重大1が全テスト合格のまま通ってしまっている。テストが欠陥を検出できないことの実証である。 / 根拠: テストファイルを全件読んで確認した。足りない検証は次のとおり。\n  - R1 の境界値（題名 100/101 文字、空白だけの題名、本文 10000 文字、タグ 6 個、不正なタグ）。\n  - 失敗時のロールバック（`hooks` で途中の障害を起こして何も残らないこと、その後に接続を使えること）。\n  - 他の組織・他人の非公開メモの NotFound（閲覧・一覧・検索・更新・削除）。\n  - 閲覧数の加算と並行実行。\n  - 一覧の範囲外（page 0、per_page 51、不正な sort）。\n  - 検索での `%` `_` と SQL インジェクション文字列、タグの OR 絞り込み。\n  - 更新の Conflict（古い version、`hooks` による割り込み）。\n  - Forbidden（他人のメモ、他の組織の管理者）。\n  - 移管の組織またぎの拒否と途中失敗時の巻き戻し。\n  - api_key のマスク（7 文字、8 文字、長い鍵）。\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドでの上限。\n  - 共有リンクの期限ちょうど、形の崩れ、署名の改ざん。\n  - ログ・例外メッセージに機密情報が出ないこと。\n / 提案: 上記を、`service.hooks.before_write` と `RateLimiter.hook` の差し込み口を使った決定論的なテストとして追加する。ロールバックの条件を外すと落ちることも確かめる。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、権限の判定（`_visible`・`_can_modify`）をトランザクションの外で読んだ古い行に対して行っている。`update_note` の UPDATE には `org_id`・`owner_id` の条件がない。`delete_note` は、トランザクション内で `version`・所有者・可視性を再確認しない。 / 成立条件: 判定の後、書き込みの前に `transfer_notes` や削除が入る（別の接続・別のスレッド）。 / 影響: 次の2つが起きる。(a) 移管で所有者が変わった後に、元の所有者が削除できる。(b) 古い判定のまま、別の利用者のメモが削除される。`get_note` はトランザクション内で再確認しているのに、`update_note` と `delete_note` にはそれがない。 / 確認した保証: `update_note` は `version` の条件で Conflict になる。移管は `version` を増やすので、更新側はほぼ防がれる。しかし `delete_note` には `version` の条件がなく、防がれていない。 / 根拠: `notes/service.py` の `delete_note` で、`_row` の判定から `with transaction` までの間に再読み込みがない。この競合は実際に再現しておらず、コードの経路からの判断である。 / 提案: `delete_note` で、`BEGIN IMMEDIATE` の後にメモの行を読み直し、`_visible` と `_can_modify` を再判定してから削除する。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` が NotFound/Forbidden/ValidationError を返す順序は問題ない。ただし、更新後の `version` の返り値を `version + 1` で計算している。 / 提案: UPDATE 後の行から読む形にすると保守しやすい。\n- [軽微2] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` のタグ検査は `_validate` と重複している。 / 提案: 共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけを確かめている。境界値と失敗時の巻き戻しがなく、不十分（重大1・2）。\n- AC2: 閲覧の成功だけで、NotFound の条件も閲覧数の加算も確かめていない。不十分。\n- AC3: 一覧と検索の正常系だけで、範囲外、`%` `_`、タグの OR、インジェクションを確かめていない。不十分。\n- AC4: 作成者による更新と削除だけで、Conflict、Forbidden、管理者の扱いを確かめていない。不十分。\n- AC5: 移管の成功と非管理者の拒否だけで、組織またぎと途中失敗時の巻き戻しを確かめていない。不十分。\n- AC6: 実際にマスクされる出力を確かめていない。監査ログの action と actor を見ているだけで、不十分。\n- AC7: 単一スレッドで枠が過ぎた後だけを確かめている。ちょうど window 秒の境界と同時の呼び出しがなく、不十分。\n- AC8: 往復と改ざんを確かめているが、期限ちょうど、形の崩れ、期限切れがなく、不十分。\n- AC9: 検証がない。\n- AC10: 検証がない。実際に失敗する（重大1）。\n- エンジンが検出したテストの兆候: なし。skip・`.only` などはない。\n\n### E2E の要否\n- 不要（ライブラリで HTTP・UI がない）。代わりに、別々の接続・別々のスレッドでの並行実行テストが必須。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: インジェクション文字列を使うテストがない。\n- K3: 同時の更新・閲覧・呼び出しを確かめるテストがない。\n- K4: 失敗時の巻き戻しを確かめるテストがなく、実装も欠陥あり。\n- K5・K7: api_key の伏せ字とログへの機密情報のテストがない。\n- K6: 組織またぎの移管と、一部だけ移る場合のテストがない。\n- K8: 期限ちょうどと、形の崩れたリンクのテストがない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が合格した。\n- ロールバックの欠陥を、`hooks.before_write` で例外を起こす小さなスクリプトで再現した。`conn.in_transaction` は True のまま残り、次の作成は `cannot start a transaction within a transaction` で失敗した。失敗した作成分の行も1件残っていた。\n- `history --since 0` と git の状態を確認した。検証条件の弱体化の兆候は見つからなかった。履歴はすべて実装担当の bind の追加だった。git のコミットは初期状態のみで、実装は未追跡だった。\n- `notes/` の全ソースを読み、仕様・設計と照合した。SQL はプレースホルダーを使っていて、LIKE の ESCAPE も正しい。共有リンクの形式検査、HMAC の比較、期限の境界（`>=`）は、仕様どおりと判断した。RateLimiter はロックの中で枠を判定していて、設計どおりと判断した。",
+ "files_changed": [],
+ "valid": true
+}

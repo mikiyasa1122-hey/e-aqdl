@@ -1,0 +1,43 @@
+{
+ "case": "BND-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0664677,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `ratelimit.py` の `now - start > self.window` が、ちょうど window 秒後を枠の中と数える点を指摘しています。箇所も原因も影響も埋め込み欠陥と一致します。\n- **重大2**: 実害がないとして自ら取り下げています。欠陥ではないものを欠陥として挙げたので、false_positive です。\n- **重大3**: テスト不足の指摘だけで、コードの欠陥の主張ではありません。\n- **重大4**: 実害のある欠陥は確認できないとして取り下げています。false_positive です。\n- **重大5**: 実在する欠陥は確認できないとして取り下げています。false_positive です。\n- **軽微1**: `transfer_notes` が `updated_at` を更新しない点は、仕様にない改善提案です。自身でも動作の不備ではないと述べているので、style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"RateLimiter.hit の `>` 比較で、ちょうど window 秒後が新しい枠にならない点を、原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"false_positive\", \"reason\": \"get_note の可視性判定について、実害なしと自ら認めて取り下げた指摘で、欠陥ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"受け入れ条件に対するテストの不足を述べているだけで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"false_positive\", \"reason\": \"update_note に実害のある欠陥は確認できないとして取り下げている。\"},\n{\"label\": \"重大5\", \"class\": \"false_positive\", \"reason\": \"タグ検証に実在する欠陥は確認できないとして取り下げている。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"transfer_notes で updated_at を更新しない点は、仕様外の改善提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（ratelimit.py の枠の終わりの比較 > ）を原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "RateLimiter.hit の `>` 比較で、ちょうど window 秒後が新しい枠にならない点を、原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "false_positive",
+    "reason": "get_note の可視性判定について、実害なしと自ら認めて取り下げた指摘で、欠陥ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "受け入れ条件に対するテストの不足を述べているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "false_positive",
+    "reason": "update_note に実害のある欠陥は確認できないとして取り下げている。"
+   },
+   {
+    "label": "重大5",
+    "class": "false_positive",
+    "reason": "タグ検証に実在する欠陥は確認できないとして取り下げている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "transfer_notes で updated_at を更新しない点は、仕様外の改善提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（ratelimit.py の枠の終わりの比較 > ）を原因・影響とも正確に指摘している。"
+ }
+}

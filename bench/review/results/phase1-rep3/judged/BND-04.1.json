@@ -1,0 +1,28 @@
+{
+ "case": "BND-04",
+ "rep": 1,
+ "judge_cost_usd": 0.0582777,
+ "judge_raw": "```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link の `>` 判定で期限ちょうどが有効になる点を、箇所・原因（`>=` が正しい）・影響まで埋め込み欠陥どおりに指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"認可確認をトランザクション内に移す改善提案で、version が上がって Conflict になるため実害はほとんどないと自ら述べている。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が verify_link の期限境界（`>` を `>=` に直すべき）を再現付きで指摘しており、埋め込み欠陥と一致する。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link の `>` 判定で期限ちょうどが有効になる点を、箇所・原因（`>=` が正しい）・影響まで埋め込み欠陥どおりに指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "認可確認をトランザクション内に移す改善提案で、version が上がって Conflict になるため実害はほとんどないと自ら述べている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が verify_link の期限境界（`>` を `>=` に直すべき）を再現付きで指摘しており、埋め込み欠陥と一致する。"
+ }
+}

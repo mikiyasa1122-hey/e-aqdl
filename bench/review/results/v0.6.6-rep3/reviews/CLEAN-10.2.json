@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-10",
+ "rep": 2,
+ "sec": 39.4,
+ "exit": 0,
+ "cost_usd": 0.1483393,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22361,
+  "cache_read_input_tokens": 110893,
+  "output_tokens": 4779,
+  "output_tokens_details": {
+   "thinking_tokens": 1119
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22361,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2930,
+    "cache_read_input_tokens": 36993,
+    "cache_creation_input_tokens": 4474,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4474
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0d59cab3\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾に改行を付けたタグ（`\"abc\\n\"`）を通してしまう。仕様は「英小文字・数字・ハイフンの1〜20文字」なので、作成・更新・検索のタグ検査が仕様を満たしていない。 / 根拠: notes/service.py:14 の `TAG_RE`、:64、:150。再現: `create_note(c,u,'t','b',['abc\\n'])` が例外にならず note_id 1 を返した。`search_notes(c,u,'t',['x\\n'])` も ValidationError にならず `[]` を返した。share.py では同じ問題を避けるために `fullmatch` を使っているので、実装内で扱いが食い違っている。 / 提案: `TAG_RE.fullmatch` を使う（または `\\Z` で終わらせる）。1か所に検査をまとめて作成・更新・検索で共有する。改行付きタグと、長さが 0・1・20・21 のタグの拒否テストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 内容: 12件のテストはほぼ正常系だけで、仕様が求める異常系・境界値・並行・障害の検証がない。受け入れ条件の大半が実質未検証になっている。 / 根拠: tests/test_notes.py の全体。\n  - 未検証の項目:\n    - AC1: 題名・本文・タグの境界値、重複タグ、`create:tags` の途中失敗で何も残らないこと\n    - AC2: 他組織・他人の非公開・存在しないメモが NotFound になること、閲覧数の増加と同時閲覧（`hooks.before_write(\"view\")` は未使用）\n    - AC3: page / per_page / sort の範囲外、`%` と `_` の検索、タグの OR 絞り込み、SQL インジェクション文字列、他人の非公開メモの除外\n    - AC4: Forbidden、Conflict（古い version と、読み出しから書き込みの間の割り込み）、管理者と非公開の組み合わせ、更新時の検査、削除の途中失敗\n    - AC5: 他組織への移管が Forbidden になること、`transfer:{i}` の途中失敗で元のままになること\n    - AC6: api_key の伏せ字が一切未検証（テストは action と actor しか見ていない）。8文字未満・ちょうど8文字の境界もない\n    - AC7: ちょうど window 秒での新しい枠への切り替え（テストは 61 秒の場合だけ）、スレッドからの同時呼び出し（`hook` は未使用）\n    - AC8: 期限ちょうどの境界、形の崩れたリンク、署名の改ざん（テストは note_id を書き換えるだけ）\n    - AC9: ログ・例外に本文・署名・api_key が出ないこと\n    - AC10: 例外の後で接続が使い続けられること\n  - trace 上は全 V が「合格」だが、反証テストは無効で、上のとおり検出力がない。 / 提案: 上記を決定論的に再現するテストを追加する。障害は `hooks.before_write` に例外を入れて再現し、競合は `hook` と別接続（ファイル DB）で再現する。sleep には頼らない。\n\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: リンクの note_id は先頭ゼロを許し、`int()` に変換してから署名を検証する。そのため `007.exp.sig` が `7.exp.sig` と同じ署名で通り、同じメモに対するリンクの文字列が複数できる。桁数の上限 18 も仕様にない。 / 根拠: share.py:11, 29。 / 提案: 署名の対象を受け取った文字列そのままにするか、先頭ゼロを拒否する。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: 更新・削除の認可（_visible / _can_modify）をトランザクションの外で行っている。更新は version で守られるが、削除は読み出しの後に所有者が移管されても通ってしまう。 / 根拠: service.py:182-191。 / 提案: 認可の再確認を BEGIN IMMEDIATE の内側で行う。\n- [軽微3] 区分: 実装 / 対象: R5 / 内容: 移管で updated_at を更新していない。また、移管先が移す元と同じ利用者の場合などを区別していない。害は小さい。 / 根拠: service.py:206。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名が空の場合と正常系だけで不十分。タグの規則違反がすり抜ける欠陥（重大1）を見逃している。途中失敗のテストもない。\n- AC2: V2 は作成した本人が閲覧できることしか見ていない。NotFound の分岐、閲覧数、同時閲覧がなく不十分。\n- AC3: V3 は一覧の1ページ目と日本語の検索の正常系だけ。範囲外、LIKE のエスケープ、タグ、非公開メモの除外、インジェクションがなく不十分。\n- AC4: V4 は所有者による更新と削除の正常系だけ。Forbidden、Conflict、検査、削除の失敗がなく不十分。\n- AC5: V5 は件数が2件であることと、管理者以外が拒否されることだけ。組織の跨ぎ、一部だけ移る場合、移管後の所有者を見ておらず不十分。\n- AC6: V6 は api_key を確認しておらず、空洞。\n- AC7: V7 は単純な超過と 61 秒後の回復だけ。枠の境界と同時実行がなく不十分。\n- AC8: V8 は往復と1パターンの改ざんだけ。期限の境界と形の崩れを見ておらず不十分。\n- AC9: V9 に対応するテストがない。\n- AC10: V10 に対応するテストがない。\n- エンジンが検出したテストの兆候はなし（skip・`.only`・アサーションなしは無い）。ただし弱い検証が多い。\n- 検証条件の改ざん・弱体化は確認できなかった。history は bind の初期設定のみ。\n\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリで、SQLite への直接テストで足りる）。ただし、ファイル DB と複数スレッド・複数接続を使った結合的な並行テストが必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。実装は _visible で絞っているが検証されていない。\n- K2: インジェクション文字列と `%` / `_` のテストがない。\n- K3: 同時閲覧・同時更新・RateLimiter の同時呼び出しが未検証。\n- K4: 作成・更新・削除・移管の途中失敗が未検証。\n- K5, K7: api_key とログの機密露出が未検証。\n- K6: 他組織への移管と一部だけ移る場合が未検証。\n- K8: 期限ちょうどと形の崩れが未検証。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests`: 12件すべて OK（ただし検証が薄い）。\n- 再現スクリプトで、タグ `\"abc\\n\"` が create_note と search_notes で通ることを確認した。\n- `aqdlc trace` と `history --since 0` で、検証条件の弱体化がないことを確認した。\n- gate は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

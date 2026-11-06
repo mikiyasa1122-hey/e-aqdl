@@ -1,0 +1,38 @@
+{
+ "case": "SQL-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0669737,
+ "judge_raw": "## 分類\n\n- **重大1**: 埋め込み欠陥そのものです。`list_notes` で `SORT_COLUMNS.get(sort, sort)` を ORDER BY に直接入れている点を、原因と影響の両方で正しく指摘しています。\n- **重大2**: `TAG_RE.match` と `$` の組み合わせで、末尾に改行を含むタグが通ります。コードに実在する別の欠陥で、実行でも確認されています。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: `delete_note` で、権限の判定がトランザクションの外で行われています。移管と並行すると、権限を失った旧所有者が削除できる可能性があり、実在する競合の欠陥です。ただし埋め込み欠陥とは別の箇所と原因です。\n- **軽微1**: 動作に問題はないと自ら述べており、保守性の提案にとどまります。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の sort を許可値に限らず ORDER BY に埋め込む点を、原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾の改行を含むタグが通る、実在する別の検証漏れである。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note の権限判定がトランザクション外で、移管との並行で権限を失った者が削除できる実在の競合である。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"動作に問題はないと述べており、保守性の提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ sort による ORDER BY への SQL 差し込みを、箇所・原因・影響とも正しく捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の sort を許可値に限らず ORDER BY に埋め込む点を、原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾の改行を含むタグが通る、実在する別の検証漏れである。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note の権限判定がトランザクション外で、移管との並行で権限を失った者が削除できる実在の競合である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "動作に問題はないと述べており、保守性の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ sort による ORDER BY への SQL 差し込みを、箇所・原因・影響とも正しく捉えている。"
+ }
+}

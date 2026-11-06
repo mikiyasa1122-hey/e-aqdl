@@ -1,0 +1,38 @@
+{
+ "case": "SQL-03",
+ "rep": 3,
+ "judge_cost_usd": 0.06538769999999999,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`SORT_COLUMNS.get(sort, sort)` が未知の値をそのまま ORDER BY に入れる点を、同じ箇所・同じ原因で指摘しています。影響も一致しています（`(SELECT 1)` が通る）。\n- **重大2**: `TAG_RE` の `$` と `.match` により、末尾が改行のタグが通ります。これは実在する別の欠陥です。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: `delete_note` は認可の判定をトランザクションの外で行っています。そのため、移管された後に旧所有者が削除できる経路が実在します。ただし、この指摘は実際に再現して確認したものではありません。実在する別の欠陥として扱います。\n- **軽微1**: 先頭ゼロの別表記が通る点は、仕様の「10進の数字だけ」には反しません。署名は int に変換した値で検証されるので、実害は小さいです。保守性・正規形の提案として style にします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の SORT_COLUMNS.get(sort, sort) で未許可の sort をそのまま ORDER BY に入れる、埋め込み欠陥そのものを指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match により末尾改行のタグが通る実在の別の欠陥で、実行して確認している。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note は認可の判定がトランザクションの外にあり、移管後に旧所有者が削除できる経路が実在する（再現は未確認）。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの別表記を通す点は仕様違反ではなく、正規形にするかどうかの改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が sort の未検証による ORDER BY への SQL 差し込みを、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の SORT_COLUMNS.get(sort, sort) で未許可の sort をそのまま ORDER BY に入れる、埋め込み欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match により末尾改行のタグが通る実在の別の欠陥で、実行して確認している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note は認可の判定がトランザクションの外にあり、移管後に旧所有者が削除できる経路が実在する（再現は未確認）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの別表記を通す点は仕様違反ではなく、正規形にするかどうかの改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が sort の未検証による ORDER BY への SQL 差し込みを、箇所・原因・影響とも正しく指摘している。"
+ }
+}

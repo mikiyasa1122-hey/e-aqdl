@@ -1,0 +1,49 @@
+{
+ "case": "SEC-02",
+ "rep": 3,
+ "sec": 32.7,
+ "exit": 0,
+ "cost_usd": 0.11323039999999998,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14931,
+  "cache_read_input_tokens": 124104,
+  "output_tokens": 4108,
+  "output_tokens_details": {
+   "thinking_tokens": 348
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14931,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2986,
+    "cache_read_input_tokens": 38993,
+    "cache_creation_input_tokens": 2108,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2108
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c4a8b4e4\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, R9 / 対応区分: 修正必須 / 内容: `export_audit` が api_key を伏せず、生の値を `actor_key` として返している。 / 成立条件: 管理者が `export_audit` を呼ぶだけで起きる。 / 影響: 監査ログに利用者の api_key が全文出る。R6 と AC6 を満たさず、K7・K5 が現実になっている。 / 根拠: `notes/service.py:216` の `\"actor_key\": r[\"api_key\"]`。マスク処理はコード全体に存在しない。実行して確認した。api_key `abcdefghijkl` が `actor_key: 'abcdefghijkl'` のまま返った。 / 提案: 末尾4文字以外を `*` にする関数を作る。鍵が8文字未満なら全文を `*` にする。それを `actor_key` に適用する。あるいは `actor_key` を出力から外す。\n- [重大2] 区分: 実装 / 対象: R1, R4, R3, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの正規表現が `^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾の改行を通してしまう。 / 成立条件: タグが `\"ab\\n\"` のように末尾に改行を含む。create・update・search のすべてで起きる。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。20文字＋改行の21文字も通る。 / 根拠: `notes/service.py:14`、検査は `:64` と `:151`。実行して確認した。`create_note(..., ['ab\\n'])` が ValidationError を出さずに成功した。share.py は同じ問題を避けるため `fullmatch` を使っており、設計の意図と不揃い。 / 提案: `TAG_RE.fullmatch(t)` に変える。または `\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC1〜AC10 のうち AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10、K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、正常系が中心。仕様の必須の異常系・境界値・リスクを確かめるテストがほぼない。trace では全 AC が「合格」だが、中身が空洞。 / 成立条件: 該当するテストが存在しない。 / 影響: 重大1・2 のような欠陥を gate が検出できなかった。 / 根拠: `tests/test_notes.py` を確認した。AC6 のテストは `action` と `actor` しか見ておらず、api_key を検査していない。次のテストが存在しない。(a) 他組織・他人の非公開メモが NotFound になること（K1）。(b) 管理者から非公開メモが見えないこと。(c) 非作成者の Forbidden。(d) version 違いと読み出し〜書き込みの間の更新による Conflict。(e) `hooks.before_write` による途中失敗でのロールバック（create・delete・transfer、AC1・AC5・AC10）。(f) 同時閲覧での閲覧数、同時の RateLimiter（`hook` を使って決定論的に）。(g) 枠の境界（ちょうど window 秒）。(h) 共有リンクの期限ちょうど・形の崩れ・署名改ざん。(i) `%` `_` の検索と、`ValidationError` になる境界値（page 0、per_page 51、sort、tag、title 101文字、空白だけ）。(j) 組織をまたぐ移管。(k) ログへの機密情報の出力（R9）。 / 提案: 上記 (a)〜(k) を、`service.hooks` と `RateLimiter.hook` の差し込み口を使って追加する。特に AC6 のマスクと、タグの改行は、条件を外すと失敗するテストにする。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K4 / 対応区分: 修正必須 / 内容: `delete_note` が、トランザクションの外で権限を確認した後、中で再確認しない。削除する側の `BEGIN IMMEDIATE` 後に、別の接続が先に削除していても、そのまま成功してしまう。 / 成立条件: 同じメモに対して2つの接続から同時に delete を呼ぶ。または `update_note` と競合する。 / 影響: すでに存在しないメモに対して、NotFound ではなく成功を返し、監査ログも二重に記録される。更新側は version で守られているので、データが壊れることはない。この件は主に削除の二重実行と監査の不整合。 / 根拠: `notes/service.py:182-191`。DELETE の `rowcount` を見ていない。 / 提案: トランザクション内で `_row` を取り直し、`_visible` と `_can_modify` を再確認する。または DELETE の rowcount が0なら NotFound を出す。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の `version` が整数かどうかを検査していない。`transfer_notes` も、渡された利用者の dict の `org_id` をそのまま信用している（仕様の対象外に沿う）。 / 提案: `version` の型検査を足す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけ。タグの規則、長さの境界、失敗時に何も残らないことは確かめておらず、不十分。実装にも改行タグの欠陥がある。\n- AC2: 閲覧数の増加、NotFound（他組織・非公開）、同時閲覧のテストがなく、不十分。\n- AC3: 一覧の1ページ目と検索の基本だけ。範囲外の拒否、`%` `_`、タグの OR、非公開の除外がなく、不十分。\n- AC4: 作成者による update/delete の正常系だけ。Forbidden、Conflict、ロールバックがなく、不十分。\n- AC5: 正常系と非管理者の拒否だけ。組織またぎと全部か何もないか、がなく、不十分。\n- AC6: api_key を一切検査しておらず、実装もマスクしていない。不合格。\n- AC7: 上限と枠のリセットだけ（61秒）。ちょうど window 秒の境界と同時呼び出しがなく、不十分。実装の `>=` は仕様に合っているように読める。\n- AC8: 往復と改ざん1件だけ。期限ちょうど、期限切れ、形の崩れがなく、不十分。実装の `fullmatch` と `>=` は仕様に合っているように読める。\n- AC9: テストなし。\n- AC10: テストなし。`transaction()` の実装自体は ROLLBACK して例外を再送しており、妥当に読める。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしは見つからなかった）。ただし、テストの弱さは重大3 のとおり。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、unittest による単体・統合で足りる。ただし並行実行の検証は、差し込み口を使った決定論的なテストが必要（重大3）。\n\n### 不足しているリスク\n- K1・K3・K4・K6・K8 を確かめる検証がない（重大3）。\n- K5・K7: 実装が漏えいしている（重大1）。\n\n### 確認したこと\n- spec.md、design.md、`notes/*.py`、`tests/test_notes.py` を全文読んだ。`aqdlc.py trace` を実行し、全項目が「合格・反証未実施」になっていることを確認した。\n- `python3 -m unittest discover -s tests` を実行した。12件が OK で、テスト自体は通る。\n- 再現を実行した。`export_audit` が api_key をそのまま返した（重大1）。改行つきタグ `'ab\\n'` が受理された（重大2）。\n- `git history` と `git diff` は確認していない。リポジトリには未追跡のファイルしかなく、比較する履歴がなかった。\n- 実装は変更していない。",
+ "files_changed": [],
+ "valid": true
+}

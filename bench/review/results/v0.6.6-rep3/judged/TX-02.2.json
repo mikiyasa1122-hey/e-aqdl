@@ -1,0 +1,43 @@
+{
+ "case": "TX-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0654177,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: matches_defect。`transfer_notes` がメモごと、さらに監査ログも別のトランザクションで処理している点を指摘しています。箇所も原因も影響も、埋め込んだ欠陥と一致します。\n- **重大2**: test_gap。テストの網羅不足を指摘したもので、コードの欠陥の主張ではありません。\n- **重大3**: test_gap。`test_export_audit` が `actor_key` を検証していないという、テストの弱さだけの指摘です。\n- **重大4**: test_gap。RateLimiter のテストが境界や並行実行を確かめていないという指摘です。\n- **軽微1**: false_positive。仕様は監査ログの出力に利用者の行があることを前提にしています。JOIN で落ちる状況は仕様上の欠陥とは言えません。また `audit.actor_id` は呼び出し側が検証済みの利用者から入ります。\n- **軽微2**: style。レビュー担当自身が仕様に反しないと述べており、テストで確かめていないという指摘にとどまります。欠陥の主張ではありません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transfer_notes がメモごと・監査ログも別トランザクションで、途中失敗時に一部だけ移る欠陥を正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足の指摘で、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"test_export_audit が actor_key を検証していないというテストの弱さのみ。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のテストが境界・並行を確かめていないというテストの不足のみ。\"},\n{\"label\": \"軽微1\", \"class\": \"false_positive\", \"reason\": \"仕様は監査ログに利用者の行がある前提で、JOIN で落ちる状況は仕様上の欠陥ではない。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"仕様違反ではないと自ら認めており、テストでの確認不足の指摘にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が transfer_notes のメモごとのトランザクション分割という原因と、一部だけ移る影響の両方を正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transfer_notes がメモごと・監査ログも別トランザクションで、途中失敗時に一部だけ移る欠陥を正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足の指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "test_export_audit が actor_key を検証していないというテストの弱さのみ。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter のテストが境界・並行を確かめていないというテストの不足のみ。"
+   },
+   {
+    "label": "軽微1",
+    "class": "false_positive",
+    "reason": "仕様は監査ログに利用者の行がある前提で、JOIN で落ちる状況は仕様上の欠陥ではない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "仕様違反ではないと自ら認めており、テストでの確認不足の指摘にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が transfer_notes のメモごとのトランザクション分割という原因と、一部だけ移る影響の両方を正しく指摘している。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 2,
+ "sec": 43.2,
+ "exit": 0,
+ "cost_usd": 0.1606966,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 23510,
+  "cache_read_input_tokens": 153066,
+  "output_tokens": 5133,
+  "output_tokens_details": {
+   "thinking_tokens": 955
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23510,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2960,
+    "cache_read_input_tokens": 42124,
+    "cache_creation_input_tokens": 492,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 492
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 内容: 楽観的ロックが機能しない。version の確認がトランザクションの外で、読み出し済みの古い row に対して行われている。UPDATE の条件は `WHERE id = ?` だけで version を含まない。そのため `cur.rowcount != 1` は常に真になり、競合を検出できない。後から書いた側が先の更新を消す。設計の「UPDATE の条件に version を入れて rowcount で判定する」にも反する。 / 根拠: notes/service.py:167-174。再現では、`hooks.before_write(\"update\")` の中で別接続が version 1→2 に更新した後、version=1 で更新した側が Conflict にならず version 2 を返した。本文は「後の更新」に上書きされ、先の更新は消えた。 / 提案: `UPDATE ... WHERE id = ? AND version = ?` にして rowcount が 0 なら Conflict にする。トランザクション内で row を読み直し、_visible と _can_modify も再判定する。version の事前確認は残してもよい。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 全般、特に AC4・AC5・AC7・AC9・AC10・K1〜K8 / 内容: 検証が空洞に近い。テストは12件の正常系中心で、受け入れ条件の大半を確かめていない。確かめていないのは次の項目。\n  - 他組織・他人の非公開メモが NotFound になること\n  - 閲覧数の増加と並行\n  - Conflict と更新・削除の Forbidden\n  - 入力の境界値\n  - `%` `_` と SQL インジェクション\n  - 移管の組織またぎとロールバック\n  - api_key の伏せ方\n  - RateLimiter の枠の境界・並行・RateLimited の同時呼び出し\n  - 共有リンクの期限境界・形崩れ・期限切れ\n  - ログに機密情報が出ないこと\n  - 例外後の接続再利用\n\n  設計が用意した差し込み口 (`hooks.before_write`, `RateLimiter.hook`) をテストが一度も使っていない。そのため重大1も検出されなかった。 / 根拠: tests/test_notes.py:1-90（全体）。AC9 のログ検査、AC10 の例外後再利用、複数スレッドの競合のテストが存在しない。 / 提案: 各 AC・K に対し、異常系・境界値・並行（hooks で順序を固定した決定論的な再現）のテストを追加する。たとえば version 条件を外すと失敗する競合テスト、移管の途中失敗、期限の境界（ちょうど期限、期限の1秒前）、window ちょうど、api_key の長さ 7/8/9。\n- [重大3] 区分: テスト / 対象: R2, AC2, R7, AC7（K3） / 内容: 仕様が求める「同時に閲覧されても数え漏れがない」「複数スレッドから同時に呼ばれても上限を超えて許さない」が、どの並行テストでも確かめられていない。実装自体（UPDATE views = views + 1 を BEGIN IMMEDIATE の中で実行、hit を Lock で保護）は妥当に見える。ただし検証なしのため、条件を外しても検出できない。 / 根拠: tests/test_notes.py に threading の利用がない。 / 提案: 別接続・別スレッドで N 回閲覧して views == N を確認する。RateLimiter は limit+k 並行で成功数が limit を超えないことを確認する。いずれも sleep ではなく hook や Barrier で順序を固定する。\n- [軽微1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: TAG_RE が `^...$` と `re.match` の組み合わせで、末尾の改行を許す。再現では `\"abc\\n\"` が create_note を通った（タグ ID 2 が返った）。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する。share.py は同じ問題を認識して fullmatch を使っている。 / 根拠: notes/service.py:14, 64, 150 / 提案: `TAG_RE.fullmatch` を使うか、パターンを `\\Z` で終える。\n- [軽微2] 区分: 実装 / 対象: R4, R5 / 内容: delete_note と transfer の認可判定（_visible/_can_modify）がトランザクションの外にあり、確認後に変更されると古い状態で判定する。delete は version を見ないため影響は小さい。重大1と同じ修正方針で、トランザクション内の再判定に寄せるとよい。 / 根拠: notes/service.py:185-193\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけ。本文・タグの境界、tags が文字列の場合、失敗時に何も残らないこと（hook によるロールバック）を確かめておらず不十分。\n- AC2: V2 は作成者本人の閲覧だけで、閲覧数の増加も組織違い・非公開の NotFound も確かめておらず不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけ。範囲外の page/per_page/sort、`%` `_`、タグ OR、インジェクションを確かめておらず不十分。\n- AC4: V4 は所有者の更新・削除の正常系のみ。Conflict、Forbidden、管理者、非公開、競合時の動作を確かめておらず不十分。実装にも欠陥がある（重大1）。\n- AC5: V5 は件数と管理者以外の拒否だけ。組織またぎ、ロールバックを確かめておらず不十分。\n- AC6: V6 は action と actor だけで、api_key の伏せ方を確かめておらず不十分。\n- AC7: V7 は枠の超過と61秒後のリセットだけ。ちょうど window 秒の境界と並行を確かめておらず不十分。\n- AC8: V8 は往復と note_id 改ざんだけ。期限の境界、期限切れ、署名改ざん、形の崩れを確かめておらず不十分。\n- AC9: V9 に該当するテストがなく不十分。\n- AC10: V10 に該当するテストがなく不十分。\n- エンジンが検出したテストの兆候: なし（skip・.only 等は無し）。ただし、アサーションが弱いというより、確かめる対象そのものが足りない。\n\n### E2E の要否\n- 不要（HTTP 層を持たないライブラリで、単体・SQLite を使った結合テストで足りる）。ただし別接続・別スレッドの並行テストは必須。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。実装は _visible で絞っているように見える。\n- K2: `%` `_` とインジェクション文字列を確かめるテストがない。実装はプレースホルダーと ESCAPE を使っている。\n- K3: 更新の競合は実装が壊れており（重大1）、閲覧・RateLimiter の並行も検証なし。\n- K4: 作成・更新・削除・移管の途中失敗でロールバックされることを確かめるテストがない。\n- K5, K7: ログとエラーに機密情報が出ないこと、api_key の伏せ方を確かめるテストがない。\n- K6: 移管の組織またぎとロールバックを確かめるテストがない。\n- K8: 期限切れ・改ざん・形崩れの共有リンクを確かめるテストが不足している。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて合格。ただし上記のとおり検証が不十分なため、合格は品質の証明にならない。\n- `aqdlc trace` と `history --since 0`: 検証条件を弱める変更は見つからなかった。反証テストは無効で、全項目が「反証未実施」。\n- スクラッチパッドの一時DBで、`hooks.before_write(\"update\")` から別接続の更新を割り込ませた。version 1 の古い更新が Conflict にならず上書きした。タグ `\"abc\\n\"` が検証を通ることも同じ方法で確認した。",
+ "files_changed": [],
+ "valid": true
+}

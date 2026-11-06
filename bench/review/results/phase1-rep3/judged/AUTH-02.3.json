@@ -1,0 +1,38 @@
+{
+ "case": "AUTH-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0660317,
+ "judge_raw": "各指摘の判定は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`list_notes` の `where` に非公開メモの除外がなく、同じ組織の他人の非公開メモの題名が一覧に出ます。箇所・原因・影響のすべてが一致します。\n- **重大2**: 欠陥ではありますが、埋め込んだものとは別です。`TAG_RE.match` と `$` の組み合わせが、末尾に改行のあるタグを通します。コードに実在するバグなので real_other とします。\n- **重大3**: コードの欠陥ではなく、テスト不足の指摘です。\n- **重大4**: 実在する別の問題です。`update_note` と `delete_note` で、認可判定がトランザクションの外にあります。`delete_note` は version を見ないので、判定後に移管されても削除できてしまいます。報告は update 側の影響は小さいと断っています。\n- **軽微1**: 検索の対象を仕様に明記する提案で、欠陥の主張ではありません。仕様の「検索」は題名と本文のどちらかを決めていないので、style とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の where が org_id だけで非公開メモを除外しておらず、埋め込んだ欠陥と箇所・原因・影響が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾改行のタグが通る実在のバグで、埋め込んだ欠陥とは別。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note の認可判定がトランザクションの外にあり、特に delete_note は判定後の移管で認可を外れて削除できる実在の競合。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"検索対象を仕様に明記する提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、埋め込んだ非公開メモの一覧漏えいを原因・影響とも正確に指摘し、修正案も適切である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の where が org_id だけで非公開メモを除外しておらず、埋め込んだ欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾改行のタグが通る実在のバグで、埋め込んだ欠陥とは別。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "update_note と delete_note の認可判定がトランザクションの外にあり、特に delete_note は判定後の移管で認可を外れて削除できる実在の競合。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "検索対象を仕様に明記する提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、埋め込んだ非公開メモの一覧漏えいを原因・影響とも正確に指摘し、修正案も適切である。"
+ }
+}

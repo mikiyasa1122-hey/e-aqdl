@@ -1,0 +1,49 @@
+{
+ "case": "VAL-04",
+ "rep": 2,
+ "sec": 38.5,
+ "exit": 0,
+ "cost_usd": 0.1206338,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15502,
+  "cache_read_input_tokens": 120898,
+  "output_tokens": 4652,
+  "output_tokens_details": {
+   "thinking_tokens": 1017
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15502,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2764,
+    "cache_read_input_tokens": 37415,
+    "cache_creation_input_tokens": 4254,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4254
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7be71891\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, R1 / 対応区分: 修正必須 / 内容: `update_note` が tags を検査していない。`_validate(new_title, new_body, [])` と空リストを渡しており、`new_tags` は個数・形式とも未検査のまま `note_tags` に入る。仕様は「更新でも R1 の入力検証を行う（タグを含む）」としている。 / 成立条件: `update_note(..., tags=[...])` に、6個以上、大文字や記号を含むタグ、長さ21以上のタグ、文字列でない要素のどれかを渡す。 / 影響: 不正なタグが保存され、R1 の不変条件と AC4 の入力拒否が崩れる。要素が文字列でない場合は sqlite の例外が出て、ValidationError にならない。上流の検証や DB の制約は無く、既存テストにも防ぐものはない。 / 根拠: notes/service.py:166。実行して確認した。`tags=[\"x\"]*9+[\"BAD tag!\"]` の更新が成功し、`note_tags` に `'BAD tag!'` が保存された。 / 提案: `_validate(new_title, new_body, new_tags or [])` のようにタグも検査する。検査はトランザクションの前に行う。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っているため、末尾が改行のタグ（例 `\"ab\\n\"`）を通す。`$` が末尾の改行の手前にも一致するからである。作成・検索の両方に影響する。 / 成立条件: 末尾に `\\n` を付けたタグを `create_note` / `search_notes` に渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に違反するタグが保存される。 / 根拠: notes/service.py:14, 64, 151。実行して確認した。`create_note(..., [\"ab\\n\"])` が受理された。share.py は fullmatch を使って同種の問題を避けており、service.py だけ漏れている。 / 提案: `TAG_RE.fullmatch` を使う。または `\\Z` で終える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8, V1〜V10 / 対応区分: 証拠不足 / 内容: 12件のテストは正常系が中心で、受け入れ条件とリスクの検証が空洞である。次の検証がない。\n  - 他組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の並行加算と、before_write フックによる途中失敗後のロールバック（K3, K4, AC10）\n  - R1 の境界値（題名100文字と101文字、空白だけ、本文、タグ5個と6個）\n  - 一覧の範囲外入力\n  - `%` / `_` を普通の文字として検索すること、SQL インジェクション文字列\n  - version の競合、管理者による更新・削除、Forbidden\n  - 移管の組織またぎと途中失敗\n  - api_key の伏せ字\n  - RateLimiter のちょうど window 秒の境界と、複数スレッドからの同時呼び出し\n  - 共有リンクの期限ちょうど、形の崩れ、署名の改ざん\n  - ログへの機密情報の非出力\n  VK1〜VK8 と V1〜V10 は `unit` に紐づいているが、実体は上の12件だけである。そのため重大1・2 の欠陥も見つからなかった。 / 成立条件: 常時 / 影響: 認可・並行・ロールバックに関する必須の要求が、検証なしのまま合格しうる。 / 根拠: tests/test_notes.py 全体（90行）。`python3 -m unittest` は 12件すべて OK。 / 提案: 上記を決定論的なテストとして追加する。並行は `hooks.before_write` と `RateLimiter.hook` を使い、sleep に頼らない。タグの検査を外すと失敗するテストも含める。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` は `version` の型を検査していない。`transfer_notes` はメモの `updated_at` を更新しない。 / 提案: 必要なら検査と更新を加える。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名しか確かめていない。境界値・タグ・ロールバックが未検証で不十分。実装にも改行タグの穴がある（重大2）。\n- AC2: 自分のメモを閲覧するテストだけで、他組織・他人の非公開・存在しない場合と同時閲覧が未検証。不十分。実装は、見られないメモを NotFound にして閲覧数を `views + 1` の UPDATE で数えており、妥当に見える。\n- AC3: 一覧の1ページ目と単純な検索だけ。範囲外入力、LIKE のワイルドカード、OR のタグ絞り込み、他人の非公開メモの除外が未検証。不十分。\n- AC4: 作成者による更新と削除だけ。Conflict、Forbidden、管理者、非公開メモ、タグの検査が未検証。実装に欠陥がある（重大1）。不十分。\n- AC5: 成功と管理者以外の拒否だけ。組織またぎと途中失敗で元に戻ることが未検証。不十分。\n- AC6: 監査ログ出力の action と actor しか見ていない。api_key の伏せ字（8文字未満も含む）は未検証。不十分。\n- AC7: 枠を超えた場合と61秒後だけ。ちょうど window 秒の境界と複数スレッドの同時呼び出しが未検証。不十分。\n- AC8: 往復と改ざん（note_id 書き換え）だけ。期限ちょうど、期限切れ、形の崩れが未検証。不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは無し）。\n- 検証条件の弱体化: `history` では bind の追加のみで、弱体化は見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、SQLite を使う単体・統合テストで足りる。ただし、並行と途中失敗のテストが必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: インジェクションを確かめる検証がない。コードはプレースホルダーと ESCAPE を使っており、問題は見つからなかった。\n- K3, K4: 並行と途中失敗の検証がない。\n- K5, K7: 伏せ字とログの検証がない。\n- K6: 組織をまたぐ移管の検証がない。\n- K8: 期限と形の崩れの検証がない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を全部読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件 OK。\n- 再現スクリプトで、更新時の不正タグの混入と、改行付きタグの受理を確認した。\n- `aqdlc.py history --since 0` で、検証条件の弱体化がないことを確認した。\n- `trace` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

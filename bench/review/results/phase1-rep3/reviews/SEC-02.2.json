@@ -1,0 +1,49 @@
+{
+ "case": "SEC-02",
+ "rep": 2,
+ "sec": 29.8,
+ "exit": 0,
+ "cost_usd": 0.1021099,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13503,
+  "cache_read_input_tokens": 120019,
+  "output_tokens": 3608,
+  "output_tokens_details": {
+   "thinking_tokens": 426
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13503,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2614,
+    "cache_read_input_tokens": 36537,
+    "cache_creation_input_tokens": 3136,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3136
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c4a8b4e4\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5, `notes/service.py` の `export_audit`（末尾の return） / 対応区分: 修正必須 / 内容: 監査ログの `actor_key` に、DB の api_key をそのまま返している。伏せ字（末尾4文字以外を `*` にする。8文字未満はすべて伏せる）の処理がコードのどこにもない。 / 成立条件: 管理者が `export_audit` を呼ぶだけで起きる。 / 影響: 組織内の全利用者の api_key が平文で出力され、仕様の R6・R9 と AC6 に違反する。機密情報の漏えいになる。 / 根拠: `service.py` の `export_audit` は `\"actor_key\": r[\"api_key\"]` を返している。`grep` でも mask 系の処理は見つからない。テストは `action` と `actor` しか見ていない。 / 提案: `actor_key` に伏せ字の関数を通す。8文字未満は全部 `*`、8文字以上は `\"*\"*(len-4)+key[-4:]` にする。\n- [重大2] 区分: テスト / 対象: AC6, AC9, K5, K7 / 対応区分: 証拠不足 / 内容: api_key が伏せられることを確かめるテストがない。8文字未満・ちょうど8文字などの境界値もない。ログや例外に本文・署名・api_key が出ないことを確かめるテストもない（R9）。 / 影響: 重大1の欠陥を gate が検出できず、12件すべて通っている。 / 根拠: `tests/test_notes.py` の `test_export_audit` は `action` と `actor` だけを見ている。`caplog` や `assertLogs` による確認もない。 / 提案: 長い鍵・7文字・8文字・空に近い鍵で `actor_key` を検証する。`create_note` / `get_note` / `make_link` のログと、例外メッセージに機密値が含まれないことを検証する。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC10, K1〜K4, K6, K8（必須の検証） / 対応区分: 証拠不足 / 内容: 実装のコードは読んだ範囲で破綻が見つからなかったが、テストは正常系が中心で、異常系・競合・境界値の検証が空洞になっている。具体的には次の検証がない。\n  - 他の組織・他人の非公開メモが NotFound になること（K1）。\n  - Conflict（古い version、`hooks.before_write(\"update\")` を使った割り込み）。\n  - `hooks` を使った途中失敗でのロールバック（作成・削除・移管、K4・K6）と、失敗後に接続が使えること（AC10）。\n  - 閲覧数の同時加算（K3）。\n  - `RateLimiter` の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。\n  - 共有リンクの期限ちょうど、形の崩れ、署名の改ざん。\n  - LIKE の `%` と `_` のエスケープ、SQL インジェクション文字列（K2）。\n  - 入力検証の境界（題名100/101文字、タグ5/6個、`tags` に文字列を渡す場合）、一覧の範囲外、他組織・非公開メモの除外。\n  - 移管の Forbidden（組織違い）。 / 影響: 受け入れ条件の大半が、リスクを確かめる検証なしになっている。 / 根拠: `tests/test_notes.py` は90行、12件。`hooks` や `RateLimiter.hook` の差し込み口を使うテストは0件。 / 提案: 上記を決定論的に（sleep を使わず hook で）追加する。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の `_visible` と `_can_modify` の判定がトランザクションの外にある。判定後に所有者が変わると、古い判定で更新できる。version の条件が付くため、実害は小さい。 / 提案: トランザクション内で行を読み直して判定する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` のみ。境界値、タグの規則、失敗時にロールバックされることを確かめておらず不十分。\n- AC2: 閲覧の正常系だけ。他組織・非公開の NotFound、閲覧数の加算、同時閲覧の検証がなく不十分。\n- AC3: `test_list_first_page` と `test_search` のみ。範囲外、`%` / `_`、タグ OR、SQL インジェクションを確かめておらず不十分。\n- AC4: 所有者による更新・削除の正常系だけ。Conflict、Forbidden、管理者、検証がなく不十分。\n- AC5: 正常系と非管理者の拒否だけ。組織違い、途中失敗の巻き戻し、移管後の所有者の確認がなく不十分。\n- AC6: 実装が未達（重大1）で、テストも伏せ字を確かめていないため不十分。\n- AC7: 基本の制限と枠のリセット（61秒）だけ。ちょうど60秒の境界とスレッドの同時呼び出しがなく不十分。\n- AC8: 往復と改ざん（note_id の書き換え）だけ。期限ちょうど、期限切れ、形の崩れがなく不十分。\n- AC9: 検証なしで不十分。\n- AC10: 検証なしで不十分。\n- エンジンが検出したテストの兆候はなし。ただし、`history` で確認した検証条件の bind は追加のみで、弱体化は見つからなかった。\n\n### E2E の要否\n- 不要（HTTP がないライブラリで、unittest による単体・結合テストで十分）。ただし、上記の異常系・並行のテストは必須。\n\n### 不足しているリスク\n- K1: 他組織・非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションを確かめるテストがない。\n- K3: 同時の閲覧・更新・呼び出しを確かめるテストがない。\n- K4 / K6: 途中失敗での巻き戻しを確かめるテストがない。\n- K5 / K7: 機密情報の露出を確かめるテストがない（実装も未達）。\n- K8: 期限・形・改ざんの境界を確かめるテストがない。\n\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を全文読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が通った（空洞なテストが多い）。\n- `aqdlc history --since 0` で、検証条件の bind が追加のみであることを確認した。\n- `grep` と目視で、`export_audit` に伏せ字の処理がないことを確認した。\n- 実行していないこと: 同時実行の再現、`gate`、カウンターファクチュアル。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 2,
+ "sec": 34.5,
+ "exit": 0,
+ "cost_usd": 0.14565,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23403,
+  "cache_read_input_tokens": 116820,
+  "output_tokens": 4034,
+  "output_tokens_details": {
+   "thinking_tokens": 558
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23403,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2674,
+    "cache_read_input_tokens": 39958,
+    "cache_creation_input_tokens": 2551,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2551
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 内容: RateLimiter.hit が `with threading.Lock():` で毎回新しいロックを作っているため、排他制御が働いていない。複数スレッドから同時に呼ぶと、上限を超えて許してしまう。`self._lock` は作られているが使われていない。 / 根拠: notes/ratelimit.py:20 / 提案: `with self._lock:` に直す。`hook` を使い、2スレッドが同時に判定箇所へ入る状況を決定論的に作る並行テストを加える。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検査が `TAG_RE.match` と `$` の組み合わせのため、末尾に改行を含むタグ（例 `\"ab\\n\"`）を通す。実行して `True` を確認した。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する。検索のタグ検査にも同じ欠陥がある。 / 根拠: notes/service.py:14、64、150 / 提案: `fullmatch` を使うか `\\Z` を付ける。改行付きタグを拒否するテストを加える。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC8〜AC10, K1〜K8 / 内容: 検証が受け入れ条件をほとんど確かめていない（全12テスト）。次の項目にテストがない。\n  - 作成: 境界値（題名100/101文字、本文10000文字、タグ5/6個、空白だけの題名）、タグの重複除外、途中失敗でのロールバック（hooks.before_write）。\n  - 閲覧: 他組織・他人の非公開メモが NotFound になること、閲覧数の同時加算。\n  - 一覧・検索: page/per_page/sort の範囲外、`%` `_` のリテラル扱い、SQL インジェクション、タグの OR 絞り込み。\n  - 更新・削除: Conflict、Forbidden、管理者の扱い、更新時の入力検証、削除の失敗伝播。\n  - 移管: 他組織への Forbidden、途中失敗で元のまま。\n  - 監査ログ: api_key の伏せ字（test_export_audit は action と actor だけを見ていて、伏せ字を一切確かめていない）。\n  - 共有リンク: 期限ちょうどの境界、形の崩れ、期限切れ。\n  - 機密情報: ログに本文・署名・api_key が出ないこと。\n  - 例外後の接続の再利用。\n  \n  RateLimit のテストも単一スレッドの1件だけで、同時実行も枠の境界ちょうど（60秒）も確かめていない。重大1・2の欠陥はテストが通ったまま見逃されている。 / 根拠: tests/test_notes.py 全体、gate は 12件合格 / 提案: 各 AC・K に対し、異常系・境界値・並行の決定論的テストを追加する。認可や条件を外すと失敗することを確認する。\n- [重大4] 区分: 実装 / 対象: R4, K3, AC4 / 内容: update_note が、読み出し（`_row`）と認可判定をトランザクションの外で行い、その結果をもとに処理している。トランザクション内で再検査しない。更新自体は version 条件があるので Conflict になる。しかし delete_note は version を持たず、可視性・権限を確認した後、BEGIN の前に他の操作（移管、非公開化など）が入ってもそのまま削除する。また、存在しないメモの DELETE も成功扱いになり、監査ログに「delete」が残る。 / 根拠: notes/service.py:181-191 / 提案: トランザクションの中で `_row` と `_visible`・`_can_modify` を再検査してから削除し、rowcount が1でなければ NotFound にする。\n- [重大5] 区分: 実装 / 対象: R4, AC4 / 内容: update_note の `_can_modify` は、所有者であれば組織を確かめずに許可する。移管などでデータが矛盾した場合に備えた防御としては、`_visible` が先に組織を確認するので実害は小さい。ただし更新の入力検証で tags=None と空リストの区別、title が非文字列のときの扱いなどがテストされていない。この項目は、Conflict と Forbidden の判定順（NotFound → Forbidden → 検証 → Conflict）が仕様どおりであることを確かめるテストがないという意味での検証不足である。 / 根拠: notes/service.py:157-178、tests に該当なし / 提案: 重大3のテストに含めて確かめる。（実装の変更が不要なら、重大3に統合してよい。）\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名だけで、境界値・タグ検査・ロールバックを確かめておらず不十分。実際にタグの欠陥が見逃されている。\n- AC2: V2 は閲覧数も他組織・非公開の NotFound も確かめておらず不十分。\n- AC3: V3 は基本の一覧と検索だけで、範囲外・LIKE のエスケープ・インジェクション・タグ OR がなく不十分。\n- AC4: V4 は所有者の更新・削除の正常系だけ。Conflict・Forbidden・管理者がなく不十分。\n- AC5: V5 は件数と管理者以外の拒否だけ。組織またぎ・全か無かの検証がなく不十分。\n- AC6: V6 は api_key の伏せ字を確かめておらず、空洞化している。\n- AC7: V7 は単一スレッドのみ。同時実行・枠の境界ちょうどを確かめておらず不十分。実際に排他の欠陥が見逃されている。\n- AC8: V8 は往復と改ざん1件のみ。期限の境界・形の崩れ・期限切れがなく不十分。\n- AC9: V9 に対応するテストがなく未検証。\n- AC10: V10 に対応するテストがなく未検証。\n- エンジン検出の兆候: なし。skip や弱体化されたテストは見つからなかった（tests は未コミットの新規ファイルで、history に検証条件の弱体化もなかった）。\n\n### E2E の要否\n- 不要（HTTP なしのライブラリで、単体・並行テストで足りる）。ただし並行テストは別接続・別スレッドで決定論的に書くこと。\n\n### 不足しているリスク\n- K3: RateLimiter の排他欠陥（重大1）。閲覧数の同時加算と更新の競合のテストがない。\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: インジェクション・LIKE エスケープのテストがない。\n- K4・K6: ロールバック、移管の全か無かのテストがない。\n- K5・K7: 伏せ字とログの機密情報のテストがない。\n- K8: 期限境界・形の崩れのテストがない。\n\n### 確認したこと\n- spec.md、design.md、全ソースを読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件 OK。ただし上記のとおり検証は薄い。\n- `TAG_RE.match(\"ab\\n\")` を実行 → True（重大2を再現）。\n- `aqdlc trace` と `history --since 0` を確認。検証条件の弱体化はなかった。\n- gate は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

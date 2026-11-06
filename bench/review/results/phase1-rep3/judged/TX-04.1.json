@@ -1,0 +1,38 @@
+{
+ "case": "TX-04",
+ "rep": 1,
+ "judge_cost_usd": 0.06758170000000001,
+ "judge_raw": "## 判定\n\n**重大1**は埋め込んだ欠陥そのものです。`transaction()` が `except BaseException: raise` だけで ROLLBACK しておらず、箇所も原因も一致しています。影響も一致しています。接続がトランザクション中のまま残り、次の `BEGIN` が失敗します。失敗までに書いた行も残ります。再現でも確認されています。\n\n**重大2**はテストの不足だけを指摘しているので、test_gap です。\n\n**重大3**は `delete_note` の権限判定がトランザクション外の古い行に基づいている、という指摘です。\n- コードを見ると、`delete_note` は `_row`、`_visible`、`_can_modify` の判定を `BEGIN IMMEDIATE` の前に行い、その後に再確認していません。\n- このため、判定後に別接続の `transfer_notes` が入ると、元の所有者が削除できてしまいます。これは R4 に反します。\n- 報告自身が再現はしていないと認めていますが、コードの経路としては成立します。\n- 埋め込んだ欠陥とは別なので、real_other とします。\n\n**軽微1**は返り値の計算方法の好みで、style です。**軽微2**はタグ検査の重複の整理で、style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transaction() が例外時に ROLLBACK しない欠陥そのものを、箇所・原因・影響とも正しく指摘し、再現もしている。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note が権限判定をトランザクション外の古い行で行い再確認しないのは実在する競合の穴で、埋め込んだ欠陥とは別物。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version+1 の返し方は保守性の提案にすぎない。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"タグ検査の重複を共通化する提案で、欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が ROLLBACK 欠落を正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transaction() が例外時に ROLLBACK しない欠陥そのものを、箇所・原因・影響とも正しく指摘し、再現もしている。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note が権限判定をトランザクション外の古い行で行い再確認しないのは実在する競合の穴で、埋め込んだ欠陥とは別物。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version+1 の返し方は保守性の提案にすぎない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "タグ検査の重複を共通化する提案で、欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が ROLLBACK 欠落を正確に捉えている。"
+ }
+}

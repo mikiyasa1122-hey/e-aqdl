@@ -1,0 +1,49 @@
+{
+ "case": "SQL-03",
+ "rep": 2,
+ "sec": 37.1,
+ "exit": 0,
+ "cost_usd": 0.13473639999999998,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19571,
+  "cache_read_input_tokens": 110064,
+  "output_tokens": 4543,
+  "output_tokens_details": {
+   "thinking_tokens": 705
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19571,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3067,
+    "cache_read_input_tokens": 36121,
+    "cache_creation_input_tokens": 2556,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2556
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 86e2428c\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 内容: `list_notes` が `sort` を検証していない。範囲外の値は ValidationError にならず、そのまま `ORDER BY` に埋め込まれる。SQL インジェクションにあたり、仕様の「sort は updated か title だけ、範囲外は ValidationError」「利用者の入力を SQL の文字列に埋め込まない」に反する。 / 根拠: notes/service.py の `SORT_COLUMNS.get(sort, sort)`。再現では `sort=\"bogus\"` が `OperationalError: no such column: bogus` になり、`sort=\"(SELECT 1)\"` は通って結果が返った。 / 提案: `sort not in SORT_COLUMNS` なら ValidationError を出し、`.get` のフォールバックをやめる。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち AC3, AC4, AC5, AC7, AC8, AC9, AC10 と K1〜K8 / 内容: テストは12件だけで、ほぼ正常系である。仕様が求める次の検証がない。重大1の欠陥も、このテストでは検出できない。\n  - R1: タグ・題名・本文の境界値と、途中失敗時のロールバック（`hooks.before_write` を使う想定）\n  - R2: 他の組織・他人の非公開メモが NotFound になること、同時閲覧で閲覧数を数え漏らさないこと\n  - R3: `%`・`_` のエスケープ、タグの OR 絞り込み、範囲外の sort・page・per_page の拒否\n  - R4: Conflict、version 不一致、読み出しと書き込みの間に入った更新、管理者・他人の Forbidden、非公開メモの NotFound、削除の失敗時\n  - R5: 組織をまたぐ移管の拒否、途中失敗時に元へ戻ること\n  - R6: 鍵の伏せ方（8文字未満・末尾4文字）。`test_export_audit` は action と actor しか見ていない\n  - R7: ちょうど window 秒での新しい枠、スレッド競合\n  - R8: 期限ちょうどの境界、形の崩れたリンク、期限切れ\n  - R9: ログや例外に本文・署名・鍵が出ないこと\n  - R10: 例外の後で接続を使い続けられること\n  / 根拠: tests/test_notes.py 全体。`test_transfer_requires_admin` と `test_tampered` は拒否の検証だが1ケースだけである。 / 提案: 上の項目をラベル（V1〜V10、VK1〜VK8）に対応づけて追加する。競合は `hooks` と `RateLimiter.hook` で決定論的に再現し、sleep に頼らない。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1, K3 / 内容: `update_note` と `delete_note` で、認可（`_visible`・`_can_modify`）の確認がトランザクションの外にある。確認から書き込みまでの間に `transfer_notes` で所有者が変わると、旧所有者や権限のない側が更新・削除できてしまう。`delete_note` には楽観的ロックもなく、確認後に他の更新が入っても検出されない。`get_note` は中で再確認しているので、扱いが不整合である。 / 根拠: notes/service.py の update_note（`_row` と認可、その後に `transaction`）、delete_note（同様）。 / 提案: `BEGIN IMMEDIATE` の中で行を読み直し、認可を再判定する。update は version 条件を維持する。\n- [重大4] 区分: 実装 / 対象: R4, R3, AC3, AC4 / 内容: `update_note` が `private` の変更に対応していない点は仕様どおりである。しかし `search_notes` は、タグの検査（個数・型）より先に SQL を組み立て、タグの規則が `_validate` と二重になっている。この二重化は軽微だが、重大なのは `transfer_notes` で、`from_user`・`to_user` の dict を呼び出し側から信用して使い、DB 上の実際の org_id・role と照合しない点である。org_id と role を信用するのは対象外だが、`to_user` が DB に存在しない場合は FK で失敗するだけで、メモの `org_id` と移管先の組織の一致を `UPDATE` の条件で保証していない。 / 根拠: notes/service.py の `UPDATE notes SET owner_id = ? ... WHERE id = ?`。 / 提案: `WHERE id = ? AND org_id = ?` を付け、`rowcount` を確認する。この指摘は影響が限定的なため、実装担当の判断で軽微へ下げてもよい。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: `007.100.<署名>` のように先頭ゼロ付きの note_id・期限も、正規の署名として通る。仕様は「10進の数字だけ」としか書いていないので逸脱ではないが、同じリンクが複数の表記を持つ。 / 提案: 正規形（先頭ゼロなし）だけを許すか、仕様に明記する。\n- [軽微2] 区分: 実装 / 対象: R7 / 内容: `RateLimiter` の `_counts` が増え続け、古い利用者のエントリが消えない。 / 提案: 枠が切れたエントリを掃除する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけを確かめている。タグ・本文の境界、重複タグ、ロールバックがなく不十分。\n- AC2: V2 は所有者の閲覧しか見ていない。他の組織・非公開の NotFound、閲覧数の同時加算がなく不十分。\n- AC3: V3 は1ページ目と簡単な検索だけを見ている。sort の拒否、`%`・`_`、タグ OR、範囲外の page・per_page がなく不十分。実際に欠陥（重大1）を見逃している。\n- AC4: V4 は所有者の更新と削除の正常系だけで、Conflict・Forbidden・競合がなく不十分。\n- AC5: V5 は件数だけを確認しており、元の所有者、組織外の拒否、失敗時の巻き戻しがなく不十分。\n- AC6: V6 は鍵の伏せ方を確かめていないので無効（空洞）。\n- AC7: V7 は枠の再開しか確かめていない。ちょうど window 秒の境界と、スレッドの同時呼び出しがなく不十分。\n- AC8: V8 は往復と改ざん1件だけで、期限ちょうど、期限切れ、形の崩れがなく不十分。\n- AC9: 機密情報が出ないことを確かめるテストがない。\n- AC10: 例外後に接続を使い続けられるテストがない。\n- エンジンが検出したテストの兆候（skip・.only・アサーションなし）はなし。tests/test_notes.py は新規ファイルのため、弱体化の確認は対象外。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest による単体・結合の検証で足りる。ただし並行実行のテストが必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: sort による SQL インジェクションが実在し、テストもない。LIKE のエスケープも未検証。\n- K3: 同時の閲覧・更新・RateLimiter が未検証。update と delete の認可確認にも競合がある。\n- K4: 途中失敗のロールバックが未検証。\n- K5: 監査ログの鍵と、ログ・例外の機密情報が未検証。\n- K6: 組織外への移管と一部だけ移る場合が未検証。\n- K7: 鍵の伏せ方が未検証。\n- K8: 期限ちょうど、改ざん、形の崩れが未検証。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK だった。\n- `list_notes(sort=\"bogus\")` で OperationalError が出ること、`sort=\"(SELECT 1)\"` が通ることを実機で確かめた。\n- `$AQ trace` で、全項目が「合格・反証未実施」であることを確認した。\n- gate は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

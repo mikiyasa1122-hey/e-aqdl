@@ -1,0 +1,49 @@
+{
+ "case": "EXC-02",
+ "rep": 1,
+ "sec": 29.3,
+ "exit": 0,
+ "cost_usd": 0.1248408,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19770,
+  "cache_read_input_tokens": 116448,
+  "output_tokens": 3410,
+  "output_tokens_details": {
+   "thinking_tokens": 444
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19770,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2511,
+    "cache_read_input_tokens": 37805,
+    "cache_creation_input_tokens": 2098,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2098
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 763c4b09\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4 / 対応区分: 修正必須 / 内容: `delete_note` が削除の失敗を握りつぶしている。 / 成立条件: トランザクション中に DB エラーやロック待ちのタイムアウトが起きる。たとえば `hooks.before_write` が例外を投げる場合や、別の接続が書き込みロックを持ち続けている場合。 / 影響: 仕様は「失敗したら例外を呼び出し側に伝える（握りつぶさない）」と定めている。実装では ROLLBACK 後に `log.warning` を出すだけで正常終了するため、呼び出し側は削除できたと誤解する。さらにログに例外文を出しており、R9 の観点でも好ましくない。 / 根拠: `notes/service.py` の `delete_note` 末尾の `except Exception as e: log.warning(...)`。上流にこの例外を拾う処理はない。 / 提案: `try/except` を外して例外を再送出する。ログが必要なら ID だけを出して `raise` する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: テストが正常系の1本ずつにとどまり、仕様が必須とする異常系・境界値・並行・途中失敗の検証が実質ない。 / 成立条件: 認可の条件、LIKE のエスケープ、楽観的ロック、途中失敗のロールバックを外しても、現在の12本は通る。 / 影響: 空洞化している検証は次のとおり。\n  - 他組織・他人の非公開メモが NotFound になること（K1）がテストされていない。\n  - 閲覧数の同時加算（AC2・K3）がテストされていない。\n  - Conflict と、更新・削除の Forbidden（AC4）がテストされていない。\n  - `%`・`_` を含む検索と SQL インジェクション（K2）がテストされていない。\n  - 入力の境界値（題名100/101文字、タグ5/6個、per_page 0/51、sort 不正）がテストされていない。\n  - `before_write` を使った作成・移管・削除の途中失敗のロールバック（K4・K6）がテストされていない。\n  - 組織をまたぐ移管の Forbidden がテストされていない。\n  - api_key の伏せ字は、`export_audit` の結果の `actor_key` を一度も検査していない（AC6・K7）。\n  - RateLimiter の枠の境界がちょうど window 秒になる点（AC7）と、複数スレッドの同時呼び出しがテストされていない。\n  - 共有リンクの期限ちょうど、形の崩れ、署名違いがテストされていない（AC8・K8）。\n  - R9（ログへの機密の混入）と、例外後に接続が使えること（AC10）がテストされていない。 / 根拠: `tests/test_notes.py` の全12本を確認した。`$AQ trace` は全項目を「合格」としているが、AC ごとの検証の中身は上記のとおり。 / 提案: 設計の差し込み口（`service.hooks.before_write`、`RateLimiter.hook`）を使い、上記の異常系・境界値・並行・ロールバックのテストを決定論的に追加する。特に重大1の回帰テストを含める。\n- [重大3] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` が `version` 引数を検証しない。成立条件は version に None などを渡すことだが、この点は未確認。 / 成立条件: 呼び出し側が `version` に不正な型を渡す。 / 影響: `version = None` なら `version = ?` が一致せず Conflict になるため、安全側には倒れる。したがって実害は小さく、重大とは言い切れない。 / 根拠: `service.py` の `update_note`。 / 提案: 追加の検証は不要。軽微1として扱う。\n  ※この項目は重大から外し、軽微1に移す。重大は上の2件（重大1・重大2）とし、件数も2件に訂正する。\n\n### 訂正後の件数\n重大な指摘: 2\n軽微な指摘: 1\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` が `version` の型を明示的に検証しない。不正値は Conflict になる。 / 提案: 必要なら整数かどうかを検査して ValidationError にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否だけを確かめている。境界値、タグの規則、トランザクションで何も残らないことは確かめておらず不十分。\n- AC2: 同じ組織の閲覧しか確かめていない。NotFound の網羅と閲覧数の同時加算が未検証で不十分。\n- AC3: 一覧の1ページ目と単純な検索だけで、範囲外の拒否・`%`/`_`・タグ OR・他人の非公開除外が未検証のため不十分。\n- AC4: 更新と削除の正常系だけで、Conflict・Forbidden・削除失敗の伝播が未検証のため不十分。実装にも欠陥がある（重大1）。\n- AC5: 正常系と非管理者の拒否だけで、組織をまたぐ移管と途中失敗時の復元が未検証のため不十分。\n- AC6: 監査ログの存在を確認するだけで、`actor_key` の伏せ字を見ていないため不十分。\n- AC7: 上限と枠のリセットだけで、ちょうど window 秒の境界とスレッド同時実行が未検証のため不十分。\n- AC8: 往復と改ざん1種類だけで、期限ちょうど・形の崩れ・期限切れが未検証のため不十分。\n- AC9・AC10: 検証なしのため不十分。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。Python ライブラリでユーザー画面や HTTP がない。必要なのは単体テストの追加。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K6、K7、K8 を確かめる異常系のテストが不足している（重大2）。\n\n### 確認したこと\n- spec.md と design.md、`notes/*.py`、`tests/test_notes.py` を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12本すべて通った。\n- `$AQ trace` を確認した。全項目が「合格・反証未実施」だった。\n- 実装側の読み取りでは、`transfer_notes`、`export_audit`、`share.verify_link`、`RateLimiter` の境界と排他の実装は仕様どおりだった。\n- `history` と `git diff` は実行していないため、検証条件の弱体化の有無は未確認。",
+ "files_changed": [],
+ "valid": true
+}

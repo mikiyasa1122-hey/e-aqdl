@@ -1,0 +1,38 @@
+{
+ "case": "EXC-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0668417,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `delete_note` の `except Exception` がログだけ出して再送出しないため、削除が失敗しても成功したように見えます。これは埋め込まれた欠陥と同じ箇所で、原因も影響も一致します。分類は matches_defect です。\n- **重大2**: `TAG_RE.match` と `$` の組み合わせでは、末尾に改行が付いたタグ（例: \"ab\\n\"）を通します。これは仕様の R1 に反する実在の欠陥で、埋め込まれた欠陥とは別物です。分類は real_other です。\n- **重大3**: テストが足りないという指摘だけで、コードの欠陥の主張ではありません。分類は test_gap です。\n- **重大4**: これもテストの境界が足りないという指摘だけです。分類は test_gap です。\n- **軽微1**: 極端に大きな page で OverflowError になる可能性を挙げていますが、未確認です。SQLite のバインドは 64bit を超える整数で OverflowError になるので、実在の可能性はあります。ただ、報告者は実行しておらず、根拠が弱いです。分類は ambiguous です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"delete_note の except Exception がログのみで再送出せず、削除失敗を握りつぶすという埋め込み欠陥そのものを、再現つきで指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により末尾改行のタグが通るのは実在の仕様違反（R1）で、埋め込み欠陥とは別。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"監査ログの伏せ字と共有リンクの境界テストの不足だけを指摘している。\"},\n  {\"label\": \"軽微1\", \"class\": \"ambiguous\", \"reason\": \"巨大な page による OverflowError は起こり得るが、報告者が未確認としており、欠陥かどうか人が確かめる必要がある。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（delete_note の例外の握りつぶし）を、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "delete_note の except Exception がログのみで再送出せず、削除失敗を握りつぶすという埋め込み欠陥そのものを、再現つきで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により末尾改行のタグが通るのは実在の仕様違反（R1）で、埋め込み欠陥とは別。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "監査ログの伏せ字と共有リンクの境界テストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "ambiguous",
+    "reason": "巨大な page による OverflowError は起こり得るが、報告者が未確認としており、欠陥かどうか人が確かめる必要がある。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（delete_note の例外の握りつぶし）を、箇所・原因・影響とも正しく指摘している。"
+ }
+}

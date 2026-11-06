@@ -1,0 +1,49 @@
+{
+ "case": "SQL-03",
+ "rep": 2,
+ "sec": 41.5,
+ "exit": 0,
+ "cost_usd": 0.1368462,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18015,
+  "cache_read_input_tokens": 130102,
+  "output_tokens": 5176,
+  "output_tokens_details": {
+   "thinking_tokens": 752
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18015,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3575,
+    "cache_read_input_tokens": 41576,
+    "cache_creation_input_tokens": 2614,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2614
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 86e2428c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: list_notes の sort を検証しておらず、許可値以外が SQL の ORDER BY にそのまま入る。 / 成立条件: sort に \"updated\"・\"title\" 以外を渡す（利用者の入力が sort に届く場合）。 / 影響: 仕様は ValidationError を要求しているが、実際は sqlite3.OperationalError が出る。ORDER BY 句に任意の式やサブクエリを入れられるため、SQL インジェクションにあたる。他組織や他人の非公開メモの情報を並び順から推測できる可能性があり、この点は未確認。ただし不正な sort が通ることは実行で確認済み。 / 根拠: notes/service.py の list_notes にある `SORT_COLUMNS.get(sort, sort)` を f-string の SQL に埋め込んでいる。上流に sort の検証はない。実行結果は sort='foo' で OperationalError \"no such column: foo\"。sort='id; DROP TABLE notes' は複数文の拒否で止まっただけ（ProgrammingError）。 / 提案: `if sort not in SORT_COLUMNS: raise ValidationError(...)` を追加し、`SORT_COLUMNS[sort]` で引く。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの正規表現が `TAG_RE.match` と `$` の組み合わせで、末尾の改行を通す。 / 成立条件: タグが \"abc\\n\" のように末尾に改行を含む（create・update・search すべて）。 / 影響: 仕様は「英小文字・数字・ハイフンの1〜20文字」。改行入りのタグが保存・検索に使われてしまい、入力検証が破れる。share.py は fullmatch を使っており、実装内で扱いが不統一。 / 根拠: notes/service.py の TAG_RE `^[a-z0-9-]{1,20}$` と、_validate・search_notes 内の `TAG_RE.match(t)`。実行で create_note(tags=['abc\\n']) が成功し id 1 が返った。 / 提案: `TAG_RE.fullmatch(t)` にする（または `\\Z` を使う）。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC3, AC4, AC5, AC7, AC10, K1, K2, K3, K4, K6, K8） / 対応区分: 証拠不足 / 内容: 12 個のテストはほぼ正常系の 1 件ずつで、異常系・境界値・並行実行・失敗時の巻き戻しを確かめていない。重大1・2 の欠陥も検出できていない。 / 成立条件: 現在の tests/test_notes.py のとおり。 / 影響: 仕様が求める検証（下の「受け入れ条件ごとの検証の妥当性」参照）が空洞で、gate が通っても欠陥がないことの証拠にならない。 / 根拠: tests/test_notes.py（90 行、12 テスト）。設計書が約束した hooks.before_write / RateLimiter.hook を使うテストが 1 つもない。 / 提案: 少なくとも次を追加する。(a) 不正な sort・page・per_page・タグ（改行入り）の ValidationError。(b) 他組織・他人の非公開メモの get/update/delete が NotFound になること。(c) 管理者以外・他人の更新・削除の Forbidden と、古い version での Conflict。hooks.before_write で割り込む競合更新も含む。(d) hooks.before_write で例外を起こし、create・delete・transfer が何も残さないこと、その後も接続を使えること。(e) 閲覧数の同時加算（別接続・別スレッド）。(f) transfer の別組織 Forbidden。(g) RateLimiter の枠の境界（ちょうど window 秒）と、hook を使った並行呼び出し。(h) 共有リンクの期限ちょうど・期限切れ・形の崩れ・改行入り。(i) api_key の伏せ字（8 文字未満・ちょうど 8 文字・末尾 4 文字）。(j) `%` と `_` を含む検索語。(k) ログに本文・署名・api_key が出ないこと。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: update_note と delete_note で、可視性・権限の判定がトランザクションの外で読んだ行に基づく。 / 成立条件: 判定と書き込みの間に、別接続が notes の行を変更する（所有者の移管、private への切替など。ただし本実装には private を変える API がないため、起こりうるのは transfer_notes による owner_id の変更）。 / 影響: 移管後の旧所有者が、古い owner_id で通過して更新・削除できてしまう。version は transfer で増えるため update は Conflict になるが、delete には version 検査がなく、権限を失った利用者が削除できる。 / 根拠: notes/service.py の delete_note は `_row` を transaction の外で読み、`_can_modify` 通過後に `DELETE FROM notes WHERE id = ?` を実行する。この削除に owner_id や org_id の条件はない。成立条件は transfer_notes と delete_note の並行実行で、再現の実行はしていない。 / 提案: transaction 内で行を読み直して `_visible`・`_can_modify` を再判定する（get_note の書き方に合わせる）。または DELETE の WHERE に owner_id を入れて rowcount を確認する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: update_note の `_validate` が、更新しない項目（既存の title・body）にも再検証をかける。また body が None のままなら検証しない。 / 提案: 動作に問題はないため現状のままでよい。コメントで意図を残すと保守しやすい。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系（test_create_and_get）と空の題名だけで不十分。本文・タグの上限、重複タグ、tags に文字列を渡す、途中失敗時に何も残らない（hooks.before_write）が未検証。実装にもタグの欠陥がある。\n- AC2: V2 は作成者本人の閲覧だけで不十分。他組織・他人の非公開・存在しないメモの NotFound と、閲覧数の同時加算が未検証。\n- AC3: V3 は一覧 1 ページ目と単純な検索だけで不十分。page・per_page・sort の範囲外、title 順、`%` と `_`、タグの OR 絞り込みが未検証。実装に sort の欠陥がある。\n- AC4: V4 は所有者の正常な更新と削除だけで不十分。Forbidden、NotFound、Conflict、割り込み更新、削除の失敗伝播、更新時の検証が未検証。\n- AC5: V5 は件数が 2 であることしか見ておらず不十分。移管後の所有者、別組織の拒否、途中失敗で元のままになることが未検証。\n- AC6: V6 は action と actor だけを見ており、api_key の伏せ字を全く確かめていないため不十分。\n- AC7: V7 は単純な超過と枠の再開だけで不十分。ちょうど window 秒の境界と、複数スレッドの同時呼び出し（hook で再現できる）が未検証。\n- AC8: V8 は往復と改ざん 1 件だけで不十分。期限ちょうど、期限切れ、形の崩れ、改行入りリンクが未検証。\n- AC9: V9 は対応するテストが存在せず、ログや出力に機密情報が出ないことの証拠がない。\n- AC10: V10 は対応するテストが存在せず、例外後に接続を使えることの証拠がない。transaction() のコード自体は妥当に見える。\n- エンジンが検出したテストの兆候: なし。skip・only・アサーションなしは見つからなかった。\n- 検証条件の改ざん・弱体化: history を確認したが、V1〜V10・VK1〜VK8 は追加のみで、弱体化はなかった（出力が途中で切れたため、後半は未確認）。\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、リスクは単体・統合テストで確かめられる）。ただし、別接続・別スレッドでファイル DB を使う並行テストは必要。\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモが漏れないことの検証がない。\n- K2: 不正な sort や LIKE の特殊文字に対する検証がない。\n- K3: 同時の更新・閲覧・呼び出しで数が失われないことの検証がない。\n- K4: 途中の失敗で何も残らないことの検証がない。\n- K5・K7: api_key の伏せ字とログへの出力の検証がない。\n- K6: 別組織への移管の拒否と、途中失敗で元のままになることの検証がない。\n- K8: 期限の境界と、形の崩れたリンクの検証がない。\n### 確認したこと\n- spec.md・design.md、notes/ の全ソース、tests/test_notes.py を通読した。\n- `python3 -B -m unittest discover -s tests -t .` → 12 件すべて合格（ただし上記の欠陥は検出できていない）。\n- 実行で欠陥を確認した。create_note(tags=['abc\\n']) が成功した。list_notes(sort='foo') は OperationalError、sort='id; DROP TABLE notes' は ProgrammingError になった（どちらも ValidationError ではない）。\n- `$AQ trace` で全要求の検証が「合格（反証未実施）」であることを確認した。`$AQ history` は出力が途中で切れた。\n- `$AQ gate` は実行していない。ファイルやリポジトリは変更していない。\n```",
+ "files_changed": [],
+ "valid": true
+}

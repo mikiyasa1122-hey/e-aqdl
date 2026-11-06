@@ -1,0 +1,38 @@
+{
+ "case": "TX-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0666137,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込んだ欠陥そのものを指摘している。箇所は notes/service.py の create_note で、原因はメモの INSERT をコミットしてからタグ・監査を別トランザクションで挿入していること。影響は、タグ・監査の失敗でタグのないメモが残ること。正解データと一致する。\n\n**重大2**: テスト不足の一般的な指摘だけで、コードの欠陥の主張ではない。test_gap。\n\n**重大3**: Conflict を検証するテストがないという指摘。実装は「おそらく正しい」と自ら述べている。test_gap。\n\n**重大4**: RateLimiter の境界と並行のテストがないという指摘。実装は「おそらく正しい」としている。test_gap。\n\n**軽微1**: update_note と delete_note の権限判定がトランザクションの外にあり、判定後に移管されると旧所有者が更新できる余地がある、という指摘。\n- 実際に判定は BEGIN IMMEDIATE の外にある。\n- 移管は version を上げるため、旧 version での更新は Conflict になる。ただし delete_note には version の条件がなく、削除は通る。\n- 仕様の R4 に反する実在の競合の穴とも読める。ただ、レビュー担当自身が影響を限定的としていて、根拠の行番号も実際のコードとずれている（139-157）。\n- 埋め込んだ欠陥ではない。実在の軽微な欠陥として real_other が妥当。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"create_note がメモのINSERTをコミットしてからタグ・監査を別トランザクションで挿入する点を、同じ箇所・同じ原因と影響で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストが正常系中心で受け入れ条件の大半を確かめていないという、テスト不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"Conflict を検証するテストがないという指摘で、実装は正しいと述べている。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界と並行のテスト不足の指摘で、実装は正しいと述べている。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限判定がトランザクション外にあり、移管との競合で旧所有者が操作できる余地がある。delete_note には version の条件もなく、実在する軽微な欠陥。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥を原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "create_note がメモのINSERTをコミットしてからタグ・監査を別トランザクションで挿入する点を、同じ箇所・同じ原因と影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストが正常系中心で受け入れ条件の大半を確かめていないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "Conflict を検証するテストがないという指摘で、実装は正しいと述べている。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界と並行のテスト不足の指摘で、実装は正しいと述べている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限判定がトランザクション外にあり、移管との競合で旧所有者が操作できる余地がある。delete_note には version の条件もなく、実在する軽微な欠陥。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥を原因・影響とも正確に指摘している。"
+ }
+}

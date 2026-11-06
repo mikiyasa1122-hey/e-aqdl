@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-06",
+ "rep": 2,
+ "sec": 45.9,
+ "exit": 0,
+ "cost_usd": 0.1585278,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22967,
+  "cache_read_input_tokens": 116038,
+  "output_tokens": 5504,
+  "output_tokens_details": {
+   "thinking_tokens": 1299
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22967,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3573,
+    "cache_read_input_tokens": 39143,
+    "cache_creation_input_tokens": 2930,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2930
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 7\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f7150041\n\n### 指摘\n- [重大1] 区分: テスト / 対象: R2, K1, AC2, VK1 / 内容: 見え方の検証が空洞。他組織・他人の非公開・存在しないメモが NotFound になるテストが1つもない。閲覧数が増えること、同時閲覧で数え漏れがないことのテストもない。 / 根拠: tests/test_notes.py に NotFound を使うのは delete 後の get 1件だけ。views を見る assert は 0 件 / 提案: 他組織・他人の非公開・存在しないメモの各 NotFound、管理者でも他人の非公開は NotFound、閲覧数+1、別接続・複数スレッドの同時閲覧（`hooks.before_write(\"view\")` を使う）のテストを追加する。\n- [重大2] 区分: テスト / 対象: R4, K3, AC4, V4, VK3 / 内容: 更新・削除の検証が空洞。Conflict（古い version、読み出しと書き込みの間の割り込み）、Forbidden（他人の更新・削除）、管理者による更新・削除、更新時の入力検証（タグを含む）、削除の失敗時に例外が伝わりロールバックされることを、どれも確かめていない。 / 根拠: tests の更新・削除は作成者の正常系1件ずつだけ。`hooks.before_write(\"update\")` と `delete:note` の差し込み口は一度も使われていない / 提案: `hooks.before_write` から別接続で割り込み更新して Conflict を再現するテスト、`delete:note` で例外を出させてタグとメモが残ることを確かめるテスト、Forbidden のテストを追加する。\n- [重大3] 区分: テスト / 対象: R5, K6, AC5, V5, VK6 / 内容: 移管の検証が不十分。正常系は件数しか見ていない。別組織への移管が Forbidden になること、途中で失敗したら元のままであること、移管後の owner_id を確かめていない。 / 根拠: test_transfer は戻り値 2 の assert のみ（tests/test_notes.py:49-52）。`transfer:{i}` フックは未使用 / 提案: from・to が別組織のとき Forbidden、2件目で失敗させて全件が元の owner のままであること、移管後の所有者のテストを追加する。\n- [重大4] 区分: テスト / 対象: R7, K3, AC7, V7 / 内容: 枠の境界と同時呼び出しの検証がない。ちょうど window 秒の時点で新しい枠になること、window 秒の1つ手前ではまだ同じ枠であること、複数スレッドで上限を超えて通さないことを確かめていない。 / 根拠: test_limit は t=61 の1点だけ（tests/test_notes.py:62-71）。`RateLimiter.hook` と複数スレッドのテストはない / 提案: t=59.99 と t=60 の境界、N スレッドで limit 回しか成功しないこと（Barrier か hook を使い、sleep は使わない）のテストを追加する。\n- [重大5] 区分: テスト / 対象: R8, K8, AC8, VK8 / 内容: 期限と形式の検証がない。期限ちょうどが無効になること、期限切れ、形の崩れたリンク（桁、大文字の16進、改行、空文字、str 以外）、署名の改ざんが Forbidden になることを確かめていない。tampered テストは note_id の書き換え1件だけ。 / 根拠: tests/test_notes.py:74-85 / 提案: expires-1 は有効、expires ちょうどは Forbidden とする境界テスト、署名の1文字改ざん、不正な形のテーブルテスト、別の secret のテストを追加する。\n- [重大6] 区分: テスト / 対象: R6, R9, K5, K7, AC6, AC9, V6, V9, VK7 / 内容: api_key の伏せ字を検証していない。末尾4文字以外が * になること、8文字未満がすべて伏せられること、管理者以外は拒否されることを確かめていない。ログや例外メッセージに本文・署名・api_key が出ないことのテストもない。 / 根拠: test_export_audit は action と actor しか見ない（tests/test_notes.py:54-58）。`assertLogs` の使用は 0 件 / 提案: 鍵の長さ 3、7、8、12 で actor_key を厳密に比較し、assertLogs と例外メッセージに本文・署名・鍵が含まれないことを確かめる。\n- [重大7] 区分: テスト / 対象: R1, R3, K2, K4, AC1, AC3, AC10, V1, V3, V10, VK2, VK4, R10 / 内容: 入力検証・境界・失敗時の検証が欠けている。題名の空白だけ・101文字、本文10001文字、タグ6個（重複を含む）・不正なタグ・文字列のタグ、page・per_page・sort の範囲外、検索語の `%` `_` とタグの OR、SQL インジェクション文字列を試すテスト、`create:tags` フックでの全件ロールバック、例外後に同じ接続で次の操作ができること（AC10）を確かめていない。 / 根拠: tests の入力拒否は空題名1件だけ。他組織を除外する一覧・検索のテストもない / 提案: 境界値の表形式テスト、`create:tags` で例外を出させてメモ・タグ・監査が0件であることと、その後に接続が使えること、`%` `_` `' OR 1=1 --` を含む検索、他組織・他人の非公開メモが一覧・検索に出ないことを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: delete_note は DELETE の rowcount を見ない。権限チェックもトランザクションの外なので、同時削除では2件目も成功して監査が二重に残る。update_note も、同時に削除されると NotFound ではなく Conflict になる。 / 根拠: notes/service.py:158-166 / 提案: トランザクション内で再度読んで確かめる（または rowcount を見る）。\n- [軽微2] 区分: 実装 / 対象: R8 / 内容: verify_link は先頭ゼロ付きの note_id（`007.…`）を int 化して署名を計算するため、同じ署名で別表記のリンクが通る。note_id の桁数の上限も仕様にない。 / 根拠: notes/share.py:11, 33 / 提案: 正規の表記（先頭ゼロなし）のみ通すか、仕様に明記する。\n- [軽微3] 区分: 実装 / 対象: R4 / 内容: update_note は、渡された version が読み出した行の version と異なる場合も、そのまま UPDATE に進む。タグを省略して title や body を部分更新するとき、読み出しが古ければ省略した項目を古い値で上書きする可能性がある。 / 根拠: notes/service.py:136-140 / 提案: トランザクション内で行を読み直してから値を組み立てる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1、VK4 は正常系と空題名1件だけで不十分。他の境界、タグの規則、失敗時のロールバックを確かめていない。\n- AC2: V2、VK1 は不十分。NotFound の各場合、閲覧数、同時閲覧がテストなし（重大1）。\n- AC3: V3、VK2 は不十分。検索と一覧の正常系しかない。範囲外の拒否、`%` `_`、タグの OR、組織・非公開の除外、インジェクションがテストなし。\n- AC4: V4、VK3 は不十分。Conflict、Forbidden、管理者、削除の失敗が未検証（重大2）。\n- AC5: V5、VK6 は不十分（重大3）。\n- AC6: V6、VK7 は不十分。伏せ字が未検証（重大6）。\n- AC7: V7 は不十分。境界と同時が未検証（重大4）。\n- AC8: V8、VK8 は不十分（重大5）。\n- AC9: V9、VK5 は不十分。ログ・例外に機密が出ないことのテストが皆無。\n- AC10: V10 は不十分。例外後に接続を再利用できることのテストがない。\n- 実装コードを読んだ限り、多くの要件は満たしているように見える。ただし検証が欠けているため、通ったとは言えない。\n- エンジンが検出したテストの兆候はなし。ただし重大1〜7のとおり、テストの量と質が足りない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テスト（別接続・複数スレッド・フックの利用）で十分に確かめられる。ただし、ファイル DB を使った複数接続・複数スレッドのテストは必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開の漏えいを確かめるテストがない。\n- K2: インジェクションと LIKE のエスケープを確かめるテストがない。\n- K3: 同時の閲覧・更新・呼び出しを再現するテストがない（フックを用意しているのに使っていない）。\n- K4: ロールバックのテストがない。\n- K5、K7: 機密情報の露出と伏せ字のテストがない。\n- K6: 別組織への移管と一部だけ移る場合のテストがない。\n- K8: 期限の境界と形の崩れたリンクのテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py の全ソース、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` → 12件すべて OK（0.008秒）。\n- `aqdlc trace` と `history --since 0` を確認した。検証条件の弱体化の履歴はない（新規追加のみ）。\n- 反証テストは無効。`git status` では全体が未追跡で、差分比較はできなかった。\n- ファイル・リポジトリは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

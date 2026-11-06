@@ -1,0 +1,38 @@
+{
+ "case": "EXC-01",
+ "rep": 1,
+ "judge_cost_usd": 0.0657197,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `get_note` が、見られないメモに `Forbidden` を返しています。存在しないメモは `NotFound` なので、例外の種類で存在が分かります。これは埋め込んだ欠陥と同じ箇所で、原因も影響も一致します。\n- **重大2**: `update_note` は、トランザクション外で `row` を読み、`title` と `body` を補完しています。ただし `UPDATE` は `WHERE version = ?` で守られています。version が最新なら、読み出し後に他の更新が入れば version が変わり、`Conflict` になります。古い値で上書きされる経路は成立せず、報告自身も再現していません。可視性の再確認がないという点も、仕様が要求する範囲を超えています。そのため false_positive と判断します。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: 並行実行テストの不足だけを指摘しています。\n- **軽微1**: 検査コードの重複という保守性の提案です。欠陥の主張ではありません。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し、NotFound と区別できて存在が分かるという、埋め込んだ欠陥そのものを指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"false_positive\", \"reason\": \"UPDATE が WHERE version = ? で守られているため、読み出し後に他の更新が入れば Conflict になる。古い値での上書きは成立しない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘している。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"hooks を使った並行実行テストの欠如だけを指摘している。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。\"}\n], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が get_note の Forbidden と NotFound の不統一による存在の漏えいを正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し、NotFound と区別できて存在が分かるという、埋め込んだ欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "false_positive",
+    "reason": "UPDATE が WHERE version = ? で守られているため、読み出し後に他の更新が入れば Conflict になる。古い値での上書きは成立しない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "hooks を使った並行実行テストの欠如だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が get_note の Forbidden と NotFound の不統一による存在の漏えいを正確に指摘している。"
+ }
+}

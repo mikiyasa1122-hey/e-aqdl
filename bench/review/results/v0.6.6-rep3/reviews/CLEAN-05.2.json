@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-05",
+ "rep": 2,
+ "sec": 51.4,
+ "exit": 0,
+ "cost_usd": 0.1720178,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 24095,
+  "cache_read_input_tokens": 116918,
+  "output_tokens": 6393,
+  "output_tokens_details": {
+   "thinking_tokens": 1878
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24095,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3747,
+    "cache_read_input_tokens": 39571,
+    "cache_creation_input_tokens": 3630,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3630
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e52d0cbc\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検査で末尾の改行を通してしまう。`TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っており、`$` が末尾の改行の手前にも一致する。そのため `\"abc\\n\"` や、20文字のタグ+改行が通る。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する。共有リンクの正規表現は `fullmatch` で対策済みなのに、タグには対策がない。 / 根拠: notes/service.py:14, 66-67, 133。`create_note(conn, u, 't', 'b', ['abc\\n'])` が成功する（実行で確認、note_id=1 が返った）。 / 提案: `TAG_RE.fullmatch` を使う（または `\\Z`）。改行を含むタグを拒否するテストを、作成・更新・検索の3か所に追加する。\n- [重大2] 区分: テスト / 対象: R2, R3, R4, R5, K1, K6, AC2〜AC5, VK1 / 内容: 他の組織や他人の非公開メモの漏えい（K1・K6）を確かめるテストが1件もない。次のものがすべてない。\n  - 他の組織・他人の非公開・存在しないメモの NotFound\n  - 管理者が非公開メモを扱ったときの NotFound\n  - 非作成者の Forbidden\n  - 一覧・検索に他人の非公開メモが出ないこと\n  - 移管の組織またぎの Forbidden\n  `_visible` や `_can_modify` の条件を外しても全テストが通る。 / 根拠: tests/test_notes.py には正常系12件だけ。テスト対象ファイルは1つで、`Forbidden` を使うのは「member による移管」の1件。 / 提案: 設計書の認可関数ごとに、拒否側のテストを追加する。\n- [重大3] 区分: テスト / 対象: R4, K3, AC4, VK3 / 内容: 楽観的ロックの Conflict が未検証。古い version での更新、読み出しと書き込みの間に他の更新が入るケース、後から書いた側が先の更新を消さないことのどれも確かめていない。更新時のタグ検査と、削除の途中失敗・例外の伝播もない。 / 根拠: tests/test_notes.py に `Conflict` の import も使用もない。`hooks.before_write` は設計でテスト用の差し込み口とされているが、テストから一度も使われていない。 / 提案: `before_write(\"update\")` で別接続から更新を割り込ませ、Conflict と先の更新が残ることを確認する。version が古い場合のテストも追加する。`WHERE version = ?` を外すと失敗するようにする。\n- [重大4] 区分: テスト / 対象: R2, R7, K3, AC2, AC7, VK3 / 内容: 同時実行のテストがない。閲覧数の数え漏れ（複数スレッド・複数接続）と、RateLimiter が複数スレッドから呼ばれたときの上限が未検証。AC7 の枠の境界（ちょうど window 秒で新しい枠になる）もない。既存の RateLimit テストは 0→61 秒の1点だけで、60 秒ちょうどと 59.99 秒を確かめていない。 / 根拠: tests/test_notes.py:63-72。`RateLimiter.hook` と `threading` はテストで使われていない。 / 提案: 別々の接続・スレッドで get_note を N 回呼び、views==N を確認する。`RateLimiter.hook` で割り込みを決定論的に再現する（sleep には頼らない）。境界値は 59.99 / 60 秒で確かめる。\n- [重大5] 区分: テスト / 対象: R1, R4, R5, R10, K4, AC1, AC5, AC10 / 内容: 失敗時のロールバックと、例外の後に接続が使い続けられること（AC10）が未検証。次のものがない。\n  - タグ挿入時の失敗で、メモ・タグ・監査ログが何も残らないこと\n  - 移管の途中失敗で元のままであること\n  - 例外の後に同じ接続で次の操作ができること\n  - 入力検証の境界（題名100/101文字、本文10000/10001文字、タグ5/6個、重複タグ、tags に文字列を渡す）\n  - 一覧の page・per_page・sort の範囲外\n  - 検索の `%`・`_`・SQL インジェクション文字列（K2） / 根拠: tests/test_notes.py に ValidationError のテストは「空の題名」1件だけ。`before_write` を使うテストはない。 / 提案: `before_write` で例外を起こして、各テーブルの件数が 0 のままであることを確認する。上記の境界値と、`%`・`_`・`' OR 1=1 --` を含む検索を追加する。\n- [重大6] 区分: テスト / 対象: R6, R8, R9, K5, K7, K8, AC6, AC8, AC9 / 内容: 次のものが未検証。\n  - api_key のマスクは出力に `ak-alice-0001` が出ないことしか見ておらず、実際にはアサーションもない（`actor` と `action` しか確認していない）。末尾4文字の維持、8文字未満の全伏せ、ちょうど8文字の境界がない。\n  - 共有リンクの期限境界（`now == expires` で Forbidden、`expires-1` で有効）、期限切れ、形の崩れ、署名違い、改ざんされた期限のどれもない。\n  - ログに本文・署名・api_key が出ないこと（`assertLogs` で確かめる）がない。\n  - 監査ログの管理者以外の拒否（Forbidden）がない。 / 根拠: tests/test_notes.py:53-60, 75-89。 / 提案: 上記を追加する。\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 内容: 共有リンクの note_id と期限の先頭ゼロを許してしまう。`007.100.<sig>` は、`7.100.<sig>` と同じ署名で有効になる（実行で確認）。仕様違反ではないが、同じリンクが複数の表記で通る。 / 根拠: notes/share.py:13, 33, 37。 / 提案: 先頭ゼロを拒否する（正準形のみ受理）。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: update_note と delete_note は、認可（`_visible`・`_can_modify`）をトランザクションの外で読んだ行で判定している。読んだ後に所有者が移管されると、古い所有者の権限で更新が通る余地がある（version が加算されるので多くは Conflict になる）。delete には version の条件もない。 / 根拠: notes/service.py:151-175。 / 提案: 認可の判定をトランザクション内で行うか、UPDATE/DELETE の条件に `owner_id` を含める。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空の題名だけで不十分。境界値、タグの規則（重大1も検出できていない）、失敗時に何も残らないことがない。\n- AC2: V2 は閲覧の正常系だけで不十分。NotFound の3種類、閲覧数の増加、同時の閲覧がない。\n- AC3: V3 は不十分。ページング1件と部分一致1件だけ。範囲外、`%`・`_`、タグの OR、他人の非公開の除外、インジェクションがない。\n- AC4: V4 は不十分。作成者による更新・削除の正常系だけ。Conflict、Forbidden、管理者、タグの検査がない。\n- AC5: V5 は不十分。正常系と member 拒否だけ。組織またぎ、全部か何もないか、失敗時の巻き戻しがない。\n- AC6: V6 は不十分。api_key のマスクを確かめていない。\n- AC7: V7 は不十分。境界（ちょうど window 秒）と同時の呼び出しがない。\n- AC8: V8 は不十分。往復と、数字を差し替えた改ざん1件だけ。期限の境界、期限切れ、形の崩れ、署名の改ざんがない。\n- AC9: V9 は未検証（ログ・例外のメッセージを確かめるテストがない）。\n- AC10: V10 は未検証。\n- 重要なリスク K1〜K8 は、検証がほぼ空洞。反証（条件を外すと落ちる）ができるテストが実質ない。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしは見つかっていない）。検証条件の改ざんも `history` で確認できなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、単体テストと統合テスト（実 SQLite・別接続・スレッド）で足りる。ただし並行テストは別々の接続・スレッドで行うこと。\n\n### 不足しているリスク\n- K1・K6: 認可の拒否テストが全くない。\n- K2: インジェクション文字列を使った検索テストがない。\n- K3: 更新の競合と閲覧数・RateLimiter の同時実行が未検証。\n- K4: 途中の失敗のロールバックが未検証。\n- K5・K7: ログの機密情報とマスクの内容が未検証。\n- K8: 期限切れ・改ざん・形の崩れのリンクが未検証。\n- R1: タグの検証が、末尾に改行のあるタグを通してしまう（重大1）。\n\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests`: 12件すべて合格。ただし上記のとおり検証は薄い。\n- 再現実行: `create_note(..., ['abc\\n'])` が成功する（タグの検査漏れ）。`007.` 形式のリンクが有効になる。\n- `aqdlc trace` で全要求の証拠が `passed_but_unchallenged`（反証未実施）であることを確認した。\n- `aqdlc history` の先頭部分では、検証条件を弱めた形跡は見つからなかった（出力が途中で切れたため、全件は確認していない）。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

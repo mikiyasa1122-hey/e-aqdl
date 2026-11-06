@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-09",
+ "rep": 2,
+ "sec": 39.5,
+ "exit": 0,
+ "cost_usd": 0.1381851,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20619,
+  "cache_read_input_tokens": 109231,
+  "output_tokens": 4477,
+  "output_tokens_details": {
+   "thinking_tokens": 1067
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20619,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2780,
+    "cache_read_input_tokens": 35746,
+    "cache_creation_input_tokens": 3979,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3979
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 095b6340\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検証が `TAG_RE.match` と `$` を使っているため、末尾に改行を含むタグ（例: `\"abc\\n\"`）が通ってしまう。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する。 / 根拠: notes/service.py:15 の正規表現と、`_validate`（service.py:55-60）および `search_notes`（service.py:141 付近）の `match`。再現手順は `create_note(c,u,'t','b',['abc\\n'])`。実際に実行すると ID 1 が返り、作成に成功した。`search_notes` に同じタグを渡しても受理された。share.py は `fullmatch` を使っており、この点は対応済み。 / 提案: `fullmatch` に統一するか、パターンを `\\Z` で閉じる。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 内容: テストは 12 件だけで、ほぼ正常系の 1 ケースずつ。受け入れ条件の中心である異常系・境界・並行が検証されていない。具体的に欠けているもの:\n  - R1: 各種の長さの境界、タグ6個、重複タグ、tags に文字列を渡す、途中の失敗時にロールバックされること（`hooks.before_write` が使われていない）\n  - R2: 他の組織・他人の非公開メモが NotFound になること、閲覧数が並行しても正確に増えること\n  - R3: `%` や `_` の部分一致、SQL インジェクション、per_page・page・sort の範囲外、タグの OR 絞り込み、他人の非公開メモが含まれないこと\n  - R4: Conflict、Forbidden、管理者による操作、非公開メモは管理者にも NotFound、タグ検証、削除失敗時の巻き戻し\n  - R5: 組織をまたぐ移管の拒否、途中失敗時の全巻き戻し\n  - R6: 伏せ字（`api_key` の末尾4文字以外を伏せる処理、8文字未満の全伏せ）。`test_export_audit` は action と actor しか見ていない\n  - R7: ちょうど window 秒での枠の切り替え（テストは 61 秒しか見ていない）、スレッドでの同時呼び出し\n  - R8: 期限ちょうど、形の崩れたリンク、期限切れ\n  - R9: ログや例外に機密情報が出ないこと\n  - R10: 例外の後に接続を使い続けられること\n  \n  これらの条件を外してもテストは落ちない。トレースで「合格」となっているのは、AC・K 単位の検証がこの薄いテストに紐づいているだけで、中身は空洞。重大1の不具合も、テストがないため見逃された。 / 根拠: tests/test_notes.py 全体（90 行）。`hooks`・`RateLimiter.hook` の差し込み口を使うテストがない。 / 提案: 上記の項目ごとに、決定論的なテスト（hook を使った並行・途中失敗の再現を含む）を追加する。\n- [重大3] 区分: 実装 / 対象: R4, K1, K3 / 内容: update_note と delete_note は、権限の確認（`_visible`・`_can_modify`）をトランザクションの外で行っている。確認後に他の更新（移管による owner の変更など）が入ると、古い行の情報で認可が判定される。更新側は version の条件で Conflict になるが、削除側は version も権限も再確認せず、移管された後でも元の所有者や管理者がメモを消せる。 / 根拠: notes/service.py:157-170（更新）と :173-183（削除）。削除は `DELETE ... WHERE id = ?` だけで、`rowcount` の確認もない。 / 提案: トランザクション（BEGIN IMMEDIATE）の中で行を読み直し、`_visible`・`_can_modify` を再判定する。\n\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: note_id に先頭ゼロを許す（`007.…`）。署名は int 化した値で計算するため、`7.…` と同じ署名で通る（リンクの表現が複数できる）。仕様の形式違反ではない。 / 提案: 先頭ゼロを拒否するか、受け入れても正規形で検証する。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: `update_note` で `title`・`body` を渡さない場合に、読み出した古い行の値で補完している。version の条件で Conflict にはなるが、`version` 引数が古くない場合の整合は version 一致に依存している。現状は問題ないが、重大3と合わせてトランザクション内で読み直すほうが安全。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1・VK4 は正常系と空の題名だけで不十分。境界、タグの検証（実装バグも未検出）、ロールバックが未検証。\n- AC2: V2・VK1 は作成者本人の閲覧だけで不十分。他組織・非公開・存在しない場合の NotFound、閲覧数の並行が未検証。\n- AC3: V3・VK2 は 1 ページ目の件数と単純な検索だけで不十分。`%`・`_`、インジェクション、範囲外、タグの OR、非公開の除外が未検証。\n- AC4: V4・VK3 は作成者による更新・削除の正常系だけで不十分。Conflict、Forbidden、管理者、巻き戻しが未検証。\n- AC5: V5・VK6 は件数の確認と非管理者の拒否だけで不十分。組織またぎと途中失敗の巻き戻しが未検証。\n- AC6: V6・VK7 は伏せ字を確認しておらず、検証が空洞。\n- AC7: V7 は枠の境界（ちょうど window 秒）と同時の呼び出しを確かめておらず不十分。\n- AC8: V8・VK8 は往復と改ざん 1 例だけで不十分。期限ちょうど・期限切れ・形の崩れが未検証。\n- AC9: V9・VK5 に対応するテストがなく、検証が空洞。\n- AC10: V10 に対応するテストがなく、検証が空洞。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしは見つからなかった）。\n\n### E2E の要否\n- 不要（HTTP なしのライブラリで、SQLite を使った単体テストで十分に確かめられる）。ただし、並行と途中失敗の決定論的な単体テストが必要。\n\n### 不足しているリスク\n- K1: 認可の確認がトランザクション外にあり（重大3）、移管後の削除などが通る可能性がある。\n- K3: 閲覧数・更新・RateLimiter の並行テストがない。\n- K4: 途中失敗のロールバックを確かめるテストがない。\n- K5, K7: 伏せ字、ログ・例外の機密情報のテストがない。\n- K2, K8: インジェクション、リンクの境界のテストがない。\n\n### 確認したこと\n- 仕様・設計・全ソース（db.py・service.py・ratelimit.py・share.py・errors.py）とテストを読んだ。\n- `python3 -B -m unittest discover -s tests -t .` → 12 件、すべて成功。\n- 末尾に改行を含むタグで `create_note` と `search_notes` を実行し、どちらも受理されることを確認した（重大1）。\n- `aqdlc history --since 0` を確認し、検証条件の弱体化は見つからなかった。`trace` は全項目が「合格・反証未実施」で、反証テストは無効。\n- コードは変更していない。`gate` も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

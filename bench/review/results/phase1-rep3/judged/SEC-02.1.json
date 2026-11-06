@@ -1,0 +1,28 @@
+{
+ "case": "SEC-02",
+ "rep": 1,
+ "judge_cost_usd": 0.060061699999999996,
+ "judge_raw": "重大1は、埋め込まれた欠陥そのものを指摘しています。`export_audit` が `actor_key` に api_key をそのまま返しており、箇所も原因も影響も正解データと一致します。\n\n重大2は、コードの欠陥ではなくテストの不足だけを指摘しているので、test_gap です。\n\n軽微1は、`search_notes` と `_validate` の検査が重複しているという保守性の提案で、欠陥の主張ではないので style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずに返すという、埋め込まれた欠陥と同じ箇所・原因・影響を指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値・並行・巻き戻しのテスト不足を指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が export_audit の api_key 未マスクを、仕様の伏せ方と修正案つきで指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずに返すという、埋め込まれた欠陥と同じ箇所・原因・影響を指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "異常系・境界値・並行・巻き戻しのテスト不足を指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が export_audit の api_key 未マスクを、仕様の伏せ方と修正案つきで指摘している。"
+ }
+}

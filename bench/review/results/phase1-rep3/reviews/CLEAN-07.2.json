@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-07",
+ "rep": 2,
+ "sec": 47.6,
+ "exit": 0,
+ "cost_usd": 0.13368750000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15914,
+  "cache_read_input_tokens": 119155,
+  "output_tokens": 5810,
+  "output_tokens_details": {
+   "thinking_tokens": 1390
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15914,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4105,
+    "cache_read_input_tokens": 36121,
+    "cache_creation_input_tokens": 5960,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5960
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d524f16c\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC4, R1, R2, R4, K1, K3, K4, V2, V4, VK1, VK3, VK4 / 対応区分: 証拠不足 / 内容: 認可と整合性の検証が実質ない。`tests/test_notes.py` の 12 件は正常系が中心で、次のどれも確かめていない。\n  - 他の組織のメモや他人の非公開メモが NotFound になること。\n  - 管理者が非公開メモを NotFound と判定されること。\n  - 作成者でも管理者でもない人の Forbidden。\n  - 古い version による Conflict。\n  - 閲覧数の同時加算。\n  - 作成中・削除中の失敗時にロールバックされること（`hooks.before_write`）。\n  \n  設計が用意した `hooks` と `RateLimiter.hook` の差し込み口を、テストが一度も使っていない。\n  / 成立条件: `_visible` や `_can_modify` の条件が壊れても、全テストが通る。/ 影響: 漏えい（K1）、更新の消失（K3）、不整合（K4）を防ぐ証拠がない。/ 根拠: tests/test_notes.py 全体。`grep` で NotFound は `test_delete_by_owner` 1 件だけ、Conflict は 0 件。`unittest` は 12 件すべて OK だが、上記は未検証。/ 提案: 別組織・他人の非公開・存在しない ID の NotFound、Forbidden、古い version の Conflict、`hooks.before_write` で例外を起こした後に何も残らず接続が使えること、2 スレッドの閲覧数と更新の競合（`hooks` で順序を固定）のテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1, AC3, AC5, K2, K6, V1, V3, V5, VK2, VK6 / 対応区分: 証拠不足 / 内容: 入力検証の境界値、SQL、移管の検証がない。\n  - 題名 100/101 文字、空白だけ、本文 10000/10001 文字。\n  - タグ 5/6 個、重複、不正な文字、文字列そのもの。\n  - page/per_page/sort の範囲外。\n  - `%` と `_` の検索、インジェクション文字列。\n  - タグの OR 絞り込み。\n  - 移管で別組織のユーザーを渡したときの Forbidden。\n  - 移管の途中で失敗したときに元のままであること。\n  \n  現状のテストは空題名の 1 件だけ。/ 成立条件: `_validate` や `_like_escape` を壊しても通る。/ 影響: R1・R3・R5 の仕様をテストが守れていない。/ 根拠: tests/test_notes.py の `test_empty_title_rejected`、`test_list_first_page`、`test_search`、`test_transfer`。/ 提案: 各規則の境界の上下と、`hooks.before_write(\"transfer:<id>\")` で途中の失敗を起こす移管のテストを追加する。\n- [重大3] 区分: テスト / 対象: AC6, AC7, AC8, AC9, AC10, K5, K7, K8, V6〜V10, VK5, VK7, VK8 / 対応区分: 証拠不足 / 内容: マスク・レート制限・共有リンク・機密情報・接続の再利用の検証が弱いか、ない。\n  - `test_export_audit` は api_key のマスクを一切確かめていない。8 文字未満や末尾 4 文字のケースもない。\n  - RateLimiter は「ちょうど window 秒」の境界と複数スレッドの同時呼び出しが未検証。\n  - 共有リンクは、期限ちょうど（now == expires）、期限切れ、形の崩れ（長さ・大文字・改行・非数字）、署名の改ざんが未検証。改ざんは note_id の置換 1 件だけ。\n  - ログや例外に本文・署名・api_key が出ないこと（caplog 等）を確かめるテストがない。\n  - 例外の後に接続を使い続けられることを確かめるテストがない。\n  \n  / 成立条件: マスク処理の削除、`>=` を `>` に変える、ロックの除去のいずれでも全テストが通る。/ 影響: 機密情報の漏えいや、上限超過・期限切れリンクの通過を防ぐ証拠がない。/ 根拠: tests/test_notes.py の ShareTest（2 件）と RateLimitTest（1 件）。ratelimit.py:21 と share.py:36 の境界の条件は実装は妥当に見えるが、検証がない。/ 提案: 上記の境界・異常系のテストを追加する。`RateLimiter.hook` で並行の順序を固定したテストも含める。\n- [重大4] 区分: 実装 / 対象: R4, K3（update_note）/ 対応区分: 修正必須 / 内容: `update_note` は権限チェック（`_visible` と `_can_modify`）を、トランザクションの外で読んだ `row` で行っている。UPDATE の条件は `id` と `version` だけで、所有者・組織・非公開の再確認がない。/ 成立条件: 権限チェックの後、トランザクションに入る前に、他の接続が `transfer_notes` を実行する。または `delete_note` で削除される。/ 影響: 移管は version を +1 するので、古い version を使った更新は Conflict になる。そのため版が一致する競合はほぼ防げる。ただし `delete_note` では version が変わらない。削除後は rowcount=0 で Conflict になるので、NotFound ではなく Conflict が返る。権限の再確認という設計意図（`get_note` は再確認している）とも一貫しない。/ 確認した保証: transfer は version を上げるため、権限が失われた後の更新は通らない。実害は「エラーの種類が仕様の NotFound とずれる」程度にとどまる。/ 根拠: service.py:129-145（権限チェックは 129-134 行、UPDATE は 139-141 行）。/ 提案: transaction の内側で `_row` を読み直し、`_visible` と `_can_modify` を再判定してから UPDATE する。あわせて、その競合を `hooks.before_write(\"update\")` で再現するテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `verify_link` は `007.<期限>.<署名>` のようにゼロ埋めした note_id も、`int` に変換して署名を計算するため通す。同じメモに複数の表記のリンクができる。/ 提案: 署名の対象を受け取った文字列そのもの、または正規形（先頭ゼロなし）に限る。\n- [軽微2] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `page` が極端に大きい整数（例: 10**30）だと、`OFFSET` の計算で sqlite3 が OverflowError を出し、ValidationError にならない。/ 提案: page の上限を設ける。\n- [軽微3] 区分: 設計 / 対象: R7 / 対応区分: 改善提案 / 内容: RateLimiter が `service` の書き込み操作に組み込まれていない。仕様は「利用者ごとの書き込み回数の制限」だが、独立した部品として存在するだけである。呼び出し側が使う前提なら、その旨を設計書に書くとよい。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の 1 件だけで不十分。境界値、タグの規則、失敗時に何も残らないことを確かめていない（重大2）。\n- AC2: V2 は閲覧の正常系だけで不十分。非公開・別組織の NotFound と、同時の閲覧数を確かめていない（重大1）。\n- AC3: V3 は一覧の件数と検索の正常系だけで不十分。範囲外の入力、`%` と `_`、SQL 文字列、タグの OR を確かめていない（重大2）。\n- AC4: V4 は所有者による更新・削除の正常系だけで不十分。Forbidden、Conflict、管理者の扱い、削除の失敗を確かめていない（重大1）。実装にも重大4がある。\n- AC5: V5 は移管の正常系と非管理者の Forbidden だけで不十分。組織をまたぐ移管と、途中で失敗したときの巻き戻しを確かめていない（重大2）。\n- AC6: V6 はマスクを確かめておらず、検証が空洞化している（重大3）。\n- AC7: V7 は枠の再開の正常系だけで不十分。ちょうど window 秒の境界と同時呼び出しを確かめていない（重大3）。\n- AC8: V8 は往復と、署名の改ざん 1 件だけで不十分。期限ちょうど、期限切れ、形の崩れを確かめていない（重大3）。\n- AC9: V9 は該当するテストがなく、検証がない（重大3）。\n- AC10: V10 は該当するテストがなく、検証がない（重大3）。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしのファイルは見つからなかった）。ただし、全受け入れ条件が同じ `unit` の 12 件に紐づいている。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite をインメモリまたは一時ファイルで使う単体テストで十分に確かめられる。ただし、並行の検証には、別々の接続とスレッドを使うテストが必要。\n\n### 不足しているリスク\n- K1: 別組織・他人の非公開メモ、およびその管理者の扱いの検証がない。\n- K2: インジェクション文字列と LIKE のワイルドカードの検証がない。\n- K3: 閲覧数・更新・レート制限の同時実行の検証がない。\n- K4: 作成・削除・移管の途中失敗でロールバックされることの検証がない。\n- K5, K7: api_key のマスクと、ログ・例外への機密情報の非出力の検証がない。\n- K6: 組織をまたぐ移管の拒否の検証がない。\n- K8: 期限の境界と形の崩れたリンクの検証がない。\n\n### 確認したこと\n- `spec.md` と `design.md`、`notes/*.py` の全行、`tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が OK。テストの内容は上記のとおり薄い。\n- `aqdlc.py history --since 0` と `trace` を確認した。検証条件の弱体化（改ざん）の記録はなく、すべて V/VK を `unit` に紐づけた新規の bind だった。\n- コードの読解では、プレースホルダーと ESCAPE の使用、`BEGIN IMMEDIATE` と ROLLBACK、`get_note` の再確認、`hmac.compare_digest` と `fullmatch` の使用は仕様に沿っていた。その点は実装の欠陥とは判断していない。\n- 並行実行の再現と、重大4の競合は、読解のみで実行して確かめてはいない。",
+ "files_changed": [],
+ "valid": true
+}

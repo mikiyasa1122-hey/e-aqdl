@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 3,
+ "sec": 37.4,
+ "exit": 0,
+ "cost_usd": 0.12628789999999998,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 16469,
+  "cache_read_input_tokens": 126959,
+  "output_tokens": 4770,
+  "output_tokens_details": {
+   "thinking_tokens": 893
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16469,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3215,
+    "cache_read_input_tokens": 40028,
+    "cache_creation_input_tokens": 2616,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2616
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py の list_notes（約107行目） / 対応区分: 修正必須 / 内容: page の検査が `page < 0` なので、page=0 が通る。仕様は「page は1以上、範囲外は ValidationError」。 / 成立条件: `list_notes(conn, user, page=0)` を呼ぶ。 / 影響: 仕様の入力拒否に反する。OFFSET が -per_page になり、SQLite は負の OFFSET を 0 として扱うので、不正な入力が 1 ページ目の結果として黙って返る。 / 根拠: 実際に実行して確認した。page=0 で ValidationError にならず、`{'items': [...], 'page': 0}` が返った。上流に別の検証はない。 / 提案: 条件を `page < 1` にする。page=0 と page=-1 が ValidationError になるテストを足す。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1〜K8（V1〜V10, VK1〜VK8） / 対応区分: 証拠不足 / 内容: tests/test_notes.py は 12 件で、ほぼ正常系の 1 回確認だけ。仕様が要求する次の検証がない。\n  - 拒否系: 他組織・他人の非公開メモが NotFound になること、Forbidden になること（K1）。\n  - 入力の境界: 題名・本文・タグの上限、tags に文字列を渡す場合、一覧の per_page と sort の範囲外（AC1, AC3）。\n  - 検索: `%` と `_` の扱い、SQL インジェクション、タグ OR（K2）。\n  - 競合・同時実行: Conflict、閲覧数の数え漏れ、RateLimiter の複数スレッド（K3, AC4, AC7）。\n  - 失敗時の巻き戻し: hooks.before_write で途中失敗させる検証（K4, AC1, AC4, AC5, AC10）。\n  - 移管: 組織またぎの拒否、全部か何もしないか（K6）。\n  - 監査ログ: api_key の伏せ字（K7, AC6）。\n  - 共有リンクの境界: 期限ちょうどの時刻、形の崩れたリンク（K8, AC8）。\n  - 機密情報: ログや例外に出ないこと（K5, AC9）。\n  - 設計書が差し込み口（hooks, RateLimiter.hook）を用意しているのに、使うテストが 0 件。\n  - 重大1のバグは、境界値のテストがないため見逃されていた。 / 成立条件: 認可、境界、並行処理、ロールバックのいずれかが壊れても、今のテストは全部通る。 / 影響: 上の受け入れ条件とリスクは、テストでは確かめられていない。 / 根拠: tests/test_notes.py 全体（assertRaises は 4 箇所で、Conflict、NotFound の他組織ケース、RateLimited の同時実行はなし）。unittest は 12 件すべて通った。 / 提案: 各受け入れ条件に、異常系と境界値のテストを追加する。並行系は hooks を使って順序を決めて再現し、sleep に頼らない。判定条件を外したら失敗するテストにする。\n- [重大3] 区分: 実装 / 対象: R4, K1, AC4, notes/service.py の update_note（約127〜145行目） / 対応区分: 修正必須 / 内容: 可視性と更新権限の検査を、トランザクションの外で読んだ古い行で行っている。トランザクション内の UPDATE は `WHERE id = ? AND version = ?` だけで、所有者・組織・非公開は再検査しない。 / 成立条件: 呼び出し側が読んだ後、書き込み前に、別の接続が transfer_notes で owner を替える（このとき version も +1 される）。または、別の接続が private を変える。 / 影響: 古い version を渡せば Conflict になる。ただし、呼び出し側が最新の version を渡している場合は、すでに権限を失った利用者の更新が通る可能性がある。この版には private を変える API がなく、実害は transfer_notes と最新 version の組み合わせに限られる。 / 根拠: update_note は 128〜132 行目で権限を判定し、`with transaction` に入るのは 139 行目。delete_note も同じ構造。get_note だけはトランザクション内で再検査している。この指摘は読み取りだけで判断した。再現は実行していない。 / 提案: transaction の中で `_row` を読み直し、`_visible` と `_can_modify` を再判定してから UPDATE する（delete_note も同様）。権限が消えた状態での更新を拒否することを確かめるテストを足す。\n\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py の update_note / 対応区分: 改善提案 / 内容: 更新後の `updated_at` はあるが、transfer_notes は version を上げるのに updated_at を更新しない。 / 提案: 仕様外なので現状でもよい。一覧の「更新順」の意味を揃えたいなら更新する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否だけで不十分。上限・境界、tags の型、重複タグ、途中失敗後に何も残らないことの検証がない。\n- AC2: V2 は閲覧後の NotFound を 1 件確認するだけ。他組織・他人の非公開の NotFound、閲覧数の加算、同時閲覧がなく不十分。\n- AC3: V3 は一覧 1 ページ目と検索 1 件だけで不十分。範囲外の拒否がなく、page=0 のバグも見逃している。`%` や `_`、SQL インジェクション、タグ OR、他人の非公開の除外もない。\n- AC4: V4 は所有者の更新と削除の正常系だけで不十分。Conflict、管理者・第三者の Forbidden、非公開の NotFound、更新の検証、削除失敗時の巻き戻しがない。\n- AC5: V5 は正常系と非管理者の拒否だけで不十分。組織またぎの拒否と、途中失敗で元のままになることがない。\n- AC6: V6 は action と actor の確認だけで不十分。api_key の伏せ字（8 文字未満・ちょうど 8 文字）を検査していない。\n- AC7: V7 は上限と枠の再開だけで不十分。枠のちょうどの境界と、複数スレッドの同時呼び出しがない。\n- AC8: V8 は往復と改ざん 1 件だけで不十分。期限ちょうど、期限切れ、形の崩れたリンクがない。\n- AC9: V9 はテストがなく不十分。\n- AC10: V10 はテストがなく不十分。例外の後に同じ接続が使えることを確認していない。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのファイルはなかった。\n- K1〜K8: 上記のとおり、検証が足りない。\n\n### E2E の要否\n- 不要。標準ライブラリだけのライブラリで、UI も HTTP もない。リスクは単体テストで決定論的に確かめられる（hooks, clock の差し込み）。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを防ぐ拒否の検証がない。\n- K2: SQL インジェクションと LIKE のエスケープの検証がない。\n- K3: 同時の更新・閲覧・呼び出しで、更新や数が失われることの検証がない。\n- K4: 途中の失敗による不整合の検証がない。\n- K5, K7: 機密情報と api_key の露出の検証がない。\n- K6: 移管で組織の外にメモが渡ること、一部だけ移ることの検証がない。\n- K8: 期限切れ・改ざん・形の崩れた共有リンクを通さないことの境界の検証がない。\n- 重大3の更新時の権限の古さ。\n\n### 確認したこと\n- 仕様、設計、`notes/*.py`、`tests/test_notes.py` を全部読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行。12 件すべて通った。\n- `list_notes(page=0)` を実行して、ValidationError にならず結果が返ることを確認した（重大1）。\n- `history` を確認した。検証条件の弱体化や変更は見つからなかった。登録は要求・受け入れ条件・検証・リスクの追加だけ。\n- git の状態を確認した。全ファイルが未追跡で、既存テストの差分は取れない。\n- gate は実行していない。依存関係のインストールもしていない。",
+ "files_changed": [],
+ "valid": true
+}

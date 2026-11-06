@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 3,
+ "sec": 41.1,
+ "exit": 0,
+ "cost_usd": 0.13446190000000002,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18341,
+  "cache_read_input_tokens": 122019,
+  "output_tokens": 4888,
+  "output_tokens_details": {
+   "thinking_tokens": 901
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18341,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3210,
+    "cache_read_input_tokens": 39654,
+    "cache_creation_input_tokens": 2786,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2786
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 内容: 更新の楽観的ロックが機能せず、後から書いた側が先の更新を消す。version の確認はトランザクションの外で行い、UPDATE の WHERE は `id = ?` だけで version を見ていない。設計書の「UPDATE の条件に version を入れて rowcount で判定」とも違う。 / 根拠: notes/service.py の update_note で `if row[\"version\"] != version` を transaction の外で判定し、`UPDATE ... WHERE id = ?` を実行している。再現手順は次のとおり。`hooks.before_write(\"update\")` の中で別の更新（version=1）を先に入れてから、version=1 で更新する。Conflict は出ず `second` で上書きされ、version は 3 になった（`first` が消えた）。 / 提案: transaction の中で `UPDATE ... WHERE id = ? AND version = ?` とし、`rowcount != 1` なら Conflict にする。可視性・権限の判定も transaction の中で読み直す。\n- [重大2] 区分: テスト / 対象: AC4, VK3, K3 / 内容: 更新の競合・version 不一致が一度も検証されていない。`test_update_by_owner` は正常系だけで、Conflict を確かめるテストがない。そのため重大1の欠陥を gate が見逃した。 / 根拠: tests/test_notes.py に Conflict の import も使用もない。 / 提案: 古い version で Conflict になるテストと、`hooks.before_write(\"update\")` の中で他の更新を入れるテストを追加する（sleep は使わない）。\n- [重大3] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検証が不十分で、末尾に改行を含む `\"abc\\n\"` が通る。`TAG_RE` が `^...$` を `match` で使っているため、`$` が末尾の改行に一致する。作成でも検索でも、「英小文字・数字・ハイフンの1〜20文字」という規則に反して保存・検索される。 / 根拠: notes/service.py の TAG_RE と `TAG_RE.match`（_validate と search_notes）。`create_note(c,u,'t','b',['abc\\n'])` が例外にならず id 1 を返した。 / 提案: `fullmatch` を使うか `\\Z` で終わらせ、その境界のテストを追加する。share.py では fullmatch を使っているので同じ方針にそろえる。\n- [重大4] 区分: テスト / 対象: AC1〜AC10 の大半, K1〜K8 / 内容: 検証が受け入れ条件・リスクに対して大幅に不足している。テストは12個で、ほぼ正常系だけ。次の項目に検証がない。\n  - AC1/K4: 失敗時のロールバック（`before_write` の差し込み口で再現できるのに未使用）。タグ・題名・本文の上限、タグ6個、重複タグの扱い。\n  - AC2/K1: 他の組織・他人の非公開メモが NotFound になること。閲覧数の増加と、同時閲覧で数え漏れがないこと。\n  - AC3/K2: ページングとソートの範囲外、`%` と `_` のエスケープ、SQL インジェクション、タグ OR、他人の非公開メモの除外。\n  - AC4: 削除の失敗時の巻き戻し、Forbidden、管理者から非公開メモを扱えないこと。\n  - AC5/K6: 他の組織への移管、移管の途中で失敗したときに元のままであること。\n  - AC6/K7: api_key の伏せ字（`test_export_audit` は api_key を全く検査していない）。\n  - AC7: 枠のちょうど境界、複数スレッドからの同時呼び出し（`hook` は未使用）。\n  - AC8/K8: 期限ちょうどの境界、期限切れ、形の崩れ、署名の改ざん（改ざんは note_id の書き換え1件だけ）。\n  - AC9/K5: ログ・例外に機密情報が出ないこと。\n  - AC10: 例外の後に接続を使えること。 / 根拠: tests/test_notes.py 全体（90行）。 / 提案: 上のリスクごとに、異常系・境界値を確かめる決定論的なテストを追加する。守りの条件を外したら失敗することも確かめる。\n- [重大5] 区分: 実装 / 対象: R2, AC2, K3 / 内容: 閲覧数の同時実行について確認できていない（コード上は `views = views + 1` を BEGIN IMMEDIATE の中で行っていて、数え漏れは起きにくい）。ただし検証がないため、数え漏れがないことは未検証である。仕様の要件を検証なしで「達成」とは言えないので、重大4の追加テスト（別接続・別スレッドでの同時閲覧）で確かめることを必須とする。 / 根拠: notes/service.py の get_note。 / 提案: 別接続の複数スレッドで閲覧し、閲覧数の合計を確かめるテストを書く。\n- [軽微1] 区分: 実装 / 対象: R2, R4 / 内容: update_note と delete_note は、可視性・権限の判定を transaction の外で行っている。確認後に所有者が移管されると古い判定で更新される余地がある（重大1と同じ修正で解消する）。 / 根拠: notes/service.py の update_note と delete_note。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけを確かめている。タグ・長さの境界、重複タグ、途中失敗時のロールバックがないため不十分。実装にもタグ検証の穴がある（重大3）。\n- AC2: V2 は作成者の自分の閲覧だけを確かめている。他の組織・非公開の NotFound と閲覧数の増加・同時実行がなく、不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけ。範囲外・LIKE のエスケープ・インジェクション・タグ OR・非公開の除外がなく、不十分。\n- AC4: V4 は作成者による正常な更新と削除だけ。Conflict・Forbidden・競合・削除失敗の検証がなく、不十分。実装も未達（重大1）。\n- AC5: V5 は件数と管理者以外の拒否だけ。組織をまたぐ拒否と途中失敗時の元通りがなく、不十分。\n- AC6: V6 は api_key を全く確かめておらず、空洞。\n- AC7: V7 は単純な超過と枠の更新だけ。ちょうどの境界（`now-start == window`）と同時呼び出しがなく、不十分。\n- AC8: V8 は往復と1件の改ざんだけ。期限ちょうど・期限切れ・形の崩れがなく、不十分（実装は読む限り妥当）。\n- AC9: V9 に該当するテストがなく、未検証。\n- AC10: V10 に該当するテストがなく、未検証。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからず）。テストの改ざん・弱体化も見つからなかった（`history` は要求・検証の追加のみ）。ただし追加された検証が弱く、全体としては空洞化している。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite（`:memory:` またはテスト用ファイル）を使った単体・結合テストで足りる。ただし並行実行は、別接続の別スレッドで決定論的に再現するテストが必要。\n\n### 不足しているリスク\n- K3: 更新の競合（重大1・2）、閲覧数の同時実行（重大5）、RateLimiter の同時実行が未検証。\n- K1/K2/K4/K5/K6/K7/K8: 上記の検証不足（重大4）。\n- K4: R10（例外後に接続が使えること）と、削除・移管の途中失敗で元に戻ることが未検証。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .`: 12件すべて成功（ただし検証が薄い）。\n- 再現スクリプトで、`\"abc\\n\"` のタグが作成できることを確認（重大3）。\n- 再現スクリプトで、古い version の更新が Conflict にならず先の更新を上書きすることを確認（重大1）。\n- `aqdlc trace` と `history --since 0` を確認した。検証条件の弱体化は見つからなかった。\n- コード（`db.py`、`service.py`、`ratelimit.py`、`share.py`）を全文読んだ。`ratelimit.py` と `share.py` は仕様どおりに読める（枠の境界は `>=`、リンクは fullmatch と compare_digest、期限は `>=`）。",
+ "files_changed": [],
+ "valid": true
+}

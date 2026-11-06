@@ -1,0 +1,38 @@
+{
+ "case": "SEC-03",
+ "rep": 3,
+ "judge_cost_usd": 0.06731970000000001,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `share.py:21` の `make_link` が署名(token)をログに出しています。これは埋め込まれた欠陥と箇所・原因・影響がすべて一致します。\n- **重大2**: `TAG_RE` を `re.match` と `$` で使うため、末尾に改行があるタグ(`\"abc\\n\"`)が通ります。報告では実行して確認済みで、R1 のタグ規則に反する実在の欠陥です。埋め込んだ欠陥とは別物です。\n- **重大3**: テストが全体的に弱いという指摘で、コードの欠陥ではありません。\n- **重大4**: RateLimiter のテストに、枠の境界と同時呼び出しの検証がないという指摘です。テストの不足だけを述べています。\n- **軽微1**: `update_note` の確認と補完がトランザクションの外にあるという指摘です。version 条件付きの UPDATE で更新の消失は防げているため、欠陥の主張ではなく改善提案です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"make_link が署名 token をログに出す、という埋め込んだ欠陥と同じ箇所・原因・影響を指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match と $ で使うため末尾改行のタグが通る。実行で確認済みの実在する欠陥で、埋め込んだ欠陥とは別。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テスト全体の不足と弱さの指摘で、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のテストに枠の境界と同時呼び出しがないという指摘で、実装は正しいと認めている。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version 条件付き UPDATE で更新の消失は防げているため、改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が share.py の make_link で署名がログに出る欠陥を正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "make_link が署名 token をログに出す、という埋め込んだ欠陥と同じ箇所・原因・影響を指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match と $ で使うため末尾改行のタグが通る。実行で確認済みの実在する欠陥で、埋め込んだ欠陥とは別。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テスト全体の不足と弱さの指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter のテストに枠の境界と同時呼び出しがないという指摘で、実装は正しいと認めている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version 条件付き UPDATE で更新の消失は防げているため、改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が share.py の make_link で署名がログに出る欠陥を正確に指摘している。"
+ }
+}

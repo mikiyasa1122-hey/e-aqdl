@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 2,
+ "sec": 34.4,
+ "exit": 0,
+ "cost_usd": 0.1226737,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18429,
+  "cache_read_input_tokens": 105917,
+  "output_tokens": 3835,
+  "output_tokens_details": {
+   "thinking_tokens": 661
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18429,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2728,
+    "cache_read_input_tokens": 34078,
+    "cache_creation_input_tokens": 3457,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3457
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 内容: `transfer_notes` がメモ1件ごとに別のトランザクションで移し、監査ログも別のトランザクションで書いている。途中で失敗すると一部のメモだけ移った状態が残り、「全部移すか何も移さない」に反する。 / 根拠: notes/service.py の transfer_notes（`for i in ids: ... with transaction(conn)` と、その後の別の `with transaction(conn)`）。`hooks.before_write(\"transfer:N\")` で2件目に例外を出せば再現できる（実行はしていない）。 / 提案: 全件の UPDATE と監査ログを1つの `transaction()` にまとめる。ids の取得もトランザクションの内側に入れる。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1〜K8 / 内容: テストが12件しかなく、ほとんどが正常系の1ケースにとどまる。仕様が求める異常系・境界値・並行実行・障害時の巻き戻しを確かめるテストがない。設計がテスト用に用意した `hooks.before_write` と `RateLimiter.hook` を使ったテストもない。history を見ると、検証IDの bind は一括でつけられており、実際の中身と対応していない。 / 根拠: tests/test_notes.py の全体。次のテストが存在しない。\n  - 他組織・他人の非公開メモの NotFound\n  - 管理者による非公開メモの操作が NotFound になること\n  - Forbidden\n  - Conflict、競合更新\n  - 閲覧数を並行で増やしたときの数え漏れ\n  - 作成の途中失敗でのロールバック\n  - 削除の途中失敗\n  - 移管の途中失敗\n  - 組織をまたぐ移管の拒否\n  - SQL インジェクション\n  - LIKE の `%` `_`\n  - タグの境界（5個・6個、重複）\n  - per_page の境界（0、51）\n  - 不正な sort\n  - 枠の境界（ちょうど window 秒）\n  - 複数スレッドからの RateLimiter\n  - 期限ちょうど\n  - 形の崩れたリンク\n  - api_key の伏せ字（8文字未満、8文字以上）\n  - ログに機密情報が出ないこと\n  - 例外後の接続の再利用\n  \n  特に移管の途中失敗のテストがないため、重大1が検出されていない。 / 提案: 上記を決定論的に追加する。移管の途中失敗のテストは、移管を1つのトランザクションにしたときだけ通ることを確かめる。\n- [重大3] 区分: テスト / 対象: AC6, K7 / 内容: `test_export_audit` が action と actor しか見ておらず、`actor_key`（伏せ字）を一切検証していない。 / 根拠: tests/test_notes.py の test_export_audit。 / 提案: 8文字以上・未満・ちょうど8文字で `actor_key` を比較し、api_key 全体が出力に含まれないことも確かめる。\n- [重大4] 区分: テスト / 対象: AC7, K3 / 内容: RateLimitTest は単一スレッドで、ちょうど window 秒の境界も確かめていない。同時呼び出しの検証が空洞になっている。 / 根拠: tests/test_notes.py の RateLimitTest（t=61 だけ）。 / 提案: 境界（window 秒ちょうどで新しい枠になること）のテストを追加する。`hook` を使った複数スレッドの同時呼び出しで、上限を超えて許可しないことも確かめる。\n- [軽微1] 区分: 実装 / 対象: R6 / 内容: `export_audit` が users と JOIN しているため、利用者の行がない監査ログは出力から落ちる。 / 提案: LEFT JOIN にして、actor_key は空にする。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: `update_note` は `_validate` の前に `_visible` と `_can_modify` を判定している。仕様に反してはいない。ただし、入力検証の失敗より認可の失敗が先に返ることをテストで確かめていない。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否だけを確認しており不十分。本文・タグ・長さの境界や、途中失敗で何も残らないことを確認していない。\n- AC2: 自分のメモを閲覧する場合だけ確認しており不十分。NotFound の各ケースと、並行での閲覧数を確認していない。\n- AC3: 一覧は1ページ目、検索は日本語の基本形だけを確認しており不十分。範囲外、LIKE のエスケープ、インジェクション、タグ OR を確認していない。\n- AC4: 所有者による更新と削除だけを確認しており不十分。Conflict、Forbidden、管理者、非公開メモ、削除の失敗を確認していない。\n- AC5: 件数を確認しているだけで不十分。移管先のメモの持ち主や、途中失敗時の巻き戻しを確認していない。また実装自体に欠陥がある（重大1）。\n- AC6: 伏せ字を確認しておらず無効（重大3）。\n- AC7: 枠のリセットだけを確認しており不十分（重大4）。\n- AC8: 往復と改ざんだけを確認しており不十分。期限ちょうど、期限切れ、形の崩れたリンクを確認していない。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。\n\n### E2E の要否\n- 不要。ライブラリで、HTTP や UI がない。ただし、SQLite の実ファイルを使った複数スレッドのテストは必要。閲覧数の数え漏れ（K3）の検証がそれにあたる。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: インジェクションと LIKE のワイルドカードを確かめるテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行を確かめるテストがない。\n- K4: 作成・削除・移管の途中失敗と、例外後の接続の再利用を確かめるテストがない。移管は実装にも欠陥がある。\n- K5: ログと例外メッセージへの機密情報の混入を確かめるテストがない。\n- K6: 組織をまたぐ移管の拒否と、一部だけ移ることを確かめるテストがない。\n- K7: 伏せ字を確かめるテストがない。\n- K8: 期限ちょうどと形の崩れたリンクを確かめるテストがない。\n\n### 確認したこと\n- 仕様・設計と、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件すべて通った。\n- `aqdlc.py history --since 0` を実行し、bind 以外の検証条件の弱体化は確認できなかった。\n- 次のものは、読んで確認し、問題を見つけられなかった。\n  - 認可の判定（`_visible`、`_can_modify`）\n  - SQL のプレースホルダーと LIKE の ESCAPE\n  - 楽観的ロック\n  - 共有リンクの検証\n  - RateLimiter の排他制御\n- gate は実行していない。依存関係のインストールもしていない。",
+ "files_changed": [],
+ "valid": true
+}

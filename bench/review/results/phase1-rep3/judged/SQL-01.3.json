@@ -1,0 +1,43 @@
+{
+ "case": "SQL-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0699857,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`search_notes` の 141-142 行で、検索語を SQL に直接埋め込んでいる点を指摘しています。SQL インジェクションとして原因も影響も一致しています。\n- **重大2**: 実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせで、末尾が改行のタグが通ります。実行して確認済みです。\n- **重大3**: テストの不足だけを指摘しているので、test_gap です。\n- **重大4**: `delete_note` で認可の確認をトランザクションの外で行っています。同時の移管で owner が変わると、古い権限のまま削除が通る可能性があります。実在する TOCTOU として妥当なので、real_other にしました。ただし、非公開化の経路は無いと報告自身が認めています。\n- **重大5**: 報告自身が欠陥ではないと判断して取り下げています。誤りを含む指摘なので false_positive です。\n- **軽微1**: 仕様の対象外にあたると報告自身が認めており、改善提案にとどまります。style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes で検索語を SQL 文字列に直接埋め込む SQL インジェクションを、同じ箇所・同じ原因で指摘し、再現も示している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により末尾改行のタグが通る実在の検証漏れで、埋め込んだ欠陥とは別物。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n  {\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note が認可をトランザクション外で判定しており、移管との競合で古い権限のまま削除が通りうる実在の TOCTOU。\"},\n  {\"label\": \"重大5\", \"class\": \"false_positive\", \"reason\": \"報告自身が version 条件で守られるため欠陥として成立しないと取り下げている。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"仕様の対象外であり、例外の種類に関する改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が search_notes の SQL インジェクションを原因・箇所・影響とも正しく捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes で検索語を SQL 文字列に直接埋め込む SQL インジェクションを、同じ箇所・同じ原因で指摘し、再現も示している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により末尾改行のタグが通る実在の検証漏れで、埋め込んだ欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note が認可をトランザクション外で判定しており、移管との競合で古い権限のまま削除が通りうる実在の TOCTOU。"
+   },
+   {
+    "label": "重大5",
+    "class": "false_positive",
+    "reason": "報告自身が version 条件で守られるため欠陥として成立しないと取り下げている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "仕様の対象外であり、例外の種類に関する改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が search_notes の SQL インジェクションを原因・箇所・影響とも正しく捉えている。"
+ }
+}
