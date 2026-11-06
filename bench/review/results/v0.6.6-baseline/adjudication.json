@@ -1,0 +1,53 @@
+{
+ "AUTH-03#1": {
+  "findings": {
+   "重大5": "real_other",
+   "軽微3": "false_positive"
+  }
+ },
+ "BND-04#1": {
+  "findings": {
+   "軽微2": "false_positive"
+  }
+ },
+ "CLEAN-01#1": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "CLEAN-04#1": {
+  "findings": {
+   "軽微3": "real_other"
+  }
+ },
+ "RACE-02#1": {
+  "findings": {
+   "軽微2": "real_other"
+  }
+ },
+ "RACE-03#1": {
+  "findings": {
+   "軽微2": "real_other"
+  }
+ },
+ "SEC-01#1": {
+  "findings": {
+   "軽微2": "real_other"
+  }
+ },
+ "SEC-03#1": {
+  "findings": {
+   "重大4": "real_other"
+  }
+ },
+ "SQL-04#1": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "TX-04#1": {
+  "findings": {
+   "重大5": "matches_defect"
+  }
+ }
+}

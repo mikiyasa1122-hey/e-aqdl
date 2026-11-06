@@ -1,0 +1,38 @@
+{
+ "case": "BND-03",
+ "rep": 1,
+ "judge_cost_usd": 0.0641597,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`notes/ratelimit.py` の `hit` で、枠の終わりの比較が `>` になっています。そのため、ちょうど window 秒後が旧枠として扱われ、余分に1回制限されます。報告は原因・箇所・影響のすべてが一致しています。\n- **重大2**: `TAG_RE` は `$` で終わるため、末尾が改行のタグを通します。報告は再現まで示していて、実在する別の欠陥です。ただし `TAG_RE.match` は `$` が末尾の改行の手前にも一致するので、この指摘は妥当です。\n- **重大3**: コードの欠陥ではなく、テストの不足だけを指摘しています。\n- **重大4**: 並行テストがないことと、境界のテストがないことを指摘していて、テストの不足です。\n- **軽微1**: 確認をトランザクションの外で行うため、delete には version の条件がなく、確認後に状態が変わる余地があります。実在しうる競合の指摘です。ただし、仕様の対象外である接続の共有や認可の前提との関係で、深刻度は低いと見ます。根拠はコードの構造にあり、実在の問題なので real_other とします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"ratelimit.py の hit で > を使っているためちょうど window 秒で制限が解けない、という埋め込み欠陥そのものを再現つきで指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ が末尾の改行を通す実在の欠陥で、埋め込み欠陥とは別である。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"並行テストと境界テストの欠落の指摘で、テストの不足である。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note の確認がトランザクションの外にあり、delete には version の条件がないという、実在する競合の指摘である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が ratelimit.py の > を原因として、ちょうど window 秒で拒否される影響まで正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "ratelimit.py の hit で > を使っているためちょうど window 秒で制限が解けない、という埋め込み欠陥そのものを再現つきで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ が末尾の改行を通す実在の欠陥で、埋め込み欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "並行テストと境界テストの欠落の指摘で、テストの不足である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "update_note と delete_note の確認がトランザクションの外にあり、delete には version の条件がないという、実在する競合の指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が ratelimit.py の > を原因として、ちょうど window 秒で拒否される影響まで正しく指摘している。"
+ }
+}

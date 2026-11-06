@@ -1,0 +1,49 @@
+{
+ "case": "TX-04",
+ "rep": 1,
+ "sec": 40.0,
+ "exit": 0,
+ "cost_usd": 0.1550746,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23522,
+  "cache_read_input_tokens": 116906,
+  "output_tokens": 4928,
+  "output_tokens_details": {
+   "thinking_tokens": 691
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23522,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3184,
+    "cache_read_input_tokens": 39976,
+    "cache_creation_input_tokens": 2652,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2652
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a7130b66\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R10, AC10, K4, R1, R4, R5, 設計「transaction() は例外のときに ROLLBACK」 / 内容: `transaction()` が例外時に ROLLBACK しない。例外のあとも接続はトランザクション中のままで、途中まで書いた内容が残る。次の `BEGIN IMMEDIATE` は \"cannot start a transaction within a transaction\" で失敗する。R1・R4・R5 の「途中で失敗したら何も残さない」も満たされない。 / 根拠: notes/service.py:33-35 は `except BaseException: raise` だけ。再現では、`hooks.before_write(\"create:tags\")` で RuntimeError を出したあと、`c.in_transaction` が True、`notes` の件数は未コミットの行を含んで 3 になった。 / 提案: `except BaseException:` で `if conn.in_transaction: conn.execute(\"ROLLBACK\")` を実行してから raise する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検証に `TAG_RE.match` と `$` を使っているため、末尾が改行のタグ（\"abc\\n\"）を通す。仕様は「英小文字・数字・ハイフンの1〜20文字」。 / 根拠: notes/service.py:14, 63, 149。`create_note(..., [\"abc\\n\"])` が成功して note_id=1 を返した。share.py は同じ問題を避けて fullmatch を使っており、不統一。 / 提案: `fullmatch` に変えるか、`\\Z` を使う。作成・更新・検索のすべてに適用する。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, V1〜V10, VK1〜VK8 / 内容: テストが 12 件の正常系中心で、受け入れ条件とリスクの大半を確かめていない。そのため重大1・2 の欠陥を検出できず、全件合格している。 / 根拠: tests/test_notes.py の全体。確認できないもの:\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の同時増加（AC2・K3）\n  - ValidationError の境界値\n  - `%`・`_` を含む検索\n  - SQL インジェクション（K2）\n  - version の不一致による Conflict、読み書きの間に更新が入った場合の Conflict（AC4）\n  - 更新・削除の Forbidden\n  - 移管の組織またぎ・途中失敗時の巻き戻し（AC5・K6）\n  - api_key の伏せ字（AC6・K7）\n  - RateLimiter の枠の境界（ちょうど window 秒）と同時呼び出し（AC7）\n  - 期限ちょうどの無効、形の崩れたリンク（AC8・K8）\n  - ログへの機密情報の漏えい（AC9）\n  - 例外後の接続再利用（AC10）\n  `test_export_audit` は api_key の中身を一切検証していない。 / 提案: 各 AC・リスクについて異常系と境界値のテストを追加する。並行系は hooks と `RateLimiter.hook` を使い、sleep に頼らず決定論的に再現する。\n- [重大4] 区分: テスト / 対象: R10, AC10, K4 / 内容: 例外後のロールバックと接続の再利用を確かめるテストが 1 件もない。hooks の差し込み口も一度も使われていない。ROLLBACK が欠けていてもすべて合格する。 / 根拠: tests/ に `hooks`・`before_write`・`RateLimiter.hook` の使用なし（grep と全文確認）。 / 提案: before_write で例外を出し、何も残らないことと次の操作が成功することを確かめるテストを、create・update・delete・transfer ごとに追加する。\n- [重大5] 区分: 実装 / 対象: R2, AC2, K3 / 内容: `get_note` の閲覧数更新は `transaction()` の中で行うので、重大1が直れば同時閲覧でも数え漏れは起きない。ただし現状は検証がなく、ロールバック欠落のまま、NotFound 後や失敗後の接続でトランザクションが残る。この項目は重大1の修正後に、同時閲覧テストでの確認が必要。 / 根拠: notes/service.py:105-110（NotFound を transaction 内で raise している）。 / 提案: 重大1の修正後、別接続・別スレッドで同時に閲覧して閲覧数が正確に増えることをテストで確認する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` が可視性と権限の確認をトランザクションの外で行っている。version 条件があるので実害は小さい（移管は version を上げるので Conflict になる）。ただし判定は読み出し時点の状態に基づく。 / 根拠: notes/service.py:157-167 / 提案: 確認を BEGIN IMMEDIATE の中に移すか、設計書に意図を明記する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系 1 件と空題名の拒否 1 件だけで不十分。本文・タグの境界、タグの文字種（改行を通す欠陥を見逃している）、失敗時に何も残らないことを確かめていない。\n- AC2: V2 は不十分。他組織・非公開・存在しないメモの NotFound、閲覧数の増加、同時閲覧のいずれも確かめていない。\n- AC3: V3 は不十分。page・per_page・sort の範囲外、`%`・`_`、タグの OR 絞り込み、非公開メモの除外、インジェクション文字列を確かめていない。\n- AC4: V4 は不十分。Conflict、Forbidden、管理者の更新と削除、更新時の検証、削除の失敗伝播を確かめていない。\n- AC5: V5 は不十分。管理者以外の拒否 1 件だけ。他組織への移管、途中失敗時の巻き戻し、移管後の所有者を確かめていない。\n- AC6: V6 は不十分。伏せ字を一切検証していない。\n- AC7: V7 は不十分。上限と、61 秒後のリセットだけ確かめている。ちょうど window 秒の境界と、スレッド同時呼び出しがない。\n- AC8: V8 は不十分。往復と改ざん 1 件だけ。期限ちょうど、期限切れ、形の崩れたリンクがない。\n- AC9: V9 は不十分。ログ・例外メッセージの検査がない。\n- AC10: V10 は未実施に等しい。重大1の欠陥を見逃している。\n- 機械検出の兆候: なし（skip・.only・アサーションなしは見つからなかった）。ただし、そもそも検証が足りない。\n- 改ざんの確認: `history` を見る限り、検証条件の弱体化はなかった。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テストで必要な検証ができる。必要なのは、別接続・別スレッドを使った並行系の単体・結合テスト。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを防ぐテストがない。\n- K2: インジェクションを確かめるテストがない（実装はプレースホルダーと ESCAPE を使っており、問題は見つからなかった）。\n- K3: 同時の閲覧・更新・呼び出しのテストがない。\n- K4: ロールバックの欠陥（重大1）と、それを確かめるテストがない。\n- K5, K7: ログと監査出力で機密情報が出ないことのテストがない（実装は期待どおりに見えた）。\n- K6: 移管での組織またぎ・一部だけ移ることを確かめるテストがない。\n- K8: 期限・改ざん・形の崩れたリンクのテストが不足している（実装は fullmatch と compare_digest で問題なし）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` → 12 件合格。ただし重大1・2 の欠陥は検出されていない。\n- 再現スクリプト（`PYTHONDONTWRITEBYTECODE` 相当で `:memory:` に実行）:\n  - 改行付きタグ \"abc\\n\" が作成できた。\n  - before_write で例外を出したあと `in_transaction=True`、`notes` が 3 件（未コミットの行が残っている）。\n- `$AQ trace` と `$AQ history --since 0` を確認した。検証条件の弱体化は見つからなかった。\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。`impl.md` は読んでいない。\n- コードは変更していない。`gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

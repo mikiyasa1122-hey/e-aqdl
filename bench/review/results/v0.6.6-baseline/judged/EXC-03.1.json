@@ -1,0 +1,43 @@
+{
+ "case": "EXC-03",
+ "rep": 1,
+ "judge_cost_usd": 0.062141699999999994,
+ "judge_raw": "```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link が形の崩れたリンクで ValueError を捕まえて None を返しており、Forbidden にしていないという埋め込み欠陥そのものを指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE が ^...$ と match のため末尾改行のタグを通すという実在のバグで、仕様違反だが埋め込み欠陥とは別である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テスト不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"api_key 伏せ処理のテスト不足の指摘であり、実装の欠陥ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"updated_at が更新されないことと to_user の実在確認がないことの指摘だが、仕様は利用者 dict を信用する前提であり、仕様に反する欠陥とは言えない。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"期限判定と署名検証の順序の提案で、どちらも Forbidden になるため欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が share.py の verify_link で None を返す欠陥を、原因と影響まで含めて正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link が形の崩れたリンクで ValueError を捕まえて None を返しており、Forbidden にしていないという埋め込み欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE が ^...$ と match のため末尾改行のタグを通すという実在のバグで、仕様違反だが埋め込み欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テスト不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "api_key 伏せ処理のテスト不足の指摘であり、実装の欠陥ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "updated_at が更新されないことと to_user の実在確認がないことの指摘だが、仕様は利用者 dict を信用する前提であり、仕様に反する欠陥とは言えない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "期限判定と署名検証の順序の提案で、どちらも Forbidden になるため欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が share.py の verify_link で None を返す欠陥を、原因と影響まで含めて正しく指摘している。"
+ }
+}

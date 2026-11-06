@@ -1,0 +1,38 @@
+{
+ "case": "RACE-01",
+ "rep": 1,
+ "judge_cost_usd": 0.06469369999999999,
+ "judge_raw": "各指摘を、正解データ（update_note の楽観的ロック破れ）とコードに照らして分類しました。\n\n- **重大1**: 埋め込んだ欠陥そのものです。箇所は update_note で、原因は version の比較が transaction の外にあり UPDATE の WHERE に version がないこと、影響は先の更新が上書きされて消えることです。どちらも正解データと一致します。再現手順も示されています。\n- **重大2**: Conflict、Forbidden、削除の巻き戻しなどのテストがないという指摘で、テストの不足だけを述べています。\n- **重大3**: 正常系中心でテストが空洞化しているという指摘で、テストの不足です。\n- **重大4**: RateLimiter と share の境界値・並行のテストがないという指摘で、テストの不足です。\n- **軽微1**: get_note で可視性の確認が transaction の外にあるという指摘です。報告自体が、内側で再確認しているので漏えいはしないと認めています。欠陥の主張というより保守性の提案なので style にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note で version 比較が transaction 外にあり UPDATE の WHERE に version がないため先の更新が消える、という埋め込み欠陥そのものを再現付きで指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"更新競合・Forbidden・削除失敗時の巻き戻しのテストがないという、テスト不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"正常系中心で境界値・認可・SQL・ログなどが未検証という、テスト不足の指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter と share の境界・並行・形崩れのテストがないという、テスト不足の指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"get_note の確認が transaction の外にあることへの保守性の提案で、報告自身が漏えいしないと認めており欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（update_note の version 条件欠落による更新の消失）を原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note で version 比較が transaction 外にあり UPDATE の WHERE に version がないため先の更新が消える、という埋め込み欠陥そのものを再現付きで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "更新競合・Forbidden・削除失敗時の巻き戻しのテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "正常系中心で境界値・認可・SQL・ログなどが未検証という、テスト不足の指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter と share の境界・並行・形崩れのテストがないという、テスト不足の指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "get_note の確認が transaction の外にあることへの保守性の提案で、報告自身が漏えいしないと認めており欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（update_note の version 条件欠落による更新の消失）を原因・影響とも正確に指摘している。"
+ }
+}

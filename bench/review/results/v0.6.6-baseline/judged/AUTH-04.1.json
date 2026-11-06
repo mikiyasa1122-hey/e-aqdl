@@ -1,0 +1,63 @@
+{
+ "case": "AUTH-04",
+ "rep": 1,
+ "judge_cost_usd": 0.0683937,
+ "judge_raw": "各指摘を埋め込み欠陥とコードに照らして分類した。\n\n- **重大1**: `transfer_notes` が `to_user[\"org_id\"]` を検査していないと指摘している。これは埋め込み欠陥と同じ箇所で、原因も影響も一致する。\n- **重大2〜7**: どれもテストの不足だけを述べていて、コードの欠陥の主張ではない。\n- **軽微1**: `update_note` と `delete_note` は、権限確認をトランザクションの外の古い行で行っている。`delete` は version 条件がないので、確認後に所有者が変わっても削除できる。ただし `_can_modify` は組織も見ている。しかも対象のメモは削除されるだけで、情報の流出にはならない。仕様の「読み出しから書き込みの間」の規定は update の Conflict が中心なので、実在する競合の指摘として `real_other` にした。弱い指摘ではある。\n- **軽微2**: 先頭ゼロの note_id を許す点は、仕様が「10進の数字だけ」としていて、正規形は求めていない。仕様には反しないので、害が小さい好みの提案として `style` にした。\n- **軽微3**: 設計書への追記の提案なので `style`。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transfer_notes が移し先 to_user の org_id を確かめておらず、他組織の利用者にメモを渡せるという埋め込み欠陥そのものを指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"入力検証・可視性・検索まわりのテスト不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"更新・削除・競合のテスト不足だけの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"閲覧数と並行閲覧のテスト不足だけの指摘。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"ロールバックと接続の再利用のテスト不足だけの指摘。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字と機密情報のテスト不足だけの指摘。\"},\n{\"label\": \"重大7\", \"class\": \"test_gap\", \"reason\": \"RateLimiter と共有リンクの境界のテスト不足だけの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限確認がトランザクション外の古い行で行われ、delete には version 条件がないという指摘は、コード上は実在する。ただし影響は小さい。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"仕様は先頭ゼロを禁じておらず、正規形を求める好みの提案。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"設計書への追記の提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が transfer_notes の移し先の組織検査の欠落を正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transfer_notes が移し先 to_user の org_id を確かめておらず、他組織の利用者にメモを渡せるという埋め込み欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "入力検証・可視性・検索まわりのテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "更新・削除・競合のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "閲覧数と並行閲覧のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "ロールバックと接続の再利用のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字と機密情報のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大7",
+    "class": "test_gap",
+    "reason": "RateLimiter と共有リンクの境界のテスト不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限確認がトランザクション外の古い行で行われ、delete には version 条件がないという指摘は、コード上は実在する。ただし影響は小さい。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "仕様は先頭ゼロを禁じておらず、正規形を求める好みの提案。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "設計書への追記の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が transfer_notes の移し先の組織検査の欠落を正しく指摘している。"
+ }
+}

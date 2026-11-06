@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-05",
+ "rep": 1,
+ "sec": 45.5,
+ "exit": 0,
+ "cost_usd": 0.1515535,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21189,
+  "cache_read_input_tokens": 110115,
+  "output_tokens": 5577,
+  "output_tokens_details": {
+   "thinking_tokens": 1140
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21189,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3863,
+    "cache_read_input_tokens": 36171,
+    "cache_creation_input_tokens": 4124,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4124
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 4\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e52d0cbc\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC4, K1, K6 / 内容: 認可と情報の秘匿を確かめるテストがない。他の組織・他人の非公開・存在しないメモが NotFound になること、非作成者の更新・削除が Forbidden になること、管理者が非公開メモに触れられないこと、組織をまたぐ移管が Forbidden になることのどれも検証していない。`_visible` や `_can_modify` の条件を外しても全テストが通る。 / 根拠: tests/test_notes.py 全体（Forbidden を検証するのは `test_transfer_requires_admin` の1件だけ）。`unittest discover` は12件すべて合格。 / 提案: 認可の分岐ごとに、拒否されること（例外の種類）と、DB が変わっていないことを確かめるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC4, K3, R2, R4 / 内容: 並行実行の検証がない。「閲覧数の数え漏れなし」「古い version での更新は Conflict」「読み出しと書き込みの間に別の更新が入ると Conflict」を確かめるテストがない。設計書は `hooks.before_write` を差し込み口として用意しているが、どのテストも使っていない。 / 根拠: tests/test_notes.py に Conflict の import も thread もない。`update_note` の version 条件（service.py:158 付近）を消してもテストは通る。 / 提案: `before_write` の中で別の接続から更新・閲覧を行い、sleep を使わず決定論的に Conflict と閲覧数を確認する。ファイル DB を使う。\n- [重大3] 区分: テスト / 対象: AC7, R7 / 内容: RateLimiter のテストは単純な上限と61秒後のリセットだけ。枠の境界（ちょうど window 秒で新しい枠になること、window−ε ではまだ同じ枠であること）と、複数スレッドの同時呼び出しで上限を超えないことを検証していない。仕様が明示する観点が空洞になっている。 / 根拠: tests/test_notes.py の `RateLimitTest.test_limit` のみ。`>=` を `>` に変えても、ロックを外しても通る。 / 提案: 境界値のテストと、`hook` を使うか複数スレッドで N 件を同時に流して許可数がちょうど limit になることを確かめるテストを追加する。\n- [重大4] 区分: テスト / 対象: AC8, K8 / 内容: 共有リンクの期限切れ、期限ちょうど（now == expires は無効）、形の崩れ（改行付き・桁違い・16進の大文字・非 str）、署名の改ざんを確かめるテストがほとんどない。あるのは正常系と note_id の差し替え1件だけ。 / 根拠: tests/test_notes.py の `ShareTest`。`>=` を `>` に変えても通る。 / 提案: 期限の前後1秒、各種の不正な形、署名1文字の改ざん、別の secret のそれぞれが Forbidden になることを確かめる。\n- [重大5] 区分: テスト / 対象: AC1, AC5, K4, AC10, R10 / 内容: 途中で失敗したときの巻き戻しを確かめるテストがない。対象は、作成時のタグ挿入失敗でメモが残らないこと、移管の途中失敗で元のままになること、削除の失敗が例外として伝わること、例外の後に同じ接続を使い続けられることの4つ。入力検証の境界値（題名100/101文字、本文10000/10001文字、タグ5/6個と重複、タグの書式、tags に文字列を渡す）、list_notes の範囲外、LIKE の `%` `_` の扱いも未検証。 / 根拠: tests/test_notes.py に `hooks` の使用がない。transaction() の ROLLBACK を消してもテストは通る。 / 提案: `hooks.before_write` で例外を起こし、メモ・タグ・監査の件数が変わらないことと、その後の操作が成功することを確認する。入力の境界値は網羅する。\n- [重大6] 区分: テスト / 対象: AC6, AC9, K5, K7, K2 / 内容: api_key の伏せ字（8文字未満は全部、8文字以上は末尾4文字だけ残す）、export_audit が管理者以外に Forbidden を返すこと、ログ・例外にメモ本文・署名・api_key が出ないこと、SQL インジェクションを含む検索語・`%`・`_` の検証がない。`test_export_audit` は action と actor しか見ておらず、`actor_key` を一度も確認していない。 / 根拠: tests/test_notes.py の `test_export_audit`。`_mask` を恒等関数にしても通る。 / 提案: マスクの境界（7・8文字）、assertLogs によるログの検査、`' OR 1=1 --` や `%` を検索語にしたテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `delete_note` は権限の確認を transaction の外で行い、削除は `id` だけを条件にしている。確認の後に別の接続が所有者を変えると（移管など）、権限のない削除が通りうる。同時に削除されても黙って成功し、0件削除の監査ログが残る。 / 根拠: service.py:170-178 付近（`delete_note`）。 / 提案: transaction 内で行を読み直して `_visible` と `_can_modify` を再確認し、rowcount が1でなければ NotFound にする。`update_note` の権限確認も同様。\n- [軽微2] 区分: 実装 / 対象: R8 / 内容: 先頭ゼロ付きのリンク（例 `007.exp.sig`）が、正規のリンク `7.exp.sig` と同じ署名で通る。仕様の形式には反しないが、リンクの正規化が曖昧になる。 / 根拠: share.py の `LINK_RE` と `int()` による変換。 / 提案: 再生成した文字列とリンクを比較するか、先頭ゼロを拒否する。\n- [軽微3] 区分: 実装 / 対象: R5 / 内容: 移管で `version` は増えるが `updated_at` は更新されない。一覧の「新しい順」に反映されない。 / 根拠: service.py:187 付近（`transfer_notes`）。 / 提案: 設計判断として明記するか、`updated_at` も更新する。\n- [軽微4] 区分: 設計 / 対象: トレーサビリティ / 内容: `notes/__init__.py` は0行なのに、全要求の実装ファイルとしてそこだけが登録されている。実際は service.py・ratelimit.py・share.py・db.py が実装している。設計書の「要求との対応」とも食い違う。 / 根拠: `aqdlc trace` の出力、`wc -l notes/__init__.py`（0行）。 / 提案: `impl-map` を実ファイルに付け直す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否しか確かめておらず不十分。境界値、タグの規則、失敗時に何も残らないことが未検証。\n- AC2: V2 は閲覧の正常系だけで不十分。NotFound の各ケースと閲覧数の加算（同時を含む）が未検証。\n- AC3: V3 は1ページ目と単純な検索だけで不十分。範囲外の拒否、sort、`%` `_`、タグの OR、他人の非公開の除外が未検証。VK2（インジェクション）も未検証。\n- AC4: V4 は作成者の更新と削除の正常系だけで不十分。Forbidden、Conflict、管理者の扱い、再検証、削除失敗が未検証。VK3 も未検証。\n- AC5: V5 は件数を返すことしか見ておらず不十分。移管後の所有者、組織外の拒否、途中失敗での元のままが未検証。VK6 も未検証。\n- AC6: V6 は `actor_key` を見ておらず空洞。VK7 も同様。\n- AC7: V7 は枠の境界と同時呼び出しを欠いており不十分。\n- AC8: V8 は期限切れ・期限ちょうど・形の崩れを欠いており不十分。VK8 も同様。\n- AC9: V9 に該当するテストがなく空洞。VK5 も同様。\n- AC10: V10 に該当するテストがなく空洞。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしは見つからなかった）。\n- 検証条件の弱体化: `history` に check の追加（bind）しかなく、弱める変更は確認できなかった。ただし証拠の状態は全項目で `passed_but_unchallenged`。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと統合テスト（ファイル DB と複数スレッドを使うもの）で足りる。ただし並行実行のテストは必須。\n\n### 不足しているリスク\n- K1: 認可の拒否と NotFound の隠蔽が未検証。\n- K2: インジェクションと LIKE のエスケープが未検証。\n- K3: 更新・閲覧・RateLimiter の同時実行が未検証。\n- K4: 作成・移管・削除の巻き戻しが未検証。\n- K5, K7: ログの機密情報とマスクが未検証。\n- K6: 組織をまたぐ移管と部分移管が未検証。\n- K8: 期限の境界と形の崩れが未検証。\n\n### 確認したこと\n- spec.md、design.md、`notes/*.py`、`tests/test_notes.py` を全文読んだ。\n- `aqdlc trace` と `aqdlc history --since 0` を実行した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件すべて合格した（Ran 12 tests, OK）。\n- 実装コードは仕様と設計におおむね沿っている。transaction の巻き戻し、`views = views + 1` の加算、version 条件付きの UPDATE、LIKE の ESCAPE とプレースホルダー、HMAC の `compare_digest`、`>=` による期限判定、ロック内での RateLimiter を読んで確認した。\n- 重大な指摘はすべてテストの不足で、実装そのものの重大な欠陥は読んだ範囲では見つけていない。\n- 追加の再現スクリプトは実行していない。上記は読解にもとづく。",
+ "files_changed": [],
+ "valid": true
+}

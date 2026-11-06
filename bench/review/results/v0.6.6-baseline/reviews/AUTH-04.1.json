@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 1,
+ "sec": 36.2,
+ "exit": 0,
+ "cost_usd": 0.1459439,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22734,
+  "cache_read_input_tokens": 116819,
+  "output_tokens": 4331,
+  "output_tokens_details": {
+   "thinking_tokens": 728
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22734,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3028,
+    "cache_read_input_tokens": 39525,
+    "cache_creation_input_tokens": 2315,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2315
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 7\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6 / 内容: `transfer_notes` が移す先（to_user）の組織を確かめていない。確かめているのは管理者の role と、移す元が管理者と同じ組織かどうかだけ。他組織の利用者を to_user に渡すと、メモの owner_id が他組織の利用者に変わる。仕様の「移す先・移す元・管理者がすべて同じ組織」に反し、組織の外にメモが渡る（K6）。 / 根拠: notes/service.py の `transfer_notes` に `to_user[\"org_id\"]` の検査がない。 / 提案: `to_user[\"org_id\"] != admin[\"org_id\"]` なら Forbidden にする。これを外すと失敗するテストを足す。\n- [重大2] テスト / 対象: AC1, AC2, AC3, K1, K2 / 内容: 他組織・他人の非公開メモが NotFound になるテストが1つもない（K1）。タグの上限・形式・重複の境界、題名の空白だけ・100文字の境界・本文の境界、tags に文字列を渡すケースもない。`list_notes` の範囲外（page 0、per_page 0/51、不正な sort）もない。`%` と `_` の検索、タグ OR 検索、SQL インジェクション文字列の入力もない（K2）。 / 根拠: tests/test_notes.py 全90行。異常系は空題名1件と `transfer_notes` の管理者検査1件だけ。 / 提案: 上の各ケースを正常系と異常系の両方で追加する。\n- [重大3] テスト / 対象: AC4, R4, K3 / 内容: 古い version での Conflict、読み出しと書き込みの間に別の更新が入る競合（`hooks.before_write(\"update\")` で再現できる）、非作成者の Forbidden、管理者の更新と削除、非公開メモの管理者への NotFound を確かめるテストがない。更新時のタグの検証と、削除失敗時の例外の伝播も確かめていない。 / 根拠: テストは `test_update_by_owner` と `test_delete_by_owner` の正常系だけ。 / 提案: 設計にある hooks の差し込み口を使って、決定論的な競合テストを書く。\n- [重大4] テスト / 対象: AC2, R2, K3 / 内容: 閲覧数が増えること自体を確かめていない。複数の接続・スレッドで同時に閲覧しても数え漏れがないことも確かめていない。 / 根拠: `test_create_and_get` は views を見ない。並行テストがない。 / 提案: 別の接続と別のスレッドで N 回閲覧し、views が N になることを確かめる。\n- [重大5] テスト / 対象: AC1, AC5, K4, AC10 / 内容: トランザクションの巻き戻しを確かめていない。`hooks.before_write` で `create:tags`、`delete:note`、`transfer:N` の途中で失敗させ、何も残らないことと、その後も接続が使えることを確かめるテストがない。 / 根拠: テスト内に hooks の使用がない。 / 提案: 途中で例外を出す hook を差し込み、巻き戻しと接続の再利用を確かめる。\n- [重大6] テスト / 対象: AC6, AC9, K5, K7 / 内容: 監査ログの api_key の伏せ字を確かめていない（`test_export_audit` は action と actor しか見ない）。8文字未満・ちょうど8文字の境界、ログや例外メッセージに本文・署名・鍵が出ないことも確かめていない。 / 根拠: tests/test_notes.py の `test_export_audit`。 / 提案: 鍵の長さ別の期待値を確かめ、`assertLogs` で機密情報が出ていないことを確かめる。\n- [重大7] テスト / 対象: AC7, AC8, K8 / 内容: RateLimiter は枠の境界（ちょうど window 秒で新しい枠になる／その1つ手前ではならない）と、並行呼び出し（`RateLimiter.hook` を使う）を確かめていない。共有リンクは期限ちょうどの境界、期限切れ、形の崩れ（改行、桁違い、大文字、署名の長さ）を確かめていない。tampered テストも note_id の改ざん1通りだけ。 / 根拠: `RateLimitTest` と `ShareTest`。t=61 は境界ではない。期限切れのテストがない。 / 提案: 境界値（window-1、window、期限-1、期限）と、複数スレッドで limit を超えないことを確かめるテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` と `delete_note` は、権限の確認をトランザクションの外の古い行で行っている。確認後に transfer で所有者が変わっても、古い権限判定のまま書き込める。update は version 条件で Conflict になるが、delete にはその条件がない。 / 提案: トランザクション内で行を読み直して、可視性と権限を確かめる。\n- [軽微2] 区分: 実装 / 対象: R8 / 内容: リンクの note_id に先頭ゼロを許し、\"007.…\" が 7 と同じ署名で通る。害は小さいが、正規形の厳密さがない。 / 提案: 正規形（先頭ゼロなし）に限る。\n- [軽微3] 区分: 設計 / 対象: R5 / 内容: 設計書に transfer の組織検査の規則が書かれていない。 / 提案: 設計書に追記する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名1件だけで不十分。境界値、タグの規則、失敗時に何も残らないことの検証がない。\n- AC2: V2 は閲覧の正常系のみで不十分。他組織・非公開の NotFound、views の増加、並行の検証がない。\n- AC3: V3 は一覧1件と検索1件のみで不十分。範囲外の拒否、LIKE のエスケープ、タグ OR、SQL インジェクションを確かめていない。\n- AC4: V4 は正常系のみで不十分。Conflict、Forbidden、管理者の扱い、競合を確かめていない。\n- AC5: V5 は正常系と管理者でない場合の Forbidden のみで不十分。組織の検証、全部か何もないかの検証がなく、実装にも欠陥がある（重大1）。\n- AC6: V6 は鍵の伏せ字を見ておらず空洞。\n- AC7: V7 は枠の境界と並行を確かめていないため不十分。\n- AC8: V8 は期限、形の崩れ、境界を確かめていないため不十分。\n- AC9: V9 は該当するテストがなく未検証。\n- AC10: V10 は例外後の接続の再利用を確かめるテストがなく未検証。\n- エンジンが検出したテストの兆候（skip、.only、アサーションなし）はなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、単体・統合テストが適切。ただし並行と巻き戻しのテストは、実際の SQLite（ファイルまたは共有メモリ）と複数の接続で行う必要がある。\n\n### 不足しているリスク\n- K1: 他組織・非公開の漏えいを確かめるテストがない。\n- K2: インジェクション・LIKE のテストがない。\n- K3: 並行の閲覧・更新・RateLimiter のテストがない。\n- K4: 途中失敗の巻き戻しのテストがない。\n- K5, K7: 機密情報の露出と api_key の伏せ字のテストがない。\n- K6: 実装に欠陥があり、テストもない（重大1）。\n- K8: 期限・形の崩れ・境界のテストがない。\n\n### 確認したこと\n- 仕様、設計、notes/*.py と tests/test_notes.py を全文読んだ。\n- `aqdlc trace` で、全要求が `notes/__init__.py`（空ファイル）に対応づいていることを確認した。履歴に検証条件の弱体化はなかった。\n- `python3 -m unittest discover -s tests -t .` は 12 件が OK。ただしテストの中身は薄い。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

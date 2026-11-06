@@ -1,0 +1,43 @@
+{
+ "case": "AUTH-05",
+ "rep": 1,
+ "judge_cost_usd": 0.0662817,
+ "judge_raw": "## 判定\n\n- **重大1**: 埋め込み欠陥そのものです。`search_notes` の WHERE に `private = 0 OR owner_id = ?` がなく、同じ組織の他人の非公開メモが検索に出ます。箇所・原因・影響が正解データと一致し、再現も示しています。\n- **重大2**: テストの不足だけを述べています。コードの欠陥の主張ではないため test_gap です。\n- **重大3**: RateLimiter の境界と同時呼び出しのテストが無いという指摘です。test_gap です。\n- **重大4**: 共有リンクの期限と形式のテストが無いという指摘です。test_gap です。\n- **軽微1**: 認可判定をトランザクションの外で行う点を挙げています。ただし version の比較で Conflict になるため実害は小さく、報告自体もそう認めています。設計上の提案にとどまるので style です。\n- **軽微2**: `search_notes` のタグ検査が `_validate` と重複しているという指摘です。保守性の提案なので style です。\n\n重大1が埋め込み欠陥に一致するため、検出は yes です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes に非公開メモの除外条件がなく他人の非公開メモが返るという、埋め込み欠陥と同じ箇所・原因・影響の指摘。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足を並べているだけで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界と並行呼び出しのテスト不足の指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"共有リンクの期限と形式のテスト不足の指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version の比較で Conflict になるため実害は小さく、設計上の提案にとどまる。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"タグ検査の重複を共通化する保守性の提案。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が search_notes の非公開メモ漏えいを正確に指摘し、実行して再現も確認している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes に非公開メモの除外条件がなく他人の非公開メモが返るという、埋め込み欠陥と同じ箇所・原因・影響の指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足を並べているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界と並行呼び出しのテスト不足の指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "共有リンクの期限と形式のテスト不足の指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version の比較で Conflict になるため実害は小さく、設計上の提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "タグ検査の重複を共通化する保守性の提案。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が search_notes の非公開メモ漏えいを正確に指摘し、実行して再現も確認している。"
+ }
+}

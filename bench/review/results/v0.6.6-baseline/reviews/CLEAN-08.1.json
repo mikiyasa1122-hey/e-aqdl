@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-08",
+ "rep": 1,
+ "sec": 40.2,
+ "exit": 0,
+ "cost_usd": 0.1466844,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21920,
+  "cache_read_input_tokens": 110784,
+  "output_tokens": 4791,
+  "output_tokens_details": {
+   "thinking_tokens": 929
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21920,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2966,
+    "cache_read_input_tokens": 36844,
+    "cache_creation_input_tokens": 4182,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4182
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8cfb3494\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC10, R1〜R10, K1〜K8, V1〜V10, VK1〜VK8 / 内容: テストが12件しかなく、ほぼ正常系の1本ずつである。仕様が求める異常系・境界値・並行・途中失敗の検証がない。具体的には次のものが無い。(a) 他組織・他人の非公開メモが NotFound になること(K1)、(b) 閲覧数の同時加算(AC2)、(c) 楽観的ロックの Conflict と、作成者・管理者以外の Forbidden(AC4)、(d) 途中失敗でのロールバック(hooks.before_write で再現する設計だったが未使用。K4・AC1・AC5・AC10)、(e) transfer の他組織 Forbidden と全部か何もしないか(AC5・K6)、(f) 監査ログの api_key 伏せ字(AC6。test_export_audit は action と actor しか見ていない)、(g) RateLimiter の枠の境界(ちょうど window 秒)とスレッド同時呼び出し(AC7。RateLimiter.hook を使っていない)、(h) 共有リンクの期限ちょうど・期限切れ・形の崩れ(AC8)、(i) LIKE の % と _ の扱い・SQL インジェクション・タグの OR 絞り込み・各入力の上限と下限(AC3・K2)、(j) ログに本文・署名・api_key が出ないこと(AC9)。検証 V1〜V10・VK1〜VK8 は trace 上すべて「合格」だが、実際には大半が空洞である。 / 根拠: tests/test_notes.py 全体（90行・12件）。`grep hooks tests/` に該当なし。 / 提案: 上記 (a)〜(j) を決定論的に書く。並行は hooks と RateLimiter.hook を使い、sleep は使わない。ラベルごとに V・VK と対応づける。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 内容: TAG_RE が `^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾が改行のタグ（\"abc\\n\"）が検査を通り、保存される。仕様は「英小文字・数字・ハイフンの1〜20文字」のみを許す。share.py では同じ問題を fullmatch で防いでおり、対応が不統一である。 / 根拠: notes/service.py:14, 64, 151。再現: `service.create_note(conn,u,'t','b',['abc\\n'])` が例外なく note_id=1 を返した。 / 提案: `fullmatch` にするか `\\Z` を使う。改行つきタグを拒否するテストも追加する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3 / 内容: update_note の権限確認（_visible / _can_modify）とバージョン確認の一部がトランザクションの外にある。UPDATE の WHERE は version だけで、トランザクション内で所有者・非公開の状態を再確認していない。そのため、読み出しと書き込みの間に所有者の移管（R5）や公開範囲の変更が入っても、変更前の権限判断のまま更新が通る。delete_note も同じで、権限確認がトランザクションの外にある。なお、移管は version を増やすので更新側は Conflict になる。ただし delete には version がなく、権限を失った元の所有者の削除が通りうる。 / 根拠: notes/service.py:158-168（update）、183-188（delete）。 / 提案: BEGIN IMMEDIATE の後に行を読み直して認可を判定する。delete は特に、トランザクション内で再検査する。この競合を hooks で再現するテストも追加する。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 内容: page に巨大な整数（10**30）を渡すと ValidationError ではなく OverflowError になる。 / 根拠: 再現: `list_notes(c,u,page=10**30)` が OverflowError を出した。 / 提案: page に現実的な上限を設けて ValidationError にする。\n- [軽微2] 区分: 実装 / 対象: R3 / 内容: search_notes のタグ検査が _validate と重複していて、規則が二重になっている。重大2の修正漏れの原因にもなる。 / 根拠: notes/service.py:146-151。 / 提案: タグ検査を共通の関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否しか確かめておらず不十分。本文・タグの上限、タグの形式、途中失敗で何も残らないことが無い。実装には改行つきタグの穴がある。\n- AC2: V2 は閲覧の正常系のみで不十分。閲覧数が増えることすら確かめていない。他組織・非公開が NotFound になることも、同時閲覧もない。\n- AC3: V3 は一覧の件数と、検索の1件だけで不十分。範囲外・sort・% と _・タグの OR・インジェクションがない。\n- AC4: V4 は作成者の更新・削除の正常系のみで不十分。Conflict、Forbidden、管理者の扱い、非公開メモ、更新時の入力検証、削除の失敗の伝播がない。\n- AC5: V5 は件数を返すことと非管理者の拒否のみで不十分。他組織の拒否と途中失敗時のロールバックがなく、移管後の所有者も確かめていない。\n- AC6: V6 は伏せ字を確かめておらず不十分。api_key の出力そのものが検証されていない。\n- AC7: V7 は単純な超過とリセットのみで不十分。ちょうど window 秒の境界と、複数スレッドの同時呼び出しがない。\n- AC8: V8 は往復と改ざん1例のみで不十分。期限ちょうど・期限切れ・形の崩れ・非文字列がない。\n- AC9: V9 に該当するテストが無く、検証が空洞である。\n- AC10: V10 に該当するテストが無い。例外後に接続が使えることを確かめていない。\n- K1〜K8: VK1〜VK8 に実質的な検証が無い。特に K2（インジェクション）、K3（並行）、K4（ロールバック）、K6、K7、K8 が未検証である。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなし無し）。ただし、テストが少ないため弱い。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、SQLite をメモリ上で使う単体・結合テストで足りる）。ただし、並行と途中失敗の決定論的な単体テストは必須。\n### 不足しているリスク\n- K1: 他組織・他人の非公開の漏えいを確かめるテストが無い。\n- K2: インジェクション・LIKE エスケープのテストが無い。\n- K3: 閲覧数・更新・RateLimiter の並行テストが無い。\n- K4: 途中失敗のロールバックのテストが無い（R1・R4・R5・R10）。\n- K5・K7: ログと監査出力での機密情報の露出のテストが無い。\n- K6: 他組織への移管の拒否と、一部だけ移る事態のテストが無い。\n- K8: 期限切れ・改ざん・形の崩れのテストが不足している。\n- R4 の認可確認のタイミング（重大3）の競合も未検証である。\n### 確認したこと\n- spec.md・design.md を読み、notes/*.py（db・errors・ratelimit・share・service）と tests/test_notes.py を全文確認した。\n- `python3 -m unittest discover -s tests -t .` → 12件 OK（ただし内容が薄い）。\n- `grep hooks tests/` → テストが hooks を使っていないことを確認した。\n- `python3 -c`（in-memory DB）で再現: タグ \"abc\\n\" が作成を通る（重大2）。page=10**30 は OverflowError（軽微1）。\n- trace: 全 AC・K が「合格・反証未実施」。history: 検証条件の弱体化（変更・削除）は見当たらない（bind のみ）。\n- gate は実行していない。コードは変更していない。\n```",
+ "files_changed": [],
+ "valid": true
+}

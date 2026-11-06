@@ -1,0 +1,7 @@
+{
+ "repo_commit": "fd0d1ff177f989cf1f4e32b1f24567a800672e49",
+ "engine_tree": "5a873e3296b846eb755829ad7726bed59b95d0bf",
+ "python": "3.13.18",
+ "built": "2026-11-06T09:16:13",
+ "config": "既定（init のまま）。counterfactual off・holdout 無効・差分カバレッジ無効・review.blind 有効・workflow.mode full"
+}

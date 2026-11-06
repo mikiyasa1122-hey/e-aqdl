@@ -1,0 +1,82 @@
+{
+ "conditions": {
+  "repo_commit": "fd0d1ff177f989cf1f4e32b1f24567a800672e49",
+  "engine_tree": "5a873e3296b846eb755829ad7726bed59b95d0bf",
+  "python": "3.13.18",
+  "built": "2026-11-06T09:16:13",
+  "config": "既定（init のまま）。counterfactual off・holdout 無効・差分カバレッジ無効・review.blind 有効・workflow.mode full"
+ },
+ "runs": {
+  "total": 40,
+  "judged": 40,
+  "invalid_or_unjudged": []
+ },
+ "detection": {
+  "TP": 29,
+  "FN": 1,
+  "FP": 10,
+  "partial_unresolved": [],
+  "ambiguous_findings_unresolved": 0,
+  "precision": 0.744,
+  "recall": 0.967,
+  "recall_reported_as_high": 0.967,
+  "high_severity_recall": 1.0,
+  "high_severity_missed": [],
+  "missed": [
+   "SQL-02#1"
+  ],
+  "by_category": {
+   "authz": "5/5",
+   "boundary": "4/4",
+   "concurrency": "3/3",
+   "exception": "3/3",
+   "secret": "3/3",
+   "sql": "3/4",
+   "transaction": "4/4",
+   "validation": "4/4"
+  }
+ },
+ "clean_cases": {
+  "n": 10,
+  "verdict_needs_fix": 10,
+  "false_positive_findings": 4,
+  "cases_with_false_positive": [
+   "CLEAN-01#1",
+   "CLEAN-03#1",
+   "CLEAN-07#1",
+   "CLEAN-10#1"
+  ]
+ },
+ "other_findings": {
+  "real_other": 64,
+  "test_gap": 108,
+  "style": 52
+ },
+ "cost_usd_per_review": {
+  "n": 40,
+  "mean": 0.143,
+  "sd": 0.015,
+  "min": 0.107,
+  "max": 0.171
+ },
+ "sec_per_review": {
+  "n": 40,
+  "mean": 37.422,
+  "sd": 5.005,
+  "min": 28.6,
+  "max": 49.9
+ },
+ "judge_cost_usd_per_review": {
+  "n": 40,
+  "mean": 0.067,
+  "sd": 0.003,
+  "min": 0.062,
+  "max": 0.073
+ },
+ "human_confirmations_per_run": "not_measured（レビュー担当だけを動かすため、人とのやりとりがない）",
+ "not_measured": [
+  "実装の品質（このベンチマークはレビューの検出だけを測る）",
+  "人への確認回数",
+  "counterfactual・holdout・差分カバレッジを有効にした条件（既定の設定で測った）"
+ ]
+}

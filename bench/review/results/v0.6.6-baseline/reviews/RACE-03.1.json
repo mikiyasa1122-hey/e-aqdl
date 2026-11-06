@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 1,
+ "sec": 31.1,
+ "exit": 0,
+ "cost_usd": 0.1069101,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 6,
+  "cache_creation_input_tokens": 16646,
+  "cache_read_input_tokens": 72041,
+  "output_tokens": 3311,
+  "output_tokens_details": {
+   "thinking_tokens": 659
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16646,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2894,
+    "cache_read_input_tokens": 28007,
+    "cache_creation_input_tokens": 7745,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7745
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 内容: RateLimiter の排他制御が働いていない。`hit` が呼ばれるたびに新しい `threading.Lock()` を作っているので、複数スレッドが同時に入れる。`self._lock` は作られるが使われていない。同時に呼ぶと、上限を超えて許してしまう。 / 根拠: notes/ratelimit.py:95 `with threading.Lock():`。`self.hook()`(100行)は読み取り(97行)と書き込み(103行)の間にあるので、hook の中で別スレッドから `hit` を呼べば再現できる。 / 提案: `with self._lock:` に直す。hook を使った決定論的な並行テストも追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 内容: タグの検査が正規表現の `$` と `match` で行われている。`$` は末尾の改行の手前にも一致するので、`\"abc\\n\"` のような不正なタグが通ってしまう。仕様は「英小文字・数字・ハイフンの1〜20文字」。 / 根拠: notes/service.py:158 `^[a-z0-9-]{1,20}$`、209行と295行の `TAG_RE.match(t)`。share.py は `fullmatch` を使っており、タグの検査だけ一貫していない。 / 提案: `fullmatch` を使うか、`\\Z` に直す。`\"a\\n\"` と 21 文字のタグを拒否するテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC10 全般 / 内容: テストが12件しかなく、ほとんどが正常系だけで、リスクを確かめていない。重大1と重大2のバグも見逃している。足りない検証は次のとおり。\n  - 並行実行（閲覧数、RateLimiter、更新の競合）\n  - 途中で失敗したときの巻き戻し（作成、削除、移管。`hooks.before_write` の差し込み口を使っていない）\n  - 他の組織・他人の非公開メモが NotFound になること\n  - 管理者が非公開メモを扱えないこと\n  - Forbidden / Conflict\n  - 入力の境界値（題名100/101文字、本文10000文字、タグ5/6個、per_page 0/51、page 0）\n  - `%` と `_` の検索\n  - 検索のタグ OR 絞り込み\n  - SQL インジェクションの文字列\n  - 共有リンクの期限ちょうど、署名・形式の改ざん\n  - api_key の伏せ字(8文字未満を含む)\n  - ログに機密情報が出ないこと(AC9)\n  - 例外の後の接続の再利用(AC10)\n  / 根拠: tests/test_notes.py は90行、test が12件。 / 提案: 上の項目を決定論的に確かめるテストを追加する。sleep には頼らない。\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 内容: 共有リンクの note_id と期限を `int()` で正規化してから署名を検証している。そのため `007.…` のような先頭ゼロ付きの別表記も有効になる。 / 根拠: notes/share.py:137, 142 / 提案: 署名の検証は、リンクに書かれた文字列のまま行う。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: 更新の権限確認(303〜306行)がトランザクションの外にある。確認の後に所有者が変わっても、古い確認のまま書き込める。version の条件で大半は防げるが、移管は version を上げるので Conflict になる。実害は小さい。 / 根拠: notes/service.py:302-316\n- [軽微3] 区分: 実装 / 対象: R4 / 内容: `update_note` が `version` の型を検査していない。 / 根拠: notes/service.py:301\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V は `test_create_and_get` と `test_empty_title_rejected` だけで不十分。境界値、タグの不正、途中の失敗で何も残らないことを確かめていない。\n- AC2: 閲覧数の同時の正確さ、他組織・非公開の NotFound を確かめていないので不十分。\n- AC3: 一覧は最初のページだけ、検索は 1 件だけ。入力の拒否、`%` と `_`、タグ、インジェクションを確かめていないので不十分。\n- AC4: 更新と削除の正常系だけ。Conflict、Forbidden、削除の失敗は確かめていないので不十分。\n- AC5: `test_transfer` と `test_transfer_requires_admin` がある。組織をまたぐ場合と途中の失敗を確かめていないので不十分。\n- AC6: `test_export_audit` はある。8文字未満の鍵などの境界は不明。コードの実装自体は妥当。\n- AC7: `test_limit` は単純な上限だけ。枠の境界も同時の呼び出しも確かめていないので不十分。実際に欠陥(重大1)がある。\n- AC8: `test_roundtrip` と `test_tampered` はある。期限ちょうど、形の崩れ、署名の改ざんの種類が足りない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出した兆候: なし。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、単体・結合テストで足りる。ただし並行実行のテストが必要。\n\n### 不足しているリスク\n- K3: RateLimiter の競合が未対策で、未検証でもある(重大1)。\n- K4: 途中の失敗による不整合の検証がない。\n- K1・K2・K5・K8: テストがほぼない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を全部読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った(OK)。通ってはいるが、上の欠陥は検出できていない。\n- `$AQ gate` は実行していない。`$AQ trace` と `$AQ history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}
