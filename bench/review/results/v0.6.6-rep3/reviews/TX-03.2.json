@@ -1,0 +1,49 @@
+{
+ "case": "TX-03",
+ "rep": 2,
+ "sec": 36.3,
+ "exit": 0,
+ "cost_usd": 0.1308931,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19344,
+  "cache_read_input_tokens": 106811,
+  "output_tokens": 4282,
+  "output_tokens_details": {
+   "thinking_tokens": 800
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19344,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2830,
+    "cache_read_input_tokens": 34533,
+    "cache_creation_input_tokens": 3917,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3917
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 62accf30\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, K4, R10 / 内容: `create_note` がメモの INSERT とタグ・監査ログの INSERT を別々のトランザクションにしている。タグ・監査の書き込みが失敗すると、タグのないメモが残る。仕様は「1つのトランザクションで行う。途中で失敗したら何も残さない」と定めている。設計は `create:tags` の hook を2つのトランザクションの間に置いており、仕様と矛盾している。 / 根拠: notes/service.py:86-95。1つ目の `with transaction` が COMMIT された後に `hooks.before_write(\"create:tags\")` が呼ばれ、その後に2つ目の `with transaction` がある。再現するには、hook で例外を投げて create_note を呼び、`notes` に行が残ることを確認する。 / 提案: 1つの `with transaction` にまとめ、hook をその中に置く。失敗時に notes・note_tags・audit のすべてが0件であることを確かめるテストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 内容: テストは正常系が中心の12件だけで、受け入れ条件の大半を確かめていない。確かめていないものは次のとおり。\n  - R1: 境界値（題名100/101文字、空白だけ、本文10000文字、タグ6個、不正なタグ、tags に文字列を渡す）と途中失敗時のロールバック\n  - R2: 他の組織・他人の非公開・存在しないメモが NotFound になること、閲覧数、同時閲覧\n  - R3: 範囲外の入力、`%` と `_` のエスケープ、SQL インジェクション、タグ OR 絞り込み、非公開メモの除外\n  - R4: Conflict、Forbidden、管理者から見えない非公開メモ、読み書きの間に更新が入った場合の競合、削除の失敗が伝わること\n  - R5: 組織をまたぐ移管、途中で失敗したときの巻き戻し\n  - R6: 伏せ字（8文字未満、末尾4文字）\n  - R7: 枠の境界（ちょうど window 秒）と同時の呼び出し\n  - R8: 期限ちょうどのリンク、形の崩れたリンク\n  - R9: ログへの機密情報の出力\n  - R10: 例外の後に接続を使い続けられること\n  - 設計が用意した `hooks.before_write` と `RateLimiter.hook` は、どのテストにも使われていない。`trace` では V1〜V10・VK1〜VK8 がすべて `unit` に紐づいているが、中身は空洞である。 / 根拠: tests/test_notes.py 全体(90行)。grep しても hooks・hook・Conflict・Thread が出てこない。 / 提案: 上の項目ごとに異常系・境界値・並行のテストを足す。並行のテストは sleep ではなく hook で順序を決める。認可の条件や version 条件を外したら失敗することも確かめる。\n- [重大3] 区分: テスト / 対象: R4, AC4, K3 / 内容: 楽観的ロックの中心である、古い version を渡したときの Conflict を検証するテストが1つもない。実装は UPDATE の WHERE に version を入れて rowcount で判定していて、おそらく正しいが、検証の裏付けがない。 / 根拠: tests/test_notes.py に Conflict の import も使用もない。 / 提案: 古い version での更新が Conflict になるテストと、`before_write(\"update\")` hook の中で別の更新を入れても Conflict になるテストを足す。\n- [重大4] 区分: テスト / 対象: R7, AC7, K3 / 内容: RateLimiter のテストが、枠の境界(ちょうど window 秒で新しい枠になる)と、複数スレッドから同時に呼ばれたときに上限を超えないことを確かめていない。実装は Lock で守られていて、おそらく正しい。ただし AC7 は境界と同時の呼び出しを明示的に要求している。 / 根拠: tests/test_notes.py:62-71 は t=0 と t=61 しか使っていない。 / 提案: t=59.999 と t=60 の境界、N スレッドで limit を超えた分がちょうど RateLimited になること、`hook` を使った決定論的な並行テストを足す。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` と `delete_note` の `_visible` と `_can_modify` の判定がトランザクションの外にある。判定後、書き込みまでの間に所有者が移管されると、旧所有者が更新できてしまう余地がある。version の条件は付いているので、更新が失われることはない。 / 根拠: notes/service.py:139-157 / 提案: 判定をトランザクションの中に移すか、UPDATE の条件に owner_id を加える。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名の1件だけで不十分。境界値、タグの規則、ロールバックが未検証で、実装にも重大1の欠陥がある。\n- AC2: V2 は閲覧数も不可視メモの NotFound も確かめていないため不十分。実装は `_visible` と `BEGIN IMMEDIATE` 内の UPDATE で、おそらく正しい。\n- AC3: V3 は一覧の正常系と検索の1件だけで不十分。範囲外の入力、エスケープ、インジェクション、タグの OR が未検証。実装は `ESCAPE` とプレースホルダーを使っていて、おそらく正しい。\n- AC4: V4 は所有者による更新と削除だけで不十分(重大3)。\n- AC5: V5 は管理者の成功と非管理者の拒否だけで不十分。組織をまたぐ場合と巻き戻しが未検証。\n- AC6: V6 は `export_audit` の伏せ字をまったく確かめていない(actor 名と action しか見ていない)ため不十分。\n- AC7: V7 は不十分(重大4)。\n- AC8: V8 は往復と改ざんの1件だけで不十分。期限ちょうど、期限切れ、形の崩れが未検証。\n- AC9: V9 はログのテストが皆無で不十分。\n- AC10: V10 は例外後の接続の再利用を確かめていないため不十分。\n- エンジンが検出したテストの兆候はなし。skip・`.only` もなし。履歴を見ても、検証条件を弱めた形跡はない。\n\n### E2E の要否\n- 不要。ライブラリだけで HTTP も UI もなく、unittest の結合テスト(SQLite、複数スレッド)で足りる。ただし並行とロールバックのテストは必要である。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの NotFound のテストがない。\n- K2: `%` `_` とインジェクション文字列のテストがない。\n- K3: 同時閲覧、競合する更新、同時の RateLimiter のテストがない。\n- K4: 作成・更新・削除・移管の途中失敗のロールバックのテストがない。作成は実装にも欠陥がある(重大1)。\n- K5・K7: 伏せ字とログのテストがない。\n- K6: 組織をまたぐ移管のテストがない。\n- K8: 期限ちょうど、形の崩れたリンクのテストがない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。ただし上のとおり、確かめている範囲が狭い。\n- 仕様・設計・全ソース・テストを読んだ。\n- `aqdlc history --since 0` を確認した。bind の記録のみで、検証条件の弱体化はない。\n- 実装の変更も gate の実行もしていない。create_note の非原子性は、コードの読解で確認した(実行による再現はしていない)。",
+ "files_changed": [],
+ "valid": true
+}

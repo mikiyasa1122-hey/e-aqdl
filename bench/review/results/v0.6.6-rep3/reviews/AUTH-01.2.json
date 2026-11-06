@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-01",
+ "rep": 2,
+ "sec": 32.7,
+ "exit": 0,
+ "cost_usd": 0.19990680000000002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 38579,
+  "cache_read_input_tokens": 90948,
+  "output_tokens": 3648,
+  "output_tokens_details": {
+   "thinking_tokens": 618
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 38579,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2243,
+    "cache_read_input_tokens": 36138,
+    "cache_creation_input_tokens": 2441,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2441
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "Both bugs reproduce.\n\n```\n## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 55ea07b9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R3 の対象外、R4, K1, AC2, AC4 / 内容: `_visible` が org_id を見ていない。他の組織の公開メモを get_note で閲覧でき、閲覧数も増える。update_note と delete_note も、他の組織の公開メモで NotFound にならない。作成者以外が管理者でも、別の組織の管理者なら _can_modify が org を見るので Forbidden になる。このため「存在を明かさない」が崩れ、他の組織のメモの存在が判別できる。/ 根拠: notes/service.py の `_visible`（約63行）。再現: org1 の alice がメモを作り、org2 の bob が get_note すると題名が返る（実行して確認した）。/ 提案: `_visible` に `row[\"org_id\"] == user[\"org_id\"]` を加える。\n- [重大2] 区分: 実装 / 対象: R1, R4, R3（タグ検査）, AC1 / 内容: TAG_RE が `re.match` と `$` を使っているため、末尾が改行のタグ（例 `\"ab\\n\"`）を受け入れる。/ 根拠: notes/service.py の TAG_RE と、_validate・search_notes の `TAG_RE.match`。再現: create_note(..., ['ab\\n']) が成功した（実行して確認した）。/ 提案: `fullmatch` を使うか、`\\Z` で終わらせる。\n- [重大3] 区分: テスト / 対象: K1, AC2, AC3, AC4, AC5 / 内容: 組織をまたぐ分離のテストが一つもなく、全利用者が org 10。そのためテストが全部通っても重大1を検出できていない。非公開メモ、Forbidden、Conflict、閲覧数、一覧・検索の異常系（page・per_page・sort の範囲外、% と _、タグ OR、SQL インジェクション文字列）、移管の途中失敗、監査ログの伏せ字もテストされていない。/ 根拠: tests/test_notes.py は 12 件で、正常系が中心。/ 提案: 仕様の各 AC に対応する異常系・境界値を加える。\n- [重大4] 区分: テスト / 対象: K3, AC7, AC2, AC4 / 内容: 設計が用意した hooks.before_write と RateLimiter.hook を使った同時実行のテストがない。閲覧数の数え漏れ、更新の Conflict、レート制限の同時呼び出しを確かめていない。RateLimiter のテストも、枠の境界（ちょうど window 秒）を確かめていない。/ 根拠: tests/ に threading や hook の使用がない。/ 提案: hook で競合を決定論的に再現するテストと、境界値のテストを加える。\n- [重大5] 区分: テスト / 対象: K4, K6, K8, AC1, AC5, AC8, AC10, AC9 / 内容: 途中失敗のロールバック（create の tags 段階、delete、transfer）、ロールバック後の接続の再利用、共有リンクの期限ちょうど・形の崩れ、ログや例外に本文・署名・api_key が出ないことが未検証。/ 根拠: tests/test_notes.py に該当するテストがない。/ 提案: hooks.before_write で例外を投げて何も残らないことを確認するテストなどを加える。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: update_note の視認性と権限の確認が、トランザクションの外で読んだ行に基づく。最新性は version の条件で守られるので、実害は小さい。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名だけで不十分。タグの規則、上限、ロールバックを確かめていない。実装にも重大2がある。\n- AC2: V2 は同じ組織の作成者の閲覧だけで不十分。組織をまたぐ NotFound、非公開、閲覧数、同時閲覧がない。実装にも重大1がある。\n- AC3: V3 は正常系だけで不十分。範囲外、% と _、タグ絞り込み、SQL インジェクションがない。\n- AC4: V4 は作成者の更新・削除だけで不十分。Conflict、Forbidden、管理者の権限、非公開、タグ検査がない。\n- AC5: V5 は件数の確認と管理者以外の拒否だけで不十分。他の組織への移管と途中失敗の巻き戻しがない。\n- AC6: V6 は伏せ字を確認しておらず不十分（actor と action しか見ていない）。\n- AC7: V7 は枠の境界と同時呼び出しがなく不十分。\n- AC8: V8 は往復と改ざんだけで不十分。期限ちょうど、期限切れ、形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（ライブラリで HTTP・UI がない）。ただし、別接続・別スレッドの統合テストは必要。\n### 不足しているリスク\n- K1: 重大1のとおり、実装に穴があり、テストもない。\n- K3: 同時の閲覧・更新・呼び出しが未検証。\n- K4: ロールバックが未検証。\n- K5, K7: 伏せ字とログの検証がない。\n- K6: 移管の組織境界の検証がない。\n- K8: リンクの境界・形の崩れの検証がない。\n- K2: インジェクション文字列のテストがない。LIKE は ESCAPE と placeholder で実装されている。\n### 確認したこと\n- spec.md、design.md、全ソース（notes/*.py）、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件が通った。\n- 別の組織の get_note は題名が返った（重大1が再現した）。\n- タグ `ab\\n` の create_note が成功した（重大2が再現した）。\n- `aqdlc trace` で、すべての要求の証拠が passed_but_unchallenged（反証未実施）だと確認した。\n- `history` と `git diff` は確認していない。\n```",
+ "files_changed": [],
+ "valid": true
+}

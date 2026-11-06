@@ -1,0 +1,49 @@
+{
+ "case": "VAL-01",
+ "rep": 1,
+ "sec": 37.9,
+ "exit": 0,
+ "cost_usd": 0.1593676,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 24907,
+  "cache_read_input_tokens": 124836,
+  "output_tokens": 4724,
+  "output_tokens_details": {
+   "thinking_tokens": 886
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24907,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3016,
+    "cache_read_input_tokens": 42414,
+    "cache_creation_input_tokens": 2626,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2626
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a9a69178\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, R4（更新でも R1 の検証）/ 対応区分: 修正必須 / 内容: 空白だけの題名を拒否していない。`_validate` は `not title` と長さしか見ていない。 / 成立条件: `create_note(..., \"   \", \"b\")` や `update_note(..., title=\"   \")`。 / 影響: 仕様「空白だけは不可」に反するメモが保存される。 / 根拠: notes/service.py:57。実行すると `create_note(c, u, '   ', 'b')` が id=1 を返し、保存された。上流の検証や DB の CHECK はない。 / 提案: `not title.strip()` を拒否条件に加える。\n- [重大2] 区分: 実装 / 対象: R1, R3（タグの規則）, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾の改行が `$` に一致する。`\"ab\\n\"` のようなタグを通してしまう。 / 成立条件: 作成・更新・検索・絞り込みで、末尾に `\\n` が付いたタグを渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。20文字＋改行で長さの上限も破れる。share.py は同じ問題を `fullmatch` で避けているので、実装側も気づいていたはず。 / 根拠: notes/service.py:14, 64, 151。実行すると `create_note(..., ['ab\\n'])` が成功し、`get_note` が `['ab\\n']` を返した。 / 提案: `TAG_RE.fullmatch` を使う（`$` を外すだけでも可）。\n- [重大3] 区分: 実装 / 対象: R4, R5, K1, K3, AC4 / 対応区分: 修正必須 / 内容: `delete_note` が、認可の判定（`_row`・`_visible`・`_can_modify`）を `BEGIN IMMEDIATE` の外で行い、トランザクション内で再確認していない。`update_note` も同様に認可を外で判定する。ただし update は version の条件があるので、Conflict になるだけで済む。 / 成立条件: delete の判定の後、削除の前に `transfer_notes` でメモの所有者が変わる。元の所有者（member）が、すでに他人のものになったメモを削除できてしまう。 / 影響: 認可の判定時と書き込み時の間にずれがある。権限のない削除が通り、データが失われる。get_note は同じ問題をトランザクション内の再確認で避けているので、設計の方針とも不統一。 / 根拠: notes/service.py:182-191。delete は version を取らず、DELETE の条件も `WHERE id = ?` だけ。確認した保証: 上流に再確認や条件付きの DELETE はない。 / 提案: transaction 内で `_row`→`_visible`→`_can_modify` を再実行してから DELETE する。または DELETE の条件に owner_id・org_id を入れ、rowcount を見る。\n- [重大4] 区分: テスト / 対象: AC1〜AC10（特に AC2, AC4, AC5, AC7, AC9, AC10）、K1〜K8 / 対応区分: 証拠不足 / 内容: 12個のテストは正常系が中心で、仕様が求める異常系・境界・並行の検証がほぼない。 / 根拠: tests/test_notes.py に次のテストがない。(a) 他組織・他人の非公開の NotFound（K1）。(b) 閲覧数の同時加算。(c) Conflict、Forbidden、管理者の更新・削除。(d) 作成・削除・移管の途中失敗による巻き戻し（`hooks.before_write` が未使用）と、例外後の接続の再利用（AC10）。(e) 他組織への移管の拒否。(f) api_key の伏せ字（AC6/K7）。(g) `%`・`_`・SQL 文字列を含む検索語（K2）。(h) 入力の境界（題名100/101文字、タグ5/6個、page・per_page・sort）。(i) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。(j) 共有リンクの期限ちょうど、形の崩れ、期限切れ。(k) ログや例外に機密が出ないこと（AC9）。重大1・2のバグは、こうした境界のテストがないために見逃されている。 / 提案: 上記を、`hooks.before_write`、`RateLimiter.hook`、別接続の別スレッドを使った決定論的なテストとして追加する。sleep には頼らない。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の認可の判定（`_row`・`_visible`・`_can_modify`）も、`delete_note` と同様にトランザクション内で行うほうが一貫する。 / 提案: 重大3の修正に合わせて揃える。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空題名と正常系だけを確認している。空白題名・タグ（個数・文字・改行）・各上限・途中失敗でも何も残らないことを確認しておらず、実際に重大1・2のバグを見逃した。\n- AC2: 不十分。自分のメモを見る正常系だけ。他組織・非公開の NotFound、閲覧数の同時加算は未検証。\n- AC3: 不十分。一覧の1ページ目と単純な検索だけ。範囲外の入力、sort、`%`/`_`、タグ OR、SQL インジェクションは未検証。\n- AC4: 不十分。所有者の更新と削除の正常系だけ。Conflict、Forbidden、管理者の扱い、非公開の NotFound、削除の途中失敗は未検証。\n- AC5: 不十分。件数と「管理者でなければ Forbidden」だけ。他組織への移管の拒否、移管後の所有者、途中失敗での巻き戻しは未検証。\n- AC6: 不十分。`actor` と `action` しか見ておらず、api_key の伏せ字を見ていない。\n- AC7: 不十分。単一スレッドで、枠が切り替わる 0→61 秒だけ確認している。ちょうど window 秒の境界と同時呼び出しは未検証。\n- AC8: 不十分。往復と改ざんだけ。期限ちょうど、期限切れ、形の崩れは未検証。\n- AC9: 検証なし。ログや例外のメッセージを調べるテストがない。実装は、コード上では本文・署名・api_key をログに出していない。\n- AC10: 検証なし。例外の後に同じ接続を使うテストがない。\n- エンジンが検出したテストの兆候: なし（skip・.only などは見つからなかった）。検証条件やテストを弱めた形跡は、history と git diff（未コミットの新規ファイルのみ）からは見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テストで足りる。足りないのは上記の並行・異常系の単体テスト。\n\n### 不足しているリスク\n- K1, K2, K3, K4, K5, K6, K7, K8: 上記のとおり、ほとんど検証がない。実装を読んだ限り、K2（プレースホルダーと ESCAPE）、K6、K7、K8 は問題なさそうだが、証拠がない。\n- 未確認: R2 の同時閲覧の数え漏れ。`UPDATE views = views + 1` を `BEGIN IMMEDIATE` の中で実行しているので正しいはずだが、実行して確かめてはいない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読み、`aqdlc trace` と `history` も確認した。\n- `python3 -B -m unittest discover -s tests -t .` は 12 件すべて成功。ただし上記のとおり検証は薄い。\n- 小さな実行で、空白題名（`'   '`）とタグ `'ab\\n'` が受理されることを再現した（インメモリ DB のみ）。\n- コードは変更していない。gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

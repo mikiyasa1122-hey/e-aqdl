@@ -1,0 +1,43 @@
+{
+ "case": "AUTH-05",
+ "rep": 3,
+ "judge_cost_usd": 0.06698370000000001,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: search_notes に非公開メモの除外条件がない点を、同じ箇所(service.py:141-143)で指摘しています。原因も影響も埋め込んだ欠陥と一致するため、matches_defect です。\n- **重大2**: テスト全体の網羅性不足の指摘なので、test_gap です。\n- **重大3**: `TAG_RE.match` と `$` により、末尾に改行を付けたタグが通ります。仕様に反する実在のバグなので、real_other です。\n- **重大4**: RateLimiter のコード自体は妥当とされており、指摘はテスト不足だけです。test_gap です。\n- **軽微1**: 読み出し後にメモが削除されると Conflict になる点です。仕様は更新時に競合を Conflict とするだけで、この挙動を違反とは言っていません。報告も許容できるとしており、欠陥の主張は弱いため style です。\n- **軽微2**: to_user の実在確認がない点です。報告自身が違反ではなく任意としているため、style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes に private/owner の条件がなく他人の非公開メモが検索に出るという、埋め込んだ欠陥と同じ箇所・原因・影響の指摘。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テスト全体の網羅性不足の指摘で、コードの欠陥ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾改行のタグが検証を通る、実在する仕様違反のバグ。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のコードは妥当と認めており、指摘は同時実行・境界のテスト不足だけ。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"削除後の更新で Conflict になる挙動は仕様の範囲内と報告自身が認めており、挙動の明確化の提案にとどまる。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"報告自身が違反ではなく整合性も保たれるとしており、任意の改善提案にとどまる。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が search_notes の非公開メモ除外漏れを再現手順つきで正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes に private/owner の条件がなく他人の非公開メモが検索に出るという、埋め込んだ欠陥と同じ箇所・原因・影響の指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テスト全体の網羅性不足の指摘で、コードの欠陥ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾改行のタグが検証を通る、実在する仕様違反のバグ。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter のコードは妥当と認めており、指摘は同時実行・境界のテスト不足だけ。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "削除後の更新で Conflict になる挙動は仕様の範囲内と報告自身が認めており、挙動の明確化の提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "報告自身が違反ではなく整合性も保たれるとしており、任意の改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が search_notes の非公開メモ除外漏れを再現手順つきで正確に指摘している。"
+ }
+}

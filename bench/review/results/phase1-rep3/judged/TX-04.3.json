@@ -1,0 +1,43 @@
+{
+ "case": "TX-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0696577,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `transaction()` が例外時に ROLLBACK しない問題です。箇所・原因・影響のすべてが埋め込み欠陥と一致します。\n- **重大2**: `TAG_RE.match` と `$` の組み合わせで、末尾が改行のタグを通してしまいます。これは実在する別の欠陥です。ただし `$` は検証用の再現で確認されているだけで、埋め込み欠陥とは無関係です。\n- **重大3**: テスト不足の指摘だけで、コードの欠陥は主張していません。\n- **重大4**: `update_note` と `delete_note` で、権限判定がトランザクションの外にあります。移管と競合すると、元の所有者が他人のメモを更新・削除できます。`delete` は `WHERE id = ?` だけで rowcount も確認しないため、これも実在する欠陥です。\n- **軽微1**: `to_user` が存在しない場合を FK 違反まで検知できないという指摘です。仕様の対象外（呼び出し側を信用する）に沿った動作なので、欠陥ではなく改善提案です。\n- **軽微2**: 移管後に `updated_at` を更新しない点です。仕様に規定がなく、提案どおり仕様判断の話なので style としました。\n\n埋め込み欠陥は重大1で検出できています。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transaction() の except で ROLLBACK せず、トランザクションが開いたまま残るという、埋め込み欠陥と同じ箇所・原因・影響を指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾改行のタグが通るのは実在するバグで、埋め込み欠陥とは別物。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足の指摘だけで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"権限判定がトランザクション外にあり、delete は rowcount も確認しないため、移管との競合で TOCTOU が起きる実在の欠陥。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"呼び出し側を信用する対象外の範囲であり、存在確認の追加は改善提案にとどまる。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"移管時の updated_at 更新は仕様に規定がなく、仕様判断の提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が ROLLBACK 欠落という埋め込み欠陥を、原因・影響とも正しく指摘し、再現も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transaction() の except で ROLLBACK せず、トランザクションが開いたまま残るという、埋め込み欠陥と同じ箇所・原因・影響を指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾改行のタグが通るのは実在するバグで、埋め込み欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足の指摘だけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "権限判定がトランザクション外にあり、delete は rowcount も確認しないため、移管との競合で TOCTOU が起きる実在の欠陥。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "呼び出し側を信用する対象外の範囲であり、存在確認の追加は改善提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "移管時の updated_at 更新は仕様に規定がなく、仕様判断の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が ROLLBACK 欠落という埋め込み欠陥を、原因・影響とも正しく指摘し、再現も示している。"
+ }
+}

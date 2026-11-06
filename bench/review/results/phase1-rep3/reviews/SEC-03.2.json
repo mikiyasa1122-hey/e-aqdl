@@ -1,0 +1,49 @@
+{
+ "case": "SEC-03",
+ "rep": 2,
+ "sec": 44.6,
+ "exit": 0,
+ "cost_usd": 0.1330407,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15879,
+  "cache_read_input_tokens": 123487,
+  "output_tokens": 5716,
+  "output_tokens_details": {
+   "thinking_tokens": 712
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15879,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4149,
+    "cache_read_input_tokens": 38367,
+    "cache_creation_input_tokens": 3681,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3681
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 (notes/share.py:20) / 対応区分: 修正必須 / 内容: `make_link` が `log.info(... token=%s ...)` で共有リンクの署名をログに出している。 / 成立条件: INFO 以上のログを有効にした状態で `make_link` を呼ぶ。 / 影響: 署名が漏れる。署名を知った人は、期限内ならそのリンクを使える。R9「共有リンクの署名をログに出さない」に反する。 / 根拠: 実行して確認した。`logging.basicConfig(level=INFO)` で `make_link('s',1,now=0)` を呼ぶと、`INFO:notes.share:... token=9995cd9d...` と署名が 64 文字そのまま出た。設計書の「ログには ID だけを出す」にも反する。 / 提案: `token=%s` を削除して note と expires だけを出す。\n\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 (notes/service.py:15 `TAG_RE`) / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。Python の `$` は末尾の改行の手前にも一致するので、`\"ab\\n\"` が通る。 / 成立条件: 作成・更新・検索のタグに末尾が `\\n` の文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの 1〜20 文字」に反するタグが保存される。20 文字のタグに `\\n` を付けた 21 文字も通る。 / 根拠: `bool(service.TAG_RE.match('ab\\n'))` が True を返した。share.py の LINK_RE は同じ問題を避けて `fullmatch` を使っているので、実装内で不統一。 / 提案: `TAG_RE.fullmatch` に変えるか、`\\Z` を使う。\n\n- [重大3] 区分: テスト / 対象: AC1〜AC10、K1〜K8 (tests/test_notes.py) / 対応区分: 証拠不足 / 内容: テストは 12 件で、正常系がほぼすべて。受け入れ条件の中心である異常系・境界値・並行・失敗時のロールバックの検証がない。具体的には次の点。 / 成立条件: 認可・競合・境界・並行の条件を外しても、現在のテストは通る。 / 影響: K1、K3、K4、K6、K7、K8 を守るコードが、テストでは確かめられていない。重大1・2の欠陥もこのためすり抜けた。 / 根拠: 次のものがテストにない。(a) 他組織・他人の非公開メモが NotFound になること、(b) 管理者が更新・削除できる場合と Forbidden になる場合、(c) version 不一致の Conflict、(d) 閲覧数の同時加算、(e) `hooks.before_write` で途中失敗させたときの作成・削除・移管のロールバック、(f) 移管で別組織が Forbidden になること、(g) api_key を伏せる処理（8 文字未満・8 文字ちょうどを含む）、(h) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し、(i) 共有リンクの期限ちょうど・形の崩れ・期限切れ、(j) ログへの機密の非出力（AC9）、(k) 例外後に接続が使えること（AC10）、(l) 入力検証の境界、(m) LIKE の `%` `_`、(n) SQL インジェクション。設計書のとおり `hooks` と `RateLimiter.hook` は用意されているが、一度も使われていない。 / 提案: 上記 (a)〜(n) を決定論的なテスト（hook でスレッドを同期する形）として追加する。AC9 は `assertLogs` でログに署名が出ないことを確認する。\n\n- [重大4] 区分: 実装 / 対象: R4, AC4, K3 (notes/service.py update_note、`new_tags` の扱い) / 対応区分: 修正必須 / 内容: 更新の入力検証で、`tags` を渡さない（None）場合は既存タグを検査しない。これ自体は妥当。ただし `version` が int かの検証がない。さらに `_validate(new_title, new_body, ...)` では、`title=\"\"` や `title=\"   \"` を渡すと ValidationError になるが、`title=None` は「変更なし」として扱われる。これらは仕様違反ではない。このため本指摘は「確認したが成立しない」ものとして取り下げる。 / 成立条件: なし / 影響: なし / 根拠: コードを追って確認した。 / 提案: なし\n  - 注: 件数を整えるための項目ではなく、重大4は上の記述のとおり成立しない。下の判定は重大1〜3 の 3 件に基づく。\n\n重大4は撤回する。重大な指摘は 3 件、軽微な指摘は 1 件に訂正する。\n\n- [軽微1] 区分: 実装 / 対象: R4 (notes/service.py update_note) / 対応区分: 改善提案 / 内容: `version` が整数かを検査していない。不正な型を渡すと ValidationError ではなく Conflict になる。 / 提案: int かつ bool でないことを検査し、違反時は ValidationError にする。\n\n---\n\n## レビュー結果（訂正後の確定版）\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 対応区分: 修正必須 / 内容: notes/share.py:20 の `make_link` が共有リンクの署名全体をログに出している。 / 成立条件: INFO 以上のログが有効で `make_link` を呼ぶ。 / 影響: 署名が漏れ、期限内ならリンクを悪用できる。R9・設計書「ログには ID だけ」に反する。 / 根拠: 実行で `INFO:notes.share:... token=9995cd9d...` と署名が出ることを確認した。 / 提案: ログから `token` を削除する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: notes/service.py の `TAG_RE`（`^...$` と `.match`）が、末尾に改行を付けたタグ（例 `\"ab\\n\"`）を通す。 / 成立条件: 作成・更新・検索のタグの末尾に `\\n` を付ける。 / 影響: 仕様外のタグが保存される。20 文字のタグに `\\n` を付けた 21 文字も通る。 / 根拠: `TAG_RE.match('ab\\n')` が True になることを実行して確認した。 / 提案: `fullmatch` に変える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10、K1〜K8 / 対応区分: 証拠不足 / 内容: 正常系だけの 12 件で、受け入れ条件の異常系・境界・並行・ロールバックの検証がない（詳細は上の重大3 の (a)〜(n)）。 / 成立条件: 認可・競合・境界・並行の条件を外してもテストは通る。 / 影響: K1・K3・K4・K6・K7・K8 の防御が未検証で、重大1・2 もすり抜けた。 / 根拠: tests/test_notes.py 全体。`hooks.before_write` と `RateLimiter.hook` は未使用。 / 提案: (a)〜(n) を決定論的なテストとして追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` が `version` の型を検査しない。 / 提案: int かつ bool でないことを検査し、違反時は ValidationError にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成の正常系と空題名の拒否だけを確認している。タグ・本文・題名の境界、ロールバックの検証がなく不十分。TAG_RE の欠陥も見逃している。\n- AC2: V2 は作成者が閲覧することしか確認していない。他組織・非公開・存在しないメモの NotFound、同時閲覧の数え漏れを確認しておらず不十分。\n- AC3: V3 は一覧の total と件数、検索の正常系だけ。page・per_page・sort の範囲外、`%`・`_`、タグの OR、インジェクションを確認しておらず不十分。\n- AC4: V4 は所有者による更新と削除だけ。Conflict、管理者・他人・Forbidden、更新時の検証、競合時の並行性を確認しておらず不十分。\n- AC5: V5 は移管の件数と非管理者の拒否だけ。別組織の拒否、途中失敗時の巻き戻しを確認しておらず不十分。\n- AC6: V6 は action と actor しか見ていない。api_key の伏せ字を確認しておらず不十分。\n- AC7: V7 は単一スレッドで、枠が切り替わる 61 秒後だけを確認している。ちょうど window 秒の境界と同時呼び出しを確認しておらず不十分。\n- AC8: V8 は往復と改ざん 1 例だけ。期限ちょうど・期限切れ・形の崩れを確認しておらず不十分。\n- AC9: V9 に相当するテストはない（実際にログへ署名が出ている）。不十分。\n- AC10: V10 に相当するテストはない。不十分。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなかった。ただし gate が通ってもリスクを確かめたことにはならない。検証条件の弱体化は、`history` を見た範囲では見つからなかった（bind の追加のみ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、unittest の単体・並行テストで十分。ただし hook を使った決定論的な並行テストは必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確認するテストがない。\n- K3: 同時の閲覧・更新・呼び出しのテストがない。\n- K4: 途中失敗でロールバックされることを確認するテストがない。\n- K6: 別組織への移管を拒否するテストがない。\n- K7: api_key を伏せる処理のテストがない。\n- K8: 期限切れ・形の崩れのテストがない。\n- K2: 検索のインジェクションと LIKE のエスケープを確認するテストがない。\n- K5: ログにも署名が出ており、実装の欠陥になっている（重大1）。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .`: 12 件が成功した。\n- INFO ログを有効にして `share.make_link` を実行した。署名がログに出た。\n- `service.TAG_RE.match('ab\\n')` が True を返した。\n- `aqdlc.py trace` と `history --since 0` を確認した。検証条件の弱体化は見つからなかった。\n- コードは変更していない。gate も実行していない。\n\n重要な補足: 先に書いた一次報告には取り下げた「重大4」が混ざっていました。有効なのは上の「訂正後の確定版」です（重大 3・軽微 1）。",
+ "files_changed": [],
+ "valid": true
+}

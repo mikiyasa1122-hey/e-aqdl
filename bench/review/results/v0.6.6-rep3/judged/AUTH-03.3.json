@@ -1,0 +1,33 @@
+{
+ "case": "AUTH-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0623537,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `_can_modify` の `or not row[\"private\"]` を指摘しています。箇所(`_can_modify`)も原因(公開メモなら誰でも可)も影響(一般メンバーが他人の公開メモを更新・削除できる)も、埋め込んだ欠陥と一致します。再現も示されています。→ matches_defect\n- **重大2**: テスト不足だけの指摘で、コードの欠陥の主張ではありません。→ test_gap\n- **重大3**: 権限確認がトランザクションの外にあるという指摘です。ただし更新は `WHERE version = ?` の条件で守られています。移管は version を増やすので、古い version での更新は Conflict になります。最新 version を渡して通る場合は、その時点の状態に対する更新です。報告自身も実害は未確認としています。仕様違反となる具体的な欠陥は示されていないため、読み違いに近い推測です。→ false_positive\n- **軽微1**: 検証コードの重複という保守性の提案です。→ style\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_can_modify の `or not row[\\\"private\\\"]` により一般メンバーが他人の公開メモを更新・削除できる点で、箇所・原因・影響が埋め込み欠陥と一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足を列挙しているだけで、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"false_positive\", \"reason\": \"version 条件付き UPDATE が競合を防いでおり、具体的な仕様違反は示されず、報告自身も実害を未確認としている。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"検証コードの重複を共通化する保守性の提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\",\n\"matched_label\": \"重大1\",\n\"note\": \"重大1が欠陥の箇所・原因・影響を正確に特定し、再現と修正案も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_can_modify の `or not row[\"private\"]` により一般メンバーが他人の公開メモを更新・削除できる点で、箇所・原因・影響が埋め込み欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足を列挙しているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "false_positive",
+    "reason": "version 条件付き UPDATE が競合を防いでおり、具体的な仕様違反は示されず、報告自身も実害を未確認としている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "検証コードの重複を共通化する保守性の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が欠陥の箇所・原因・影響を正確に特定し、再現と修正案も示している。"
+ }
+}

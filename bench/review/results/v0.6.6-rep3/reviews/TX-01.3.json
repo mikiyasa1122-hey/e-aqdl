@@ -1,0 +1,49 @@
+{
+ "case": "TX-01",
+ "rep": 3,
+ "sec": 35.2,
+ "exit": 0,
+ "cost_usd": 0.1162615,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15451,
+  "cache_read_input_tokens": 114215,
+  "output_tokens": 4302,
+  "output_tokens_details": {
+   "thinking_tokens": 910
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15451,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2778,
+    "cache_read_input_tokens": 35734,
+    "cache_creation_input_tokens": 3821,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3821
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 548d810a\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4 / 内容: `delete_note` がタグの削除とメモの削除を別々のトランザクションで行っている。仕様は「タグとメモを1つのトランザクションで消す」。タグを消して COMMIT した後に失敗すると、タグだけが消えたメモが残る。`hooks.before_write(\"delete:note\")` が2つの間に置かれていて、この不整合を再現できる。 / 根拠: notes/service.py の `delete_note`。`with transaction(conn)` が2回ある。 / 提案: 1つの `transaction` の中でタグ削除・メモ削除・監査記録を行う。途中で失敗したらタグも残ることを確かめるテストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3, K2 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾が改行のタグ（`\"abc\\n\"`）が通る。実際に `create_note(..., [\"abc\\n\"])` が成功し、`search_notes` のタグ絞り込みも通った。仕様は英小文字・数字・ハイフンのみ。share.py は同じ問題を避けて `fullmatch` を使っているので、実装内でも不統一。 / 根拠: notes/service.py の `TAG_RE` と `_validate`、`search_notes`。再現コマンドは「確認したこと」に記載。 / 提案: `fullmatch` を使う。末尾に改行があるタグを拒否するテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC10、K1〜K8 / 内容: テストは12件で、ほぼ正常系だけ。仕様が要求する次の検証がない。ここで挙げた項目は仕様上の重要な要求なので、検証が空洞化している。\n  - 同時の閲覧で数え漏れがないこと（R2/K3）\n  - 同時更新での Conflict と、読み出しから書き込みの間の割り込み（R4）。差し込み口 `hooks.before_write` はあるが使っていない。\n  - `RateLimiter` の同時呼び出し、`hook` の利用、枠の境界ちょうどの動き（R7）\n  - 他の組織・他人の非公開メモの NotFound（R2/K1）\n  - 一覧と検索での漏えい防止\n  - `%` `_` のエスケープと SQL インジェクション文字列（R3/K2）\n  - 一覧の page・per_page・sort の境界値の拒否\n  - 管理者と非公開メモの扱い、更新・削除の Forbidden（R4）\n  - 作成と移管の途中失敗でのロールバック（R1/R5、K4/K6）\n  - 他の組織への移管の拒否（K6）\n  - `api_key` の伏せ字（R6/K7）。実際に伏せられているかを assert していない。\n  - 共有リンクの期限ちょうど、形の崩れ、期限切れ、署名の改ざん（R8/K8）\n  - ログに機密情報が出ないこと（R9）\n  - 例外の後も接続を使い続けられること（R10）\n  - 上記のとおり、検証が弱いのに trace では全項目が「合格」になっている。\n  / 根拠: tests/test_notes.py（90行）。 / 提案: 上の項目をテストにする。競合は sleep ではなく hooks.before_write と RateLimiter.hook を使って決定論的に再現する。\n- [重大4] 区分: 実装 / 対象: R4, K3 / 内容: 更新・削除は、認可の判定（`_visible` と `_can_modify`）をトランザクションの外で行っている。判定の後に、メモの所有者が変わる（移管）、非公開になる、削除されるといったことが起きても、古い行で判定した結果のまま書き込む。更新は version で守られているが、`delete_note` には version も再判定もない。 / 根拠: notes/service.py の `update_note` と `delete_note`。`_row` を `BEGIN IMMEDIATE` より前に呼んでいる。 / 提案: `transaction` の内側で行を読み直して認可を判定する。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: 「007.…」のように先頭が 0 の note_id や期限でも、整数化した値で署名を検証するため有効になる。リンクの形が複数あり得る。 / 提案: 先頭の 0 を拒否するか、正規化した形と照合する。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: `transfer_notes` は呼び出し側の dict（from_user・to_user）の org_id を信用する。仕様上は許容されるが、DB 上の users との整合は見ていない。 / 提案: 必要なら DB 上の org_id で確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空題名だけを見ていて、長さの境界、タグの規則（改行つきタグを含む）、失敗時に何も残らないことを確かめていない。\n- AC2: 不十分。同じ組織が閲覧できることしか確かめていない。他の組織・非公開・存在しないメモの NotFound、閲覧数の増加、同時閲覧が未検証。\n- AC3: 不十分。一覧の1ページ目と単純な検索だけ。範囲外の拒否、`%` `_` の扱い、タグの OR、非公開メモの除外、SQL インジェクションが未検証。\n- AC4: 不十分。作成者による更新・削除の正常系だけ。Conflict、Forbidden、管理者の扱い、削除のトランザクションが未検証。後者は実装にも欠陥がある。\n- AC5: 不十分。移管が成功する場合と、管理者でない場合の拒否だけ。他の組織への移管の拒否と途中失敗の巻き戻しが未検証。\n- AC6: 不十分。伏せ字の内容を assert していない。\n- AC7: 不十分。単一スレッドの基本動作だけ。枠のちょうどの境界と同時呼び出しが未検証。\n- AC8: 不十分。往復と改ざんの1例だけ。期限ちょうど・期限切れ・形の崩れが未検証。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、決定論的な単体テストで十分。ただし並行と途中失敗のテストは必須。\n\n### 不足しているリスク\n- K1: 漏えいの否定テストがない。\n- K2: インジェクションと LIKE エスケープのテストがない。\n- K3: 並行テストがない。\n- K4: 途中失敗のテストがなく、削除には実装の欠陥がある。\n- K5/K7: 伏せ字のテストがない。\n- K6: 他の組織への移管のテストがない。\n- K8: 期限と形のテストがない。\n\n### 確認したこと\n- 仕様・設計と、notes/ 全ファイル、tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` → 12件 OK。ただし内容は上記のとおり薄い。\n- 再現 `python3 -B -c`（`create_note` でタグ `\"abc\\n\"` を作成し `search_notes` で絞り込み）→ 作成成功、タグ絞り込みでも該当。\n- `aqdlc.py trace` と `history --since 0` を確認。検証条件の弱体化の形跡はないが、全項目が「合格」になっているのは上記のテストの薄さと合わない。\n- gate と反証テストは実行していない。",
+ "files_changed": [],
+ "valid": true
+}

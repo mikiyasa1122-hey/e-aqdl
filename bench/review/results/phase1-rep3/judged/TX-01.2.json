@@ -1,0 +1,38 @@
+{
+ "case": "TX-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0644257,
+ "judge_raw": "## 判定\n\n- **重大1**: 埋め込み欠陥そのものです。`delete_note` のタグ削除とメモ削除が別々のトランザクションで、間に `hooks.before_write(\"delete:note\")` が入っています。途中で失敗するとタグだけが消える、という原因も影響も正解データと一致します。\n- **重大2**: テストの不足だけを指摘しています。コードの欠陥の主張ではないので test_gap です。\n- **重大3**: RateLimiter のテスト不足の指摘です。実装は正しそうだと本人も述べているので test_gap です。\n- **重大4**: 楽観的ロックと閲覧数の並行テストの不足です。実装は妥当と述べているので test_gap です。\n- **軽微1**: `update_note` の権限確認がトランザクションの外にある点を指摘しています。ただし、version が `transfer_notes` で上がるため通常は Conflict になります。実害のある欠陥とは言えず、改善提案です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"delete_note がタグ削除とメモ削除を別トランザクションにしており、途中失敗でタグだけ消えるという埋め込み欠陥と原因・影響が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値・失敗注入のテスト不足を指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の枠境界と並行呼び出しのテスト不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"楽観的ロックと閲覧数の並行テストの不足で、実装は妥当と述べている。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"権限確認をトランザクション内に移す改善提案で、version 更新により通常は Conflict になるため実害のある欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が delete_note の分割トランザクションを、原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "delete_note がタグ削除とメモ削除を別トランザクションにしており、途中失敗でタグだけ消えるという埋め込み欠陥と原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "異常系・境界値・失敗注入のテスト不足を指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "RateLimiter の枠境界と並行呼び出しのテスト不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "楽観的ロックと閲覧数の並行テストの不足で、実装は妥当と述べている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "権限確認をトランザクション内に移す改善提案で、version 更新により通常は Conflict になるため実害のある欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が delete_note の分割トランザクションを、原因・影響とも正しく指摘している。"
+ }
+}

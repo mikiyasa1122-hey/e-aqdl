@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-03",
+ "rep": 1,
+ "sec": 40.1,
+ "exit": 0,
+ "cost_usd": 0.16275,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 25209,
+  "cache_read_input_tokens": 114880,
+  "output_tokens": 5041,
+  "output_tokens_details": {
+   "thinking_tokens": 944
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 25209,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3249,
+    "cache_read_input_tokens": 39065,
+    "cache_creation_input_tokens": 3019,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3019
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 73cf7484\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `_can_modify` の `or not row[\"private\"]` により、同じ組織の一般メンバーなら誰でも他人の公開メモを更新・削除できる。Forbidden が出るのは、実質ありえない経路だけになっている。 / 成立条件: 同じ組織の member B が、A の公開メモ（private=0）に対して update_note または delete_note を呼ぶ。 / 影響: 仕様は「できるのは作成者と同じ組織の管理者だけ（それ以外は Forbidden）」。実際は他人のメモを書き換え・削除でき、認可が機能しない。 / 確認した保証: `_visible` は閲覧権限しか見ない。DB 制約や上流の検査はない。 / 根拠: notes/service.py:78-80。実行結果は、一般メンバー bob が alice の公開メモを `update_note(..., title='hijack')` で更新でき、戻り値が version 2 だった。 / 提案: `_can_modify` を `row[\"owner_id\"] == user[\"id\"] or (user[\"role\"] == \"admin\" and row[\"org_id\"] == user[\"org_id\"])` に直す。非公開メモは `_visible` が先に NotFound にするので、その順序は保つ。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査に `TAG_RE.match` と `^…$` を使っているため、末尾に改行があるタグ（例 `\"ab\\n\"`）が通る。 / 成立条件: create_note・update_note・search_notes の tags に、末尾が `\\n` の文字列を渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反する値が保存される。21文字目に改行がある場合も通る。 / 根拠: notes/service.py:14, 64, 151。実行結果は、`create_note(..., tags=['ab\\n'])` が成功した。 / 提案: `TAG_RE.fullmatch` にする。share.py は fullmatch を使っている。\n- [重大3] 区分: テスト / 対象: AC4, AC5, K1, K6, R4, R5 / 対応区分: 証拠不足 / 内容: 認可の拒否を確かめるテストがない。他組織・他人の非公開メモの NotFound、一般メンバーによる更新・削除の Forbidden、管理者が同じ組織で更新・削除できること、組織をまたぐ移管の Forbidden、非公開メモを管理者が扱えないことが、どれも未検証。重大1のバグも、この欠落のために gate を通っている。 / 成立条件: tests/test_notes.py の全 12 テストが正常系で、拒否の検証は `test_transfer_requires_admin` だけ。 / 影響: AC4・AC5 と、漏えいのリスク K1・K6 が確かめられていない。 / 根拠: tests/test_notes.py:17-87。 / 提案: 上記の各ケースに加え、認可の条件を外すと失敗するテストを追加する。\n- [重大4] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K2, K3, K4, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 仕様の必須ケースの大半に検証がない。 / 成立条件: 次のケースがすべて未検証。\n  - 検証の境界値（題名100/101文字、タグ5/6個、重複、文字列そのもののタグ）\n  - 作成・移管・削除の途中失敗でのロールバック（`hooks.before_write` が用意されているのに未使用）\n  - 閲覧数の同時加算\n  - 楽観的ロックの Conflict（古い version と、読み出し〜書き込みの間の割り込み）\n  - `%` `_` の検索と SQL インジェクション\n  - ページ・per_page・sort の範囲外\n  - タグ OR 絞り込み\n  - api_key の伏せ字（8文字未満・8文字以上）\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッド\n  - 共有リンクの期限ちょうど・期限切れ・形の崩れ\n  - ログ・例外への機密情報の非出力\n  - 例外後に接続を使い続けられること / 影響: 並行処理・ロールバック・秘密情報・リンク検証が、挙動のまま未確認になっている。 / 根拠: tests/test_notes.py の全体。ratelimit のテストは 1 本（スレッドなし、境界なし）、share は 2 本（期限テストなし）。 / 提案: 各 AC につき最低 1 本の異常系・境界値テストを追加する。並行処理は `hooks.before_write` と `RateLimiter.hook` で決定論的に作り、sleep に頼らない。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: update_note と delete_note は、権限の判定を `BEGIN IMMEDIATE` の前に行う。その間に transfer_notes などで所有者が変わると、古い判定のまま書き込まれる。更新は version 条件が防ぐが、delete には防ぐものがない。 / 提案: 判定のための SELECT をトランザクションの内側に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と題名が空の拒否だけで不十分。境界値、タグ規則、ロールバックが未検証。重大2のバグも見逃している。\n- AC2: 作成者本人の閲覧しか確かめておらず不十分。他組織・他人の非公開メモが NotFound になること、閲覧数の増加と同時加算が未検証。\n- AC3: 1ページ目の件数と単純検索の各1本だけで不十分。範囲外の拒否、`%` `_`、インジェクション、タグ絞り込み、他人の非公開メモの除外が未検証。\n- AC4: 作成者による正常系だけで不十分。Forbidden、Conflict、削除の失敗伝播が未検証。実装にも欠陥がある（重大1）。\n- AC5: 管理者の正常系と「管理者以外は拒否」のみで不十分。組織をまたぐ移管の拒否と、失敗時に全部元のままになることが未検証。\n- AC6: 伏せ字の出力を一切確かめておらず不十分。\n- AC7: 枠の境界（ちょうど60秒）と複数スレッドが未検証。実装は Lock で守られているように読めるが、確認はしていない。\n- AC8: 往復と改ざんのみで不十分。期限ちょうど、期限切れ、形の崩れが未検証。\n- AC9: 検証が存在しない。\n- AC10: 検証が存在しない。\n- エンジンが検出したテストの兆候はなし（skip や弱いアサーションの検出はなかった）。ただし、検証の量が圧倒的に足りない。gate の「合格」は、リスクが確かめられた証拠にならない。\n- 検証条件の弱体化の有無は、`history` を実行していないため未確認。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest による単体・統合テスト（SQLite と複数スレッド）で十分。上記の単体テストの追加が必要。\n\n### 不足しているリスク\n- K1: 他人の公開メモを一般メンバーが書き換えられる（重大1）。\n- K3: 同時閲覧の数え漏れ、楽観的ロックの競合、RateLimiter の同時呼び出しは、決定論的なテストがなく未検証。\n- K4: 作成・移管・削除の途中失敗でのロールバックは、検証がなく未確認。\n- K5・K7: ログ・例外・監査出力に機密情報が出ないことは、検証がなく未確認。実装を読んだ範囲では、api_key の伏せ字ロジックは仕様どおり。\n- K8: リンクの期限ちょうど・形の崩れは、検証がなく未確認。実装は `>=` と fullmatch で妥当に読める。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を全文読んだ。\n- `aqdlc.py trace` を実行した。全要求が「合格・反証未実施」。\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が成功。\n- 再現スクリプトを実行した（`python3 -I`、インメモリ DB）。タグ `\"ab\\n\"` が作成できた。bob が alice の公開メモを更新できた（戻り値 2）。\n- `git status` を実行した。コードはすべて未追跡のため、`git diff` によるテスト改ざんの比較はできなかった。`history` は実行していない。\n- 実装を変更するコマンドと `gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

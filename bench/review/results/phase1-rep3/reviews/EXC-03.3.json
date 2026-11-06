@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 3,
+ "sec": 38.8,
+ "exit": 0,
+ "cost_usd": 0.1100574,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12765,
+  "cache_read_input_tokens": 119014,
+  "output_tokens": 4708,
+  "output_tokens_details": {
+   "thinking_tokens": 797
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12765,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3428,
+    "cache_read_input_tokens": 35538,
+    "cache_creation_input_tokens": 3394,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3394
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: `verify_link` が、形の崩れたリンクで Forbidden を送出せず `None` を返す。 / 成立条件: `LINK_RE.fullmatch` に合わない文字列を渡す。例は `\"abc\"`、署名が短いリンク、数字が19桁以上のリンク。 / 影響: 仕様は「形の崩れたリンクはどれも Forbidden」としている。呼び出し側が戻り値を `if note_id:` のように扱うと、`None` を有効なリンクの結果として扱う危険がある。K8（形の崩れたリンクを通す）に該当する。 / 根拠: notes/share.py の 29〜34 行付近。`if not m: raise ValueError(link)` を `except ValueError: return None` で受けている。`verify_link(\"s\", \"abc\")` は `None` を返す。 / 提案: `except ValueError` を `raise Forbidden(\"不正なリンク\")` に変える。あわせて、Forbidden になることを確かめるテストを足す。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査に `TAG_RE.match` と `$` を使っているため、末尾に改行のあるタグ（`\"abc\\n\"`）を通してしまう。 / 成立条件: `create_note`・`update_note`・`search_notes` の tags に `\"abc\\n\"` を渡す。 / 影響: 仕様は「英小文字・数字・ハイフンの1〜20文字」としているので、不正なタグが保存される。20文字ちょうどのタグに改行を足した21文字目も通る。 / 根拠: notes/service.py の `TAG_RE = re.compile(r\"^[a-z0-9-]{1,20}$\")` と `_validate` / `search_notes` の `TAG_RE.match`。実行して `re.match(..., 'abc\\n')` が True になることを確認した。share.py のコメントも同じ落とし穴を認識している。 / 提案: `TAG_RE.fullmatch(t)` に変える。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC5, AC7, AC10, K1, K3, K4, K6 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件すべて正常系の1回きりの確認で、受け入れ条件の中心部分を確かめていない。次の検証がまったくない。 / 成立条件: 認可の条件・version 判定・ロールバックの処理・ロック・COMMIT の失敗を壊しても、全テストが通る。 / 影響: 次の検証が空洞のままになる。 / 根拠: テスト全体を読んで確認した。`hooks.before_write` と `RateLimiter.hook` は設計の差し込み口だが、どのテストでも使っていない。足りない検証は次のとおり。\n  - AC2/K1: 他の組織・他人の非公開メモが NotFound になること、管理者でも非公開メモは NotFound になること、閲覧数の同時加算に数え漏れがないこと。\n  - AC4: Conflict（古い version）、読み出しと書き込みの間に別の更新が入った場合の Conflict、Forbidden、削除の失敗が伝わること。\n  - AC5/K6: 他の組織への移管が Forbidden になること、途中で失敗したら元のままになること。\n  - AC7: 枠の境界（ちょうど window 秒）と、複数スレッドの同時呼び出し。\n  - AC10: 例外の後も接続を使い続けられること。\n  - AC1/K4: 作成の途中で失敗したら何も残らないこと。\n  - 加えて、検証の拒否側が一切確かめられていない。\n / 提案: 上記を、`hooks` / `RateLimiter.hook` と `threading.Barrier` などを使って、sleep に頼らず決定論的に再現するテストとして足す。\n- [重大4] 区分: テスト / 対象: AC3, AC6, AC8, AC9, K2, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 入力検証・検索・監査ログ・共有リンク・ログ出力について、異常系と境界値の検証がない。 / 成立条件: LIKE のエスケープ、api_key の伏せ字の境界、期限の境界を実装が誤っても、テストは通る。 / 影響: K2・K7・K8・K5 を実際に確かめた証拠がない。上の [重大1][重大2] の欠陥も検出されなかった。 / 根拠: 次の検証が存在しない。\n  - AC3: 検索語に `%` と `_` を含める検査、ページ・ソート・per_page の範囲外、タグの OR 絞り込み、SQL インジェクション風の入力。\n  - AC6: api_key の伏せ字（8文字未満、8文字、それ以上）。`test_export_audit` は action と actor しか見ていない。\n  - AC8: 期限ちょうどの境界、期限切れ、改ざん、形の崩れたリンク（改ざんのテストは1件だけ）。\n  - AC9: ログに本文・署名・api_key が出ないこと。\n  - AC1: タイトル・本文・タグ数の境界。\n / 提案: 各境界の値（例: 100/101文字、5/6個、8文字未満の鍵、期限の前後）の異常系テストを足す。\n\n- [軽微1] 区分: 実装 / 対象: R4, update_note / 対応区分: 改善提案 / 内容: 権限判定（`_visible`・`_can_modify`）をトランザクションの外で古い行を使って行っている。ただし更新は version 条件付きで、移管は version を増やすため、競合は Conflict になる。 / 提案: 認可の判定も `transaction` の中でやり直すと、読み出しから書き込みまでの隙間が閉じる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、不十分。境界値、タグ規則、途中失敗でロールバックされること、改行付きタグの拒否を確かめていない。\n- AC2: 不十分。閲覧数の同時加算も、閲覧できない場合の NotFound も未検証。\n- AC3: 不十分。範囲外の入力、`%` `_`、タグの OR 絞り込み、インジェクションはどれも未検証。\n- AC4: 不十分。正常系の更新と削除しかなく、Conflict・Forbidden・失敗の伝播は未検証。\n- AC5: 不十分。正常系と「管理者でない」場合の拒否だけ。組織をまたぐ場合と途中失敗は未検証。\n- AC6: 不十分。伏せ字を一切確かめていない。\n- AC7: 不十分。枠の境界（ちょうど window 秒）と同時の呼び出しは未検証。正常系の limit 超過と枠の更新（61秒後）だけ確認している。\n- AC8: 不十分。往復と改ざん1件だけ。期限の境界と形の崩れは未検証で、実際に欠陥がある（重大1）。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしは見つからなかった）。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、SQLite をインメモリで使う単体・結合テストで足りる。ただし並行実行の検証（スレッド、別々の接続）は必須。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: SQL インジェクションを確かめる検証がない。\n- K3: 同時の更新・閲覧・呼び出しで数が失われないことを確かめる検証がない。\n- K4: 途中の失敗による不整合を確かめる検証がない。\n- K5: 機密情報の露出を確かめる検証がない。\n- K6: 移管で組織の外にメモが渡る・一部だけ移ることを確かめる検証がない。\n- K7: 監査ログから api_key が漏れることを確かめる検証がない。\n- K8: 期限切れ・改ざん・形の崩れた共有リンクを通すことへの検証が不足していて、実装にも欠陥がある。\n\n### 確認したこと\n- 仕様・設計、notes/*.py、tests/test_notes.py を全部読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が通った。ただし上のとおり検証は弱い。\n- `re.match(r'^[a-z0-9-]{1,20}$', 'abc\\n')` が True を返すことを実行して確認した。\n- `verify_link` の形崩れ時の `None` 返却を、コードの経路で確認した。\n- git はすべて未追跡なので、テストの改ざん・弱体化の差分はない。\n- `$AQ gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

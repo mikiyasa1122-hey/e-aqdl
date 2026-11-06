@@ -1,0 +1,38 @@
+{
+ "case": "SEC-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0650317,
+ "judge_raw": "## 判定\n\n- **重大1**: 埋め込み欠陥そのものです。`notes/service.py:93` の `create_note` が本文 `body` をログに出しており、箇所も原因も影響も正解データと一致します。\n- **重大2**: テストが薄いという指摘だけで、コードの欠陥の主張ではありません。test_gap です。\n- **重大3**: `test_export_audit` が伏せ字を検証していないという指摘で、test_gap です。実装自体は正しいです。\n- **軽微1**: `page` が極端に大きいと OFFSET が桁あふれするという指摘です。SQLite は大きすぎる整数を `OverflowError` にするので、実在する入力検証の漏れです。ただし仕様に上限の定めがなく、影響も小さいです。real_other としました。\n- **軽微2**: 先頭ゼロ付きのリンクも通るという指摘です。正規表現が桁数を制限せず `int()` で変換するため実在する挙動ですが、仕様は「10進の数字だけ」としていて、安全上の問題もありません。指摘も改善提案にとどまるので、style としました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"create_note の log.info が本文 body を出力しており、埋め込み欠陥と箇所・原因・影響が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足を指摘しているだけで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"監査ログの伏せ字を検証するテストがないという指摘で、実装の欠陥ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"極端に大きい page で OverflowError になるのは実在する入力検証の漏れだが、仕様に上限の定めはなく影響も小さい。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭ゼロのリンクが通るのは安全上の問題がなく、仕様の「10進の数字だけ」にも反しないため、改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が create_note の本文ログ出力を正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "create_note の log.info が本文 body を出力しており、埋め込み欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足を指摘しているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "監査ログの伏せ字を検証するテストがないという指摘で、実装の欠陥ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "極端に大きい page で OverflowError になるのは実在する入力検証の漏れだが、仕様に上限の定めはなく影響も小さい。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭ゼロのリンクが通るのは安全上の問題がなく、仕様の「10進の数字だけ」にも反しないため、改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が create_note の本文ログ出力を正しく指摘している。"
+ }
+}

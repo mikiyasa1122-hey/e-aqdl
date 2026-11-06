@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-03",
+ "rep": 2,
+ "sec": 35.7,
+ "exit": 0,
+ "cost_usd": 0.2097144,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 39595,
+  "cache_read_input_tokens": 129244,
+  "output_tokens": 3839,
+  "output_tokens_details": {
+   "thinking_tokens": 400
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 39595,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2622,
+    "cache_read_input_tokens": 39299,
+    "cache_creation_input_tokens": 296,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 296
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 73cf7484\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1 / 内容: `_can_modify` が「公開メモなら誰でも可」になっている。同じ組織の一般メンバーが、他人の公開メモを更新・削除できる。仕様は作成者と同じ組織の管理者だけを許可し、それ以外は Forbidden にする。 / 根拠: notes/service.py:222-224 の `or not row[\"private\"]`。再現: alice が作成したメモを bob（member）が `update_note(..., body='hacked')` すると version 2 を返し、`delete_note` も成功した。 / 提案: `row[\"owner_id\"] == user[\"id\"] or (user[\"role\"] == \"admin\" and row[\"org_id\"] == user[\"org_id\"])` にする。bob の更新・削除が Forbidden になるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, R1〜R10 / 内容: テストは12件だけで、ほとんどが正常系の1例である。異常系・境界値・並行・途中の失敗は検証されていない。仕様の主要な要求が空洞化している。 / 根拠: tests/test_notes.py。未検証は次のとおり。\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の同時加算（K3）\n  - 楽観的ロックの Conflict（読み出しと書き込みの間に他の更新が入る場合も含む）\n  - Forbidden（member による更新・削除。上の重大1を検出できなかった理由）\n  - タグの検査（6個以上、不正文字）\n  - 題名・本文の境界値\n  - `%` と `_` を普通の文字として検索すること、SQL インジェクション（K2）\n  - 失敗時のロールバック（hooks.before_write で再現できる。K4・AC1・AC5・AC10）\n  - 移管の組織またぐ拒否と途中失敗\n  - api_key の伏せ字（AC6。`actor_key` を一度もアサートしていない）\n  - ログへの機密の非出力（AC9）\n  - 枠の境界（ちょうど window 秒）と RateLimiter の同時呼び出し\n  - 共有リンクの期限ちょうど・期限切れ・形の崩れ\n- [重大3] 区分: 実装 / 対象: R1, R4, R3, AC1 / 内容: タグの正規表現が `^...$` かつ `match` のため、末尾に改行を含むタグ（例 `'ab\\n'`）を通す。仕様は英小文字・数字・ハイフンの1〜20文字だけを許可する。 / 根拠: notes/service.py:158, 208, 295。再現: `create_note(..., ['ab\\n'])` が成功した。 / 提案: `fullmatch` に変えるか `\\Z` を使う。改行付きタグを拒否するテストを追加する。\n- [重大4] 区分: テスト / 対象: AC7, K3, R7 / 内容: RateLimiter の「ちょうど window 秒で新枠」の境界と、複数スレッドの同時呼び出しを確かめるテストがない。tests/test_notes.py:66-75 は 0 と 61 の2点だけである。 / 提案: window 秒ちょうどと window−ε を確かめるテストを追加する。`hook` や Barrier を使い、決定論的に N スレッドで上限を超えないことも確かめる。\n- [重大5] 区分: テスト / 対象: AC8, K8 / 内容: 共有リンクの期限ちょうど（`now == expires`）、期限切れ、署名の改ざん、形の崩れ（改行、桁数、大文字）を検証していない。tampered テストは note_id の書き換え1例だけである。 / 提案: 境界値と形の崩れの各パターンを追加する。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` と `delete_note` は、権限判定を transaction の外で読んだ行で行っている。判定後に所有者が移管されると古い判定のままになる。version 条件は更新側にあるが、delete には version 条件がない。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: `transfer_notes` は、渡された `from_user` / `to_user` の dict を信用する。DB 上の存在確認がない。ただし仕様の対象外（呼び出し側が確かめて渡す）とも読める。\n- [軽微3] 区分: 実装 / 対象: R1 / 内容: `create_note` は本文を `str` かどうかしか検査しない。長さの上限は 10000 文字で検査している。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名1件だけである。タグ・長さの境界、ロールバック（hooks）がないため不十分。\n- AC2: V2 は閲覧の一例だけである。他組織・非公開の NotFound と閲覧数の同時加算がないため不十分。\n- AC3: V3 は件数と1件の検索だけである。範囲外の拒否、LIKE の `%` `_`、タグ OR、インジェクションがないため不十分。\n- AC4: V4 は作成者による更新・削除だけである。Conflict、Forbidden、管理者、非公開の扱いがなく、重大1のバグを見逃している。不十分。\n- AC5: V5 は成功と非管理者の拒否だけである。組織またぎと途中失敗のロールバックがないため不十分。\n- AC6: V6 は伏せ字をアサートしていない。不十分。\n- AC7: V7 は境界と同時呼び出しがない。不十分。\n- AC8: V8 は往復と改ざん1件だけである。期限の境界と形の崩れがない。不十分。\n- AC9: V9 は検証するテストが存在しない。不十分。\n- AC10: V10 は検証するテストが存在しない。不十分。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。ライブラリで HTTP はなく、SQLite を使った単体・結合テストで足りる。ただし並行実行は、別の接続・別のスレッドで決定論的に再現するテストが必要である。\n\n### 不足しているリスク\n- K1: 公開メモを他の member が更新・削除できる（重大1）。他の組織・他人の非公開メモが NotFound になることのテストもない。\n- K2: インジェクションのテストがない。\n- K3: 同時の閲覧・更新・RateLimiter のテストがない。\n- K4: ロールバックのテストがない。\n- K5, K7: 伏せ字とログのテストがない。\n- K6: 組織またぎ・一部だけ移るケースのテストがない。\n- K8: 期限・改ざんの境界のテストがない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。ただし弱いテストである。\n- 再現スクリプト（読み取りのみ。`-B` で実行しメモリ DB を使った）: 他の member による更新と削除が成功した。改行付きタグが受理された。\n- `aqdlc history --since 0`: 検証条件の弱体化は見つからなかった（bind のみ）。\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。`impl.md` は読んでいない。",
+ "files_changed": [],
+ "valid": true
+}

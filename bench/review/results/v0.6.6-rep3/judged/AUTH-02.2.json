@@ -1,0 +1,53 @@
+{
+ "case": "AUTH-02",
+ "rep": 2,
+ "judge_cost_usd": 0.07226729999999999,
+ "judge_raw": "各指摘の判定です。\n\n- **重大1**: `list_notes` の `where` に非公開メモの除外がない点を指摘している。箇所も原因も影響も埋め込んだ欠陥と一致する。\n- **重大2**: `TAG_RE.match` が `$` で末尾の改行を通すのは実在するバグ。仕様の「英小文字・数字・ハイフン」に反する。ただし埋め込んだ欠陥ではない。\n- **重大3**: テストの不足だけを指摘している。\n- **重大4**: RateLimiter のテストの不足を指摘している。\n- **重大5**: 共有リンクと監査ログのテストの不足を指摘している。\n- **重大6**: 認可のテストの不足を指摘している。\n- **軽微1**: `LINK_RE` が先頭の 0 を許すため、`007.…` が note_id 7 として通る。これは実在する挙動で、同じ note_id に複数の文字列が有効になる。ただし仕様は「10進の数字だけ」としているので、仕様違反とまでは言いにくい。影響も小さい。このため real_other とする。\n- **軽微2**: `update_note` の権限確認が transaction の外にあり、移管との競合で古い権限判定のまま更新できる点は、実在する競合の指摘。version を条件にした UPDATE があるので、移管で version が上がれば Conflict になる。実害は限定的だが、根拠のある指摘なので real_other とする。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の where に private の除外がなく、他人の非公開メモが一覧に出ると、埋め込んだ欠陥と同じ箇所・原因・影響を指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾に改行のあるタグが通る。仕様に反する実在のバグだが、埋め込んだ欠陥ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のテスト不足の指摘である。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"共有リンクと監査ログのテスト不足の指摘である。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"認可のテスト不足の指摘である。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"LINK_RE が先頭の 0 を許し、同じ note_id に別の文字列のリンクが有効になる。実在する挙動だが影響は小さい。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"update_note の権限確認が transaction の外にあるのは実在する競合の指摘。version 条件で更新の消失は防がれるので影響は限定的。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が list_notes の非公開メモ漏えいを、箇所・原因・影響まで正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の where に private の除外がなく、他人の非公開メモが一覧に出ると、埋め込んだ欠陥と同じ箇所・原因・影響を指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾に改行のあるタグが通る。仕様に反する実在のバグだが、埋め込んだ欠陥ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter のテスト不足の指摘である。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "共有リンクと監査ログのテスト不足の指摘である。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "認可のテスト不足の指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "LINK_RE が先頭の 0 を許し、同じ note_id に別の文字列のリンクが有効になる。実在する挙動だが影響は小さい。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "update_note の権限確認が transaction の外にあるのは実在する競合の指摘。version 条件で更新の消失は防がれるので影響は限定的。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が list_notes の非公開メモ漏えいを、箇所・原因・影響まで正確に指摘している。"
+ }
+}

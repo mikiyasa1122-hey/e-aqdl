@@ -1,0 +1,33 @@
+{
+ "case": "EXC-02",
+ "rep": 1,
+ "judge_cost_usd": 0.0625497,
+ "judge_raw": "## 判定\n\n- **重大1**: `delete_note` が `except Exception` で例外を捕まえ、`log.warning` だけで正常終了している。埋め込まれた欠陥と箇所・原因・影響がすべて一致する。さらに「削除に失敗しても呼び出し側が成功と誤解する」点まで正しく述べている。\n- **重大2**: テストの不足だけを指摘しており、コードの欠陥の主張ではない。よって test_gap。\n- **重大3**: 本文で自ら「実害は小さく、重大とは言い切れない」とし、軽微1へ移している。`version` が不正でも Conflict になり安全側に倒れるので、欠陥ではない。ただし重大3としては報告に残っているため、分類は style とする。\n- **軽微1**: 重大3と同じ内容で、`version` の型検査の提案にとどまる。仕様違反ではないので style。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"delete_note が例外を握りつぶして log.warning だけにしており、埋め込んだ欠陥と箇所・原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"style\", \"reason\": \"不正な version は Conflict になり安全側に倒れると本文自身が認めており、重大から外して軽微1に移している。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version の型検査の追加という改善提案で、仕様違反の欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（削除失敗の握りつぶし）を原因・影響まで正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "delete_note が例外を握りつぶして log.warning だけにしており、埋め込んだ欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "style",
+    "reason": "不正な version は Conflict になり安全側に倒れると本文自身が認めており、重大から外して軽微1に移している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version の型検査の追加という改善提案で、仕様違反の欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（削除失敗の握りつぶし）を原因・影響まで正しく指摘している。"
+ }
+}

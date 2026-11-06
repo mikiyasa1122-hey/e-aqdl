@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 1,
+ "sec": 35.0,
+ "exit": 0,
+ "cost_usd": 0.12564209999999998,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18162,
+  "cache_read_input_tokens": 113081,
+  "output_tokens": 4167,
+  "output_tokens_details": {
+   "thinking_tokens": 459
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18162,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3240,
+    "cache_read_input_tokens": 36117,
+    "cache_creation_input_tokens": 2178,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2178
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K1, K6 / 対応区分: 修正必須 / 内容: `transfer_notes`（notes/service.py の transfer_notes）は、移す先 `to_user` の組織を確認していない。確認しているのは管理者の役割と `from_user` の組織だけ。 / 成立条件: 管理者が、他の組織の利用者を `to_user` にして呼ぶ。 / 影響: 組織のメモが他の組織の利用者に渡る。仕様の「移す先も同じ組織のときだけ」に違反する。K6 と K1（漏えい）が起きる。 / 確認した保証: 呼び出し元の検証は対象外で、DB の制約も無い。`owner_id` は users への外部キーだけで、組織の一致は見ていない。 / 根拠: 実行して確認した。org1 の管理者が org2 の利用者へ `transfer_notes` を呼ぶと、拒否されず 1 件が移った（戻り値 1）。 / 提案: トランザクションの前に `to_user[\"org_id\"] != admin[\"org_id\"]` なら Forbidden にする。`from_user` と `to_user` の存在確認もあるとよい。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。Python の `$` は末尾の改行の手前にも一致するため、`\"abc\\n\"` が通る。 / 成立条件: 作成・更新・検索のタグに末尾が `\\n` の文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」を破る不正なタグが保存される。検証が全体として抜ける。 / 確認した保証: 他の層では検査していない。 / 根拠: `create_note(..., [\"abc\\n\"])` が成功した（実行結果は note_id 1）。同じ正規表現を `_validate` と `search_notes` が使っている。 / 提案: `TAG_RE.fullmatch` に変えるか、パターンを `\\Z` で終わらせる。share.py の `LINK_RE.fullmatch` と同じ扱いにする。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7, AC9, AC10, K1〜K4 / 対応区分: 証拠不足 / 内容: テストは正常系が中心の 12 件で、異常系・境界値・並行実行の検証が無い。 / 成立条件: 該当する検証が無い。 / 影響: [重大1]・[重大2]がテストをすり抜けたことがその証拠。認可を外しても、タグ検査を外しても、すべて通る。 / 根拠: tests/test_notes.py に次のどれも無い。\n  - 他の組織・他人の非公開メモが NotFound になること。更新・削除の Forbidden と管理者への NotFound。\n  - version 不一致の Conflict と、`hooks.before_write` による割り込みの競合。\n  - `create_note` のタグ挿入中の失敗でロールバックされること。`delete_note` の失敗の伝播。`transfer_notes` の途中失敗。例外の後の接続の再利用（AC10）。\n  - 閲覧数の同時加算（スレッドと別接続）。\n  - 一覧の範囲外（page=0、per_page=51、sort 不正）と LIKE の `%`・`_`・SQL 文字列。\n  - RateLimiter の枠境界（ちょうど window 秒）と同時呼び出し。\n  - 共有リンクの期限ちょうど・形の崩れ、監査ログの api_key のマスク（AC6）。\n  - ログ・例外メッセージに本文・署名・api_key が出ないこと（AC9）。\n  - 既存の `test_transfer` は組織をまたぐ移管を試していない。 / 提案: 上記を決定論的な形で追加する（`hooks` と `RateLimiter.hook` を使い、sleep に頼らない）。認可の条件を外すと失敗する形にする。\n- [重大4] 区分: 実装 / 対象: R2, R4, AC2 / 対応区分: 修正必須 / 内容: `update_note` が `_can_modify` で Forbidden にする前に `_visible` を確認している。これは仕様どおりで問題ない。ただし `update_note` は更新時に `private` の変更を扱わず、`delete_note` も `version` を取らない。仕様どおりかは確認が必要で、断定はしない。この項目は欠陥の断定ではなく、下記の実測した問題に置き換える。 / 成立条件: 別の利用者の更新が `update_note` の読み出しと UPDATE の間に入る。 / 影響: 実行はしておらず、コードを読んだ範囲では `UPDATE ... WHERE version = ?` で Conflict になるため正しい。 / 根拠: notes/service.py の update_note。 / 提案: 取り下げ。実測した欠陥は[重大1]と[重大2]の 2 件、証拠不足は[重大3]の 1 件。件数の整合のため、この項目は次の軽微1 に相当する扱いとして重大から外す。\n\n(注: [重大4] は根拠が確認できず、取り下げの扱い。実質的な重大は[重大1]〜[重大3]の 3 件。報告上の「重大な指摘: 4」は誤り。判定は「要修正」で変わらない。)\n\n- [軽微1] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: `transfer_notes` は `to_user` の存在や役割を確認せず、移管の元と先が同じ利用者でも通る。 / 提案: 存在確認と、元と先が同一でないことの確認を足す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。タグ・本文の境界とタグ形式（改行付き）を確かめておらず、実際に欠陥がすり抜けた。失敗時のロールバックも未検証。\n- AC2: 同じ組織・他の組織・非公開の見え方と、閲覧数の同時加算を確かめるテストが無く、不十分。\n- AC3: 一覧と検索の正常系だけで不十分。範囲外の拒否、LIKE の特殊文字、タグ OR、SQL インジェクションを確かめていない。\n- AC4: 作成者による更新・削除だけで不十分。Forbidden、Conflict、管理者の扱い、削除の失敗の伝播が無い。\n- AC5: 同じ組織の移管と非管理者の拒否だけで不十分。組織をまたぐ移管のテストが無かったため、[重大1]が通った。全部か何もしないか、の検証も無い。\n- AC6: 監査ログの api_key のマスクを確かめるテストが無い（rows の action と actor だけを見ている）。\n- AC7: 正常系と固定の枠のリセットだけ。ちょうど window 秒の境界と同時呼び出しを確かめておらず、不十分。\n- AC8: 往復と改ざん（note_id の書き換え）だけ。期限ちょうど、期限切れ、形の崩れ、署名の改ざんが無く、不十分。\n- AC9, AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip や `.only` は無い。弱体化の痕跡も確認していない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリなので、単体・結合テストで足りる。ただし並行実行（別接続・別スレッド）のテストは必要。\n\n### 不足しているリスク\n- K1: 組織をまたぐ移管と、他組織・他人の非公開メモの検証が無い。\n- K3: 閲覧数・更新・RateLimiter の同時実行の検証が無い。\n- K4: 途中失敗のロールバックを `hooks` で再現するテストが無い。\n- K5, K7: api_key のマスクとログ出力の検証が無い。\n- K8: 共有リンクの期限境界・形の崩れの検証が不十分。\n\n### 確認したこと\n- `notes/*.py`（db・errors・ratelimit・share・service）と `tests/test_notes.py` を全部読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件すべて OK。\n- 実行して欠陥を再現した。\n  - 改行付きのタグ `\"abc\\n\"` で `create_note` が成功した。\n  - 他の組織の `to_user` への `transfer_notes` が成功した（戻り値 1）。\n- `$AQ history` と `trace` は実行していない。git は全ファイルが未追跡で、差分による改ざんの確認はできなかった。\n- コードは変更していない。`gate` も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

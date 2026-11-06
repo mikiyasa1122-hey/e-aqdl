@@ -1,0 +1,48 @@
+{
+ "case": "CLEAN-07",
+ "rep": 2,
+ "judge_cost_usd": 0.0730257,
+ "judge_raw": "各指摘をコードと照らして分類しました。このケースは欠陥なしで、回数制限の内部の名前を変えただけです。\n\n- **重大1〜3**は、テストが足りないという指摘だけです。コードの欠陥を主張していないので test_gap にしました。\n- **重大4**は、`update_note` が権限チェックをトランザクションの外で行う点を指摘しています。\n  - 移管は version を上げるので、古い version の更新は Conflict になります。\n  - 削除後は Conflict が返り、NotFound にはなりません。\n  - 報告自身も、実害は「エラーの種類が仕様の NotFound とずれる」程度だと認めています。\n  - 仕様 R4 の「読み出しから書き込みの間に他の更新が入った場合も Conflict」に沿っています。\n  - 削除後に Conflict を返すのは仕様の範囲内なので、欠陥の主張としては誤りです。false_positive にしました。\n- **軽微1**は、ゼロ埋めした note_id も通る点です。署名は int に変換した値に対して計算されるので、偽造にはなりません。ただし、同じメモに複数の表記のリンクができます。仕様の形式（10進の数字だけ）は満たしており、改善提案にとどまるので style にしました。\n- **軽微2**は、page に極端に大きい整数を渡すと OverflowError になる点です。仕様は「範囲外は ValidationError」で、page に上限を定めていません。ただし 10**30 では実際に OverflowError が出るため、ValidationError にならない実在の問題です。real_other にしました。\n- **軽微3**は、RateLimiter が service に組み込まれていない点です。仕様では独立した部品なので、設計の好みの話として style にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"認可・競合・ロールバックのテスト不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"入力検証・SQL・移管のテスト不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"マスク・レート制限・共有リンク等のテスト不足だけの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"false_positive\", \"reason\": \"報告自身も認めるとおり移管は version を上げるので古い版の更新は Conflict になり、削除後の Conflict も仕様の範囲内で、欠陥の主張として成立しない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"ゼロ埋めの note_id も通るが、署名は偽造できず仕様の形式も満たす。表記の正規化は改善提案にとどまる。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"page が極端に大きいと OverflowError になり、範囲外は ValidationError という仕様に反するのは実在する問題。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"RateLimiter を独立部品とする設計への好みの指摘で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大4は誤検知、軽微2だけが実在する別の問題、残りはテスト不足か好みの指摘だった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "認可・競合・ロールバックのテスト不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "入力検証・SQL・移管のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "マスク・レート制限・共有リンク等のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "false_positive",
+    "reason": "報告自身も認めるとおり移管は version を上げるので古い版の更新は Conflict になり、削除後の Conflict も仕様の範囲内で、欠陥の主張として成立しない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "ゼロ埋めの note_id も通るが、署名は偽造できず仕様の形式も満たす。表記の正規化は改善提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "page が極端に大きいと OverflowError になり、範囲外は ValidationError という仕様に反するのは実在する問題。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "RateLimiter を独立部品とする設計への好みの指摘で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大4は誤検知、軽微2だけが実在する別の問題、残りはテスト不足か好みの指摘だった。"
+ }
+}

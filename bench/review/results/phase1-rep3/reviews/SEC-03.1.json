@@ -1,0 +1,49 @@
+{
+ "case": "SEC-03",
+ "rep": 1,
+ "sec": 38.4,
+ "exit": 0,
+ "cost_usd": 0.1429092,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20872,
+  "cache_read_input_tokens": 118152,
+  "output_tokens": 4759,
+  "output_tokens_details": {
+   "thinking_tokens": 695
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20872,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3461,
+    "cache_read_input_tokens": 38666,
+    "cache_creation_input_tokens": 2339,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2339
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5, notes/share.py:21 / 対応区分: 修正必須 / 内容: `make_link` が共有リンクの署名（token）をログに出している。 / 成立条件: `make_link` を呼ぶと、INFO ログが有効なときに必ず出る。 / 影響: 署名を持つ者は誰でもメモにアクセスできる。ログから署名が漏れるので、R9 の「ログに共有リンクの署名を出さない」に違反する。設計の「ログには ID だけを出す」にも反する。 / 確認した保証: ログ出力を抑える処理も、署名を伏せる処理もない。 / 根拠: `log.info(\"share link created note=%s expires=%s token=%s\", note_id, expires, token)`。 / 提案: token をログから外し、note_id と expires だけにする。\n- [重大2] 区分: 実装 / 対象: R1・R4・R3, AC1・AC4・AC3, notes/service.py:14 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っている。`$` は末尾の改行の直前にも一致するので、`\"abc\\n\"` が通る。 / 成立条件: タグに末尾が `\\n` の文字列を渡す（create・update・search のどれでも）。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。20文字＋改行の21文字も通る。 / 確認した保証: 他に検証する層はない。share.py は同じ問題を避けるために `fullmatch` を使っており、service.py だけが抜けている。 / 根拠: `TAG_RE.match('abc\\n')` が True になることを実行して確認した。 / 提案: `TAG_RE.fullmatch` を使うか、`\\Z` で終わらせる。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC7, K3, V2, V4, V7, VK3 / 対応区分: 証拠不足 / 内容: 同時実行の検証が1つもない。閲覧数の数え漏れ、楽観的ロックの Conflict（version 不一致、読み出しと書き込みの間の割り込み）、RateLimiter の複数スレッドからの呼び出しを確かめるテストがない。 / 成立条件: 該当なし（検証が存在しない）。 / 影響: AC2・AC4・AC7 は並行の正しさを受け入れ条件にしているが、その主張が空洞のまま gate が通っている。設計は `service.hooks.before_write` と `RateLimiter.hook` を再現用に用意したが、テストが使っていない。 / 根拠: `tests/test_notes.py` は12件で、threading も hook も Conflict もない。`RateLimitTest` は直列の1例だけで、枠の境界（ちょうど window 秒）もない。 / 提案: hook か別々の接続・スレッドで、次のテストを決定論的に追加する。(a) 更新の割り込みで Conflict、(b) 並行の閲覧で views が N 増える、(c) N スレッドの hit で上限を超えない、(d) window 秒ちょうどで新しい枠になる、(e) 古い version で Conflict。\n- [重大4] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4, K6, V1, V4, V5, V10, VK4, VK6 / 対応区分: 証拠不足 / 内容: 失敗時のロールバックと接続の再利用を確かめるテストがない。作成の途中失敗で何も残らないこと、移管の途中失敗で元のままなこと、削除の失敗が例外として伝わること、例外後に接続が使えることのどれもテストされていない。入力検証の境界（題名100/101文字、空白だけ、タグ5/6個、本文10000文字、tags に文字列を渡す）、page・per_page・sort の範囲外も同様。 / 成立条件: 該当なし（検証が存在しない）。 / 影響: `transaction()` や hooks の差し込み口を壊しても全テストが通る。 / 根拠: `hooks` を使うテストがない。ValidationError のテストは空の題名の1例だけ。 / 提案: `hooks.before_write` から例外を投げ、`create_note`・`transfer_notes`・`delete_note` の後に notes、note_tags、audit の件数が変わらないことと、次の操作が成功することを確認する。境界値のテストも追加する。\n- [重大5] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC6, AC8, K1, K2, K7, K8, V2, V3, V6, V8, VK1, VK2, VK7, VK8 / 対応区分: 証拠不足 / 内容: 認可、情報漏えい、マスクのテストが弱いか存在しない。 / 成立条件: 該当なし。 / 影響: 次の欠陥があってもテストが失敗しない。 / 根拠: 次の点を確認した。\n  - 他組織・他人の非公開メモが NotFound になるテストがない。一覧と検索への混入を確かめるテストもない。\n  - Forbidden（管理者以外の更新・削除、組織をまたぐ移管）のテストがない。\n  - `%` と `_` を普通の文字として扱うこと、SQL インジェクション文字列、タグの OR 絞り込みのテストがない。\n  - `test_export_audit` は api_key のマスクを一切確かめていない。8文字未満の鍵のテストもない。\n  - 共有リンクは期限の境界（ちょうどの時刻）、形が崩れたリンク、期限切れのテストがなく、改ざんも1例だけ。\n  - `test_transfer` は件数しか見ておらず、所有者が変わったことを確かめていない。\n  / 提案: 上記を網羅するテストを追加する。リンクの署名がログに出ないことを確かめる `assertLogs` のテストも追加する。\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py の `delete_note`・`update_note` / 対応区分: 改善提案 / 内容: 可視性と権限の確認がトランザクションの外にある。確認後に別接続が所有者を変えると、古い判定のまま削除できる。更新は version 条件で守られる。 / 提案: 確認をトランザクション内に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の拒否だけを確認している。境界値・タグ規則・ロールバックを確認しておらず、不十分。実装にもタグの改行バグ（重大2）がある。\n- AC2: V2 は閲覧の取得しか確認していない。閲覧数の加算も、見えない場合の NotFound も、並行実行も確認しておらず、不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで、不十分。範囲外の拒否、`%`・`_`、タグの OR、他人の非公開メモの除外、SQL インジェクションが未検証。\n- AC4: V4 は所有者による更新と削除の正常系だけで、不十分。Conflict・Forbidden・NotFound・入力検証・削除失敗の伝播が未検証。\n- AC5: V5 は件数と管理者以外の拒否だけで、不十分。組織をまたぐ移管の拒否、実際の所有者の変更、途中失敗での巻き戻しが未検証。\n- AC6: V6 は action と actor しか見ておらず、api_key のマスクを確認していない。実質空洞で不十分。\n- AC7: V7 は直列の1例で、枠の境界も同時実行も確認しておらず、不十分。\n- AC8: V8 は往復と改ざんの1例だけで、不十分。期限の境界、期限切れ、形の崩れたリンクが未検証。\n- AC9: V9 に該当するテストがなく、実装も署名をログに出している（重大1）。\n- AC10: V10 に該当するテストがなく、不十分。\n- テストの兆候: エンジンの検出はなし。skip や `.only` はないが、アサーションの範囲が狭い。\n- 検証条件の弱体化: `history` を確認した。check は unit の追加だけで、弱体化はない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たない標準ライブラリだけのライブラリで、単体テストで足りる。ただし並行実行と途中失敗は、hook を使った決定論的な単体テストで確認する必要がある。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモを検証するテストがない。\n- K2: SQL インジェクションを検証するテストがない。\n- K3: 同時実行を検証するテストがない。\n- K4: ロールバックを検証するテストがない。\n- K5: 署名のログ出力が実在する（重大1）。\n- K6: 組織をまたぐ移管を検証するテストがない。\n- K7: api_key のマスクを検証するテストがない。\n- K8: 期限の境界と形の崩れたリンクを検証するテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が OK になった。\n- `TAG_RE.match('abc\\n')` を実行して True を確認した（重大2）。\n- `history --since 0` を確認し、検証条件の弱体化はなかった。\n- 実装の変更はしていない。",
+ "files_changed": [],
+ "valid": true
+}

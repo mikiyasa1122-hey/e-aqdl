@@ -1,0 +1,49 @@
+{
+ "case": "SQL-01",
+ "rep": 2,
+ "sec": 33.6,
+ "exit": 0,
+ "cost_usd": 0.102658,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12167,
+  "cache_read_input_tokens": 119140,
+  "output_tokens": 4206,
+  "output_tokens_details": {
+   "thinking_tokens": 351
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12167,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3344,
+    "cache_read_input_tokens": 36090,
+    "cache_creation_input_tokens": 2251,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2251
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 676349a2\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2, K1 / 対応区分: 修正必須 / 内容: `search_notes` が検索語 `q` を SQL 文字列に直接埋め込んでいる。プレースホルダーを使っていない。`_like_escape` は定義されているが呼ばれず、`ESCAPE` 句もない。 / 成立条件: `q` に `'` や SQL 断片を含む任意の検索語を渡す。または `%`・`_` を渡す。 / 影響: 仕様の「SQL は必ずプレースホルダー」に違反する。また `%`・`_` が普通の文字にならない。`' OR '1'='1` の検索語は `org_id` と非公開の絞り込みを AND の優先順位で外せる。UNION などで他テーブルの `users.api_key` を読み出せる可能性もある（これは未実行で、推測）。 / 根拠: `notes/service.py` の `search_notes` の `sql = (... f\"AND (title LIKE '%{q}%' OR body LIKE '%{q}%')\")`。実行して確認した。題名が `hello_x` と `hello` のメモで `q=\"_\"` と `q=\"%\"` はどちらも全件に一致した。`q=\"' OR '1'='1\"` はエラーにならず全件を返した。設計書の「SQL はプレースホルダー。LIKE は ESCAPE」にも反する。 / 提案: `LIKE ? ESCAPE '\\\\'` にして、値は `f\"%{_like_escape(q)}%\"` を2回渡す。f-string での埋め込みはやめる。\n- [重大2] 区分: テスト / 対象: AC3, R3, K2 / 対応区分: 証拠不足 / 内容: 検索の検証が「予算」の1件だけで、SQL インジェクション、`%`・`_` のリテラル扱い、タグ OR 絞り込み、他組織・他人の非公開メモの除外、検索語・タグの不正入力の検証がない。K2 は必須のリスクで、重大1もこの欠落ですり抜けている。 / 成立条件: 該当のテストがない。 / 影響: K1・K2 を確かめる証拠がない。 / 根拠: `tests/test_notes.py` の `test_search` のみ。 / 提案: 悪意ある `q`、`%`・`_`、タグ OR、他組織・非公開の除外、空白だけの `q`、不正タグのテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC7, AC8, AC9, AC10, K1, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: 検証が正常系中心で、受け入れ条件の大半を確かめていない。不足は次のとおり。\n  - 作成時の途中失敗でのロールバック（`hooks.before_write` が未使用）\n  - 他組織・非公開の NotFound\n  - 閲覧数の同時加算\n  - Conflict（古い version、競合）\n  - 更新・削除の Forbidden\n  - 移管の途中失敗での巻き戻し、組織またぎの Forbidden\n  - api_key の伏せ字（`test_export_audit` は `action` と `actor` しか見ていない）\n  - RateLimiter の同時呼び出しと枠の境界（61 秒のみで、ちょうど 60 秒を確認していない）\n  - 共有リンクの期限ちょうど、形の崩れ、期限切れ\n  - ログに機密が出ないこと\n  - 例外後の接続の再利用\n  / 成立条件: 該当のテストがない。 / 影響: 設計書が用意した差し込み口の `hooks` と `RateLimiter.hook` を使ったテストが1つもなく、同時実行・整合性・認可のリスクが未検証。 / 根拠: `tests/test_notes.py` の12テストを全件読んだ。 / 提案: 各 AC に、境界値・異常系・`hooks` による途中失敗・スレッドごとに別接続の同時実行を決定論的に再現するテストを追加する。\n- [重大4] 区分: 実装 / 対象: R4, K1, K3, AC4 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` の可視性・認可の判定が、トランザクションの外で読んだ行に対して行われる。トランザクション内では再検査しない。 / 成立条件: 判定後、書き込みの前に別の接続が `transfer_notes` でメモの所有者を変える。または非公開に切り替える。 / 影響: 作成者でなくなった利用者が更新・削除でき、権限のない操作が通る。`update_note` は version が合えば成功する。`delete_note` は version を見ないので確実に削除される。`get_note` は同じ問題をトランザクション内で再検査しており、実装の一貫性もない。 / 根拠: `notes/service.py` の `update_note`（`_row`、`_can_modify` の後に `transaction`）と `delete_note`。`delete_note` の `DELETE FROM notes WHERE id=?` には所有者・組織の条件がない。 / 提案: `BEGIN IMMEDIATE` の中で行を読み直して `_visible` と `_can_modify` を判定する。または UPDATE と DELETE の WHERE に `owner_id`・`org_id` の条件を足して rowcount を見る。\n\n- [軽微1] 区分: 実装 / 対象: R1, R3 / 対応区分: 改善提案 / 内容: `_validate` は `private` の型を検査しない。`search_notes` はタグの検査を `list_notes` と別実装で重複している。 / 提案: `_validate_tags` に共通化する。\n- [軽微2] 区分: テスト / 対象: R9 / 対応区分: 改善提案 / 内容: `ValidationError(\"不正な tag: {t!r}\")` と `RateLimited` のメッセージには利用者の入力がそのまま入る。本文は含まないので R9 には違反しない。 / 提案: 入力値をメッセージに出さない方針を明文化する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` のみ。長さの境界、タグの規則、重複の除去、ロールバックを確かめておらず不十分。\n- AC2: 閲覧数の増加、NotFound、同時閲覧のテストがなく不十分。\n- AC3: 検索のテストが「予算」の1件だけ。インジェクションと `%`・`_` が実際に壊れているのに検出できておらず不十分（重大2）。`list_notes` も境界の検証がなく不十分。\n- AC4: 所有者の正常系のみ。Conflict、Forbidden、競合、削除の失敗伝播がなく不十分。\n- AC5: 正常系と非管理者の拒否のみ。組織またぎ、途中失敗の巻き戻し、移管後の件数・所有者の確認がなく不十分。\n- AC6: 伏せ字の出力を確認しておらず不十分。実装は仕様どおり（末尾4文字以外を伏せ、8文字未満は全部伏せる）。\n- AC7: 正常系と 61 秒後のみ。ちょうど window 秒と同時の呼び出しがなく不十分。\n- AC8: 往復と改ざん1件のみ。期限ちょうど、期限切れ、形の崩れがなく不十分。実装は仕様どおりに見える。\n- AC9: ログ・例外に機密が出ないことを確かめるテストがなく不十分。\n- AC10: 例外後の接続の再利用を確かめるテストがなく不十分。\n- エンジンが検出したテストの兆候: なし。skip・弱体化は見つからなかった。\n\n### E2E の要否\n- 不要（HTTP 層のない標準ライブラリで、対象は単体と結合テストで足りる）。ただし、スレッドごとに別接続を使う並行テストは必要。\n\n### 不足しているリスク\n- K1: 検索で他組織・非公開が出ないことの検証がなく、更新・削除の認可の競合も未検証。\n- K2: 悪意ある `q` に対する検証がない。\n- K3: 閲覧数・更新・RateLimiter の同時実行の検証がない。\n- K4: `hooks` を使った途中失敗の検証がない。\n- K6: 移管で組織の外にメモが渡らないことの検証がない。\n- K5・K7・K8: 伏せ字の出力、ログ、期限ちょうどの検証がない。\n\n### 確認したこと\n- spec.md と design.md の全文、`notes/*.py` と `tests/test_notes.py` の全文を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。12 件が通ったが、上記のとおり検証は弱い。\n- `search_notes` に対して、`%`・`_`・`' OR '1'='1` を試す再現スクリプトを実行した。いずれも全件を返し、重大1を確認した。\n- `$AQ trace`、`$AQ history`、`impl.md` は実行・参照していない。gate は実行していない。テストファイルは git の履歴が未コミットのため、弱体化の差分は確認できなかった（未確認）。",
+ "files_changed": [],
+ "valid": true
+}

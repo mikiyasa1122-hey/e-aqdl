@@ -1,0 +1,38 @@
+{
+ "case": "BND-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0636117,
+ "judge_raw": "**分類の結果**\n\n- 重大1: 埋め込んだ欠陥そのものです。`service.py:122` の `PER_PAGE_MAX + 1` により per_page=51 が通ります。箇所・原因・影響がすべて一致します。\n- 重大2: 実在する別の欠陥です。`TAG_RE` の `$` を `match` で使うと、末尾の改行を持つタグが通ります。実行でも確認されています。\n- 重大3: テスト不足の指摘だけで、コードの欠陥の主張ではありません。\n- 重大4: 同じくテスト不足(hooks を使うテストがない)の指摘だけです。\n- 軽微1: 先頭にゼロが付いた note_id を通す指摘です。報告自身が仕様違反ではないと述べており、改善提案にとどまります。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の per_page 上限が PER_PAGE_MAX + 1 で51を通すという、埋め込み欠陥と同じ箇所・原因・影響の指摘。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match の組み合わせで末尾改行のタグが通るのは実在するバグで、実行でも確認されている。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足を指摘しているだけで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"hooks を使う並行・途中失敗のテストがないという、テスト不足だけの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの note_id は仕様違反ではないと報告自身が認めており、改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が per_page 上限の比較のずれを、箇所・原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の per_page 上限が PER_PAGE_MAX + 1 で51を通すという、埋め込み欠陥と同じ箇所・原因・影響の指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match の組み合わせで末尾改行のタグが通るのは実在するバグで、実行でも確認されている。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足を指摘しているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "hooks を使う並行・途中失敗のテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの note_id は仕様違反ではないと報告自身が認めており、改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が per_page 上限の比較のずれを、箇所・原因・影響とも正確に指摘している。"
+ }
+}

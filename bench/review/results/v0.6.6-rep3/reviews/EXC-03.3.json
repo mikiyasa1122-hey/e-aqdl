@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 3,
+ "sec": 36.5,
+ "exit": 0,
+ "cost_usd": 0.12180450000000001,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 16502,
+  "cache_read_input_tokens": 115905,
+  "output_tokens": 4419,
+  "output_tokens_details": {
+   "thinking_tokens": 724
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16502,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2798,
+    "cache_read_input_tokens": 36981,
+    "cache_creation_input_tokens": 3625,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3625
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 内容: 形の崩れたリンクが Forbidden にならず `None` を返す。`verify_link(\"k\",\"abc\")` で `None` を返すことを実行して確認した。呼び出し側が `None` を「無効」と扱い忘れると、認可の穴になりうる。/ 根拠: notes/share.py:33-34（`except ValueError: return None`）/ 提案: 正規表現に合わない場合は `Forbidden(\"不正なリンク\")` を送出する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 内容: タグの検査が `TAG_RE.match` と `$` の組み合わせなので、末尾に改行を含むタグ（例 `\"ab\\n\"`）を通す。実際に `create_note(..., ['ab\\n'])` が成功した。仕様は「英小文字・数字・ハイフンの1〜20文字」。検索時のタグ検査（service.py:151）も同じ。/ 根拠: notes/service.py:14, 64, 150 / 提案: `fullmatch` を使うか `\\Z` で終わる正規表現に変える。\n- [重大3] テスト / 対象: AC1〜AC10, R1〜R10 全般 / 内容: テストは12件で、ほぼ正常系だけ。仕様が求める次の検証がない。\n  - R1: 長さ・個数・タグ形式の境界、tags が文字列のとき、途中失敗時のロールバック\n  - R2: NotFound の秘匿（他の組織・他人の非公開）、閲覧数の同時加算\n  - R3: 範囲外の入力、`%`/`_`、タグの OR、SQL インジェクション\n  - R4: Conflict、Forbidden、管理者と非公開の扱い、削除失敗の伝播\n  - R5: 他の組織の拒否、途中失敗時の元通り\n  - R6: 伏せ字（8文字未満と末尾4文字）\n  - R7: 枠の境界ちょうど、同時呼び出し\n  - R8: 期限ちょうど、形の崩れ（このためテストで重大1・2を検出できなかった）\n  - R9: 機密がログに出ないこと\n  - R10: 例外後の接続の再利用\n  hooks.before_write と RateLimiter.hook は設計で想定された差し込み口なのに、テストで一度も使われていない。/ 根拠: tests/test_notes.py 全体 / 提案: 各 AC と K1〜K8 に対して、異常系・境界値・並行・障害注入のテストを足す。\n- [重大4] テスト / 対象: AC6, AC9, K5, K7 / 内容: `test_export_audit` は action と actor しか見ていない。`actor_key` の伏せ字は一度も検証されていない。AC9 のログ検査もない。/ 根拠: tests/test_notes.py:50-54 / 提案: 鍵の長さが7、8、それ以上の各場合の期待値を検査し、`caplog` 相当でログに本文・署名・api_key が出ないことを確かめる。\n- [重大5] 実装 / 対象: R2, R4, K1 / 内容: update_note と delete_note は、可視・権限の判定をトランザクションの外で読んだ行で行う。その後 transfer_notes が走ると、旧所有者が権限を失ったあとでも更新が通りうる。version を引数で渡す update では Conflict になることが多いが、delete には version の確認がない。権限の判定を BEGIN IMMEDIATE の中で読み直した行に対して行うべき。/ 根拠: notes/service.py:158-168, 182-187 / 提案: transaction 内で `_row` を再取得し、`_visible`・`_can_modify` を判定する。\n- [重大6] テスト / 対象: AC4, AC7, K3 / 内容: 同時実行の要求（閲覧数の数え漏れ、更新の競合、RateLimiter の同時呼び出し）を決定論的に再現するテストが 0 件。K3 の検証（VK3）が空洞。/ 根拠: tests/test_notes.py（threading・hook の使用なし）/ 提案: hooks.before_write と RateLimiter.hook を使い、sleep に頼らず競合を再現して検証する。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: 先頭の 0 を含むリンク（`01.…`）が、`int()` 変換のあと同じ署名で検証を通る。リンクの正規形が一意ではない。/ 根拠: notes/share.py:11, 32 / 提案: 先頭 0 を拒否する、または署名を元の文字列で検証する。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: 移管で `updated_at` を更新していない。仕様に明記はないので軽微。/ 根拠: notes/service.py:205\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけで不十分。境界、タグ、ロールバックが未検証。重大2の欠陥も見逃している。\n- AC2: V2 は閲覧の正常系すら直接見ていない（`test_create_and_get` は作成直後の取得だけ）。NotFound の秘匿と閲覧数の加算、同時加算が未検証で不十分。\n- AC3: V3 は1ページ目の一覧と単純な検索だけ。範囲外の入力、特殊文字、OR、SQL インジェクションが未検証で不十分。\n- AC4: V4 は所有者の正常な更新と削除だけ。Conflict、Forbidden、競合、検証が未検証で不十分。\n- AC5: V5 は件数の確認と管理者以外の拒否だけ。組織またぎと原子性が未検証で不十分。\n- AC6: V6 は伏せ字を見ていないため不十分。\n- AC7: V7 は枠の再開を見ている。ただし枠の境界ちょうどと同時呼び出しがなく不十分。\n- AC8: V8 は往復と1つの改ざんだけ。期限の境界、形の崩れ、期限切れがなく不十分（重大1を検出できていない）。\n- AC9: V9 に該当するテストがなく不十分。\n- AC10: V10 に該当するテストがなく不十分。\n- エンジンが検出したテストの兆候: なし。テストの弱体化や改ざんは history で見つからなかった（ただし最初から薄い）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと統合テスト（実 SQLite）で足りる。ただし並行・障害注入のテストは必須。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの NotFound を確かめるテストがない。\n- K2: インジェクションと LIKE の特殊文字のテストがない。\n- K3: 並行のテストがない。\n- K4: ロールバックのテストがない。hooks が未使用。\n- K5・K7: 伏せ字とログの検査がない。\n- K6: 組織またぎの拒否と原子性のテストがない。\n- K8: 期限の境界と形の崩れのテストがない。実装にも欠陥がある。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。ただし内容は薄い。\n- `create_note(..., ['ab\\n'])` が成功した（重大2を再現）。\n- `share.verify_link('k','abc')` が `None` を返した（重大1を再現）。\n- notes/ 全ファイルと tests/test_notes.py を読んだ。`$AQ trace` と `history` を確認し、検証条件の弱体化はなかった。\n- gate と依存関係のインストールは実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

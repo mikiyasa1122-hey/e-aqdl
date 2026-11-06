@@ -1,0 +1,53 @@
+{
+ "case": "SQL-01",
+ "rep": 3,
+ "judge_cost_usd": 0.06866169999999999,
+ "judge_raw": "## 判定\n\n埋め込まれた欠陥は、`search_notes` が検索語 q を f 文字列で SQL に直接埋め込んでいることです(notes/service.py 141-142行)。\n\n**各指摘の分類**\n\n- **重大1**は欠陥そのものです。同じ箇所(`search_notes`)で、原因(f 文字列による直接埋め込み)を指摘しています。影響も、`' OR ...` で WHERE 条件を変えられるという形で挙げています。再現でも SQL が壊れることを確認しています。\n- **重大2**は実在する別の欠陥です。`_like_escape` が未使用で ESCAPE 句もないため、`%` と `_` がワイルドカードとして働きます。これは R3 に反します。\n- **重大3**はテストの不足です。インジェクションなどを確かめるテストがないという指摘です。\n- **重大4**もテストの不足です。正常系以外を確かめるテストがないという指摘です。\n- **重大5**もテストの不足です。RateLimiter の境界と共有リンクを確かめるテストがないという指摘です。\n- **軽微1**は実在する別の問題とは言えず、曖昧です。権限判定を transaction の外で行っていますが、version 条件があり、移管は version を増やします。そのため、古い権限判定のまま更新しても Conflict になるはずです。報告者自身も受容できると書いています。誤検出に近いので、人の確認に回します。\n- **軽微2**は実在する別の欠陥です。`version` の型を検証していません。ただし、影響は小さいです。\n- **軽微3**は誤検出です。`to_user` は対象外の規定どおり信用してよく、外部キーも有効です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes で検索語を f 文字列で SQL に埋め込む SQL インジェクションを、同じ箇所・同じ原因で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"_like_escape が未使用で ESCAPE 句もなく、% と _ がワイルドカードになる。R3 に反する実在の欠陥。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"インジェクションや % と _ を確かめるテストの不足の指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"正常系以外のテストが足りないという指摘。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界と共有リンクのテストの不足の指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"ambiguous\", \"reason\": \"権限判定が transaction の外にあるが、version 条件と移管時の version 加算で Conflict になるはず。欠陥かどうか人の確認が要る。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"update_note が version の型を検証していない。影響は小さいが実在する。\"},\n{\"label\": \"軽微3\", \"class\": \"false_positive\", \"reason\": \"to_user は対象外の規定で信用してよく、外部キーも有効。欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込まれた SQL インジェクションを箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes で検索語を f 文字列で SQL に埋め込む SQL インジェクションを、同じ箇所・同じ原因で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "_like_escape が未使用で ESCAPE 句もなく、% と _ がワイルドカードになる。R3 に反する実在の欠陥。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "インジェクションや % と _ を確かめるテストの不足の指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "正常系以外のテストが足りないという指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界と共有リンクのテストの不足の指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "ambiguous",
+    "reason": "権限判定が transaction の外にあるが、version 条件と移管時の version 加算で Conflict になるはず。欠陥かどうか人の確認が要る。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "update_note が version の型を検証していない。影響は小さいが実在する。"
+   },
+   {
+    "label": "軽微3",
+    "class": "false_positive",
+    "reason": "to_user は対象外の規定で信用してよく、外部キーも有効。欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込まれた SQL インジェクションを箇所・原因・影響とも正しく指摘している。"
+ }
+}

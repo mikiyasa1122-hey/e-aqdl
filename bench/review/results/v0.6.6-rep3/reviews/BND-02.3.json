@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 3,
+ "sec": 34.4,
+ "exit": 0,
+ "cost_usd": 0.1258805,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18062,
+  "cache_read_input_tokens": 121865,
+  "output_tokens": 4143,
+  "output_tokens_details": {
+   "thinking_tokens": 841
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18062,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2522,
+    "cache_read_input_tokens": 39554,
+    "cache_creation_input_tokens": 2613,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2613
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC10、V1〜V10、VK1〜VK8 / 内容: テストは正常系が中心で、12件しかない。仕様の異常系・境界値・リスクを確かめるテストがほぼ空洞。次の検証が欠けている。\n  - 他組織・他人の非公開メモの NotFound（K1）\n  - 閲覧数の同時加算（AC2）\n  - 楽観的ロックの Conflict（AC4、K3）\n  - SQL インジェクション・LIKE の `%` `_`（K2）\n  - 途中失敗でのロールバック（K4）。`hooks.before_write` の差し込み口があるのに使われていない\n  - 移管の失敗時の巻き戻し（K6）\n  - 監査ログの api_key 伏せ。`export_audit` のテストは action と actor しか見ておらず、`actor_key` を一切確認していない（AC6、K7）\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し（AC7）\n  - 共有リンクの期限ちょうど・形の崩れ・期限切れ（AC8、K8）\n  - ログへの機密情報の非出力（AC9）\n  - 例外後の接続の再利用（AC10）\n  \n  trace では全 V が「合格」だが、実際に確かめているのは一部だけ。 / 根拠: tests/test_notes.py 全体（90行）。`ShareTest` は正常系と改ざん1件のみ、`RateLimitTest` は61秒後の1件のみ。 / 提案: 上記を決定論的に再現するテストを追加する。並行実行は `hooks.before_write` と `RateLimiter.hook` で再現する。\n- [重大2] 区分: 実装 / 対象: R3、AC3 / 内容: `list_notes` が `page=0` を受け付ける。仕様は「page は1以上、範囲外は ValidationError」。 / 根拠: notes/service.py の `if not isinstance(page, int) or page < 0:`。実行すると `list_notes(c,u,page=0)` が例外にならず `page: 0` を返した。 / 提案: `page < 1` に直し、page=0 と負の値を拒否するテストを追加する。\n- [重大3] 区分: 実装 / 対象: R1、R3、AC1、AC3 / 内容: タグ検査が `TAG_RE.match` と `$` を使っているため、末尾が改行のタグ（`\"abc\\n\"`）を通す。仕様は英小文字・数字・ハイフンの1〜20文字だけ。 / 根拠: notes/service.py の `TAG_RE`、`_validate`、`search_notes` の検査。実行すると `create_note(..., ['abc\\n'])` が成功した。 / 提案: `fullmatch` を使うか、`\\Z` を使う。改行付きタグを拒否するテストを追加する。\n- [重大4] 区分: 実装 / 対象: R4、AC4 / 内容: `update_note` の認可・可視性の判定がトランザクションの外にある。判定後に `transfer_notes` で所有者が変わった場合、旧所有者の更新が通りうる。また `update_note` / `delete_note` は、判定後に他の接続が削除すると、どちらも握りつぶして成功を返す。削除側はそのまま成功し、更新側は Conflict になる。 / 根拠: notes/service.py の `update_note` と `delete_note`。`_row` と `_can_modify` を `transaction` の前で実行している。 / 提案: `BEGIN IMMEDIATE` の中で行を読み直し、可視性と権限を再判定する。`delete_note` は DELETE の rowcount を確認する。ただしこの点は競合の再現が必要なので、実装前に確認してほしい。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: 先頭ゼロ付きの note_id（`007.…`）も、`int` に変換した値で署名が一致すれば通る。仕様の形には合うので許容できるが、同一のリンクが複数の表記を持つ。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成と空題名の拒否だけを確かめていて不十分。本文長、タグ数・形式（改行付き含む）、重複タグ、失敗時に何も残らないこと（K4）が未検証。\n- AC2: V2 は閲覧数も NotFound も確かめておらず不十分。\n- AC3: V3 は1ページ目と単純な検索だけで不十分。範囲外の入力、LIKE の特殊文字、SQL インジェクション、タグ OR が未検証。\n- AC4: V4 は所有者の更新と削除の正常系だけで不十分。Conflict、Forbidden、管理者の扱いが未検証。\n- AC5: V5 は移管の件数と管理者以外の拒否だけで不十分。別組織への移管と途中失敗の巻き戻しが未検証。\n- AC6: V6 は `actor_key` を見ておらず空洞。\n- AC7: V7 は境界とスレッドの検証がなく不十分。\n- AC8: V8 は期限の境界も形の崩れもなく不十分。\n- AC9: V9 に対応するテストがない。\n- AC10: V10 に対応するテストがない。\n- エンジンが検出したテストの兆候（skip・`.only`・アサーションなし）はなし。\n\n### E2E の要否\n- 不要。ライブラリで UI も HTTP もなく、E2E の対象がない。ただしリスクが高いので、SQLite のファイルを使った複数スレッド・複数接続の結合テストが必要（閲覧数・楽観的ロック）。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションを確かめるテストがない。\n- K3: 並行の閲覧数・更新・RateLimiter を確かめるテストがない。\n- K4: 途中の失敗による不整合を確かめるテストがない。\n- K5、K7: api_key の伏せ方と、ログ・例外への機密情報の出力を確かめるテストがない。\n- K6: 別組織への移管の拒否と巻き戻しを確かめるテストがない。\n- K8: 期限ちょうどと形の崩れたリンクを確かめるテストがない。\n\n### 確認したこと\n- spec.md、design.md、全ソース（notes/*.py）と tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件すべて成功した。\n- 再現用スクリプトで、タグ `abc\\n` が作成できること、`list_notes(page=0)` が成功することを確かめた。\n- `$AQ trace` を確認した。全 V が「合格・反証未実施」で、`history` は長くて途中までしか見ていない。検証条件を弱めた形跡は見つけていない。\n- gate は実行していない。ファイルは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

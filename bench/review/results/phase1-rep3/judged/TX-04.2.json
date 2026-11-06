@@ -1,0 +1,38 @@
+{
+ "case": "TX-04",
+ "rep": 2,
+ "judge_cost_usd": 0.0677537,
+ "judge_raw": "## 判定\n\n埋め込まれた欠陥は、`transaction()` が例外のときに ROLLBACK しないことです。コードでは `except BaseException: raise` だけで、ROLLBACK は COMMIT 失敗時にしか実行されません。\n\n- **重大1**: 同じ箇所(notes/service.py:29-42)を指摘しています。原因(例外時に ROLLBACK しない)も、影響(トランザクションが開いたまま残る、次の `BEGIN IMMEDIATE` が失敗する、途中の変更が残る)も正解データと一致します。\n- **重大2**: ロールバックを確かめるテストが無いという指摘で、コードの欠陥ではなくテストの不足です。\n- **重大3**: `TAG_RE` を `re.match` で使うと、末尾が改行のタグ(`\"ab\\n\"`)が通ります。`$` は末尾の改行の手前にも一致するので、この指摘は実在します。仕様に反する別の欠陥です。\n- **重大4**: テストの不足だけを指摘しています。\n- **軽微1**: 巨大な page で OverflowError になりうるという指摘です。報告自身が未実行の推測と書いています。SQLite は int64 を超える値を OverflowError にするので、実際に起きる可能性は高いです。ただし根拠は確認されておらず、仕様違反とも言い切れません。そのため ambiguous とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transaction() が例外時に ROLLBACK せずトランザクションが開いたまま残る点を、同じ箇所で原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"ロールバックや途中失敗を確かめるテストが無いという、テスト不足のみの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"TAG_RE を re.match で使うため、末尾が改行のタグが通る。埋め込み欠陥とは別の、実在する仕様違反。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値・並行のテストが無いという、テスト不足のみの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"ambiguous\", \"reason\": \"巨大な page による OverflowError の可能性を、未実行の推測として挙げている。根拠が確認されておらず、仕様違反かどうかも不明。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、埋め込まれた ROLLBACK 欠落を箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transaction() が例外時に ROLLBACK せずトランザクションが開いたまま残る点を、同じ箇所で原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "ロールバックや途中失敗を確かめるテストが無いという、テスト不足のみの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "TAG_RE を re.match で使うため、末尾が改行のタグが通る。埋め込み欠陥とは別の、実在する仕様違反。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "異常系・境界値・並行のテストが無いという、テスト不足のみの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "ambiguous",
+    "reason": "巨大な page による OverflowError の可能性を、未実行の推測として挙げている。根拠が確認されておらず、仕様違反かどうかも不明。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、埋め込まれた ROLLBACK 欠落を箇所・原因・影響とも正確に捉えている。"
+ }
+}

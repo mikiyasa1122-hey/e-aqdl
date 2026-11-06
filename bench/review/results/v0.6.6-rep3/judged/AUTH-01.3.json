@@ -1,0 +1,38 @@
+{
+ "case": "AUTH-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0685013,
+ "judge_raw": "各指摘の判定は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`_visible` が `org_id` の一致を確かめていない点を原因として挙げています。影響も、他の組織のメモを読める・更新や削除でも NotFound にならない、と一致します。再現も示されています。\n- **重大2**: テストの不足だけを述べています。コードの欠陥の主張ではありません。\n- **重大3**: `version` の型を検査していないという指摘です。不正な型は Conflict になる程度で、更新は安全側に倒れます。仕様にも `version` の型検証の要件はありません。指摘自体が実害は小さいと認めているため、欠陥とは言えず false_positive とします。\n- **重大4**: 認可確認がトランザクション外にあるという指摘です。`version` 条件付きの UPDATE と、移管での `version` 加算により Conflict になるので、実害はありません。指摘自身も実害は小さいと認めています。仕様違反は示されておらず、false_positive とします。\n- **軽微1**: 先頭ゼロ付きの note_id が通るという指摘です。署名は正しい値でなければ通りません。仕様の形式は「10進の数字だけ」で、これを満たします。仕様違反とは言えず、保守性や好みの提案に近いので style とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_visible が org_id を比較しない点を原因に挙げ、他組織のメモの閲覧・更新・削除ができる影響まで埋め込み欠陥と一致している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"false_positive\", \"reason\": \"不正な version は Conflict になり安全側に倒れる。仕様に version の型検証の要件もなく、実害のある欠陥ではない。\"},\n{\"label\": \"重大4\", \"class\": \"false_positive\", \"reason\": \"version 条件付き UPDATE と移管時の version 加算で Conflict になり、指摘自身も実害は小さいと述べている。仕様違反は示されていない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの表記は仕様の形式（10進の数字だけ）を満たし、署名も正しくなければ通らない。表記の正規化の提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が _visible の org_id 未確認という原因と、他組織のメモを読み・更新・削除できる影響の両方を正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_visible が org_id を比較しない点を原因に挙げ、他組織のメモの閲覧・更新・削除ができる影響まで埋め込み欠陥と一致している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "false_positive",
+    "reason": "不正な version は Conflict になり安全側に倒れる。仕様に version の型検証の要件もなく、実害のある欠陥ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "false_positive",
+    "reason": "version 条件付き UPDATE と移管時の version 加算で Conflict になり、指摘自身も実害は小さいと述べている。仕様違反は示されていない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの表記は仕様の形式（10進の数字だけ）を満たし、署名も正しくなければ通らない。表記の正規化の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が _visible の org_id 未確認という原因と、他組織のメモを読み・更新・削除できる影響の両方を正しく特定している。"
+ }
+}

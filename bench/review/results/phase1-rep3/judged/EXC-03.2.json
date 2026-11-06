@@ -1,0 +1,33 @@
+{
+ "case": "EXC-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0637057,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`verify_link` の同じ箇所を指しています。原因は `except ValueError: return None` で、影響は呼び出し側が `None` を取り違えて検証をすり抜けることです。どちらも正解データと一致します。\n- **重大2**: 実在する別の欠陥です。`TAG_RE` は `^…$` と `match` の組み合わせなので、末尾が改行のタグ `\"abc\\n\"` が通ります。仕様の「英小文字・数字・ハイフンの1〜20文字」に反します。ただし行番号は実際のコードとずれています。\n- **重大3**: コードの欠陥ではなく、テストの不足だけを指摘しています。\n- **軽微1**: `update_note` と `delete_note` は、認可の確認をトランザクションの外で行います。そのため、同時に `transfer_notes` が走ると所有者が変わる余地があります。条件付きですが、仕様 R4 と R5 に絡む実在の競合です。そのため real_other としました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link の形崩れリンクで Forbidden でなく None を返す点を、同じ箇所・同じ原因と影響で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ の組み合わせで改行付きタグが通るのは、埋め込み欠陥とは別の実在するバグである。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"認可確認がトランザクションの外にあり、同時の transfer_notes と競合する余地は実在する。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（verify_link が None を返す）を原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link の形崩れリンクで Forbidden でなく None を返す点を、同じ箇所・同じ原因と影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ の組み合わせで改行付きタグが通るのは、埋め込み欠陥とは別の実在するバグである。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "認可確認がトランザクションの外にあり、同時の transfer_notes と競合する余地は実在する。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（verify_link が None を返す）を原因・影響とも正しく指摘している。"
+ }
+}

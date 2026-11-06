@@ -1,0 +1,49 @@
+{
+ "case": "RACE-02",
+ "rep": 1,
+ "sec": 38.0,
+ "exit": 0,
+ "cost_usd": 0.1433843,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 20787,
+  "cache_read_input_tokens": 154463,
+  "output_tokens": 4477,
+  "output_tokens_details": {
+   "thinking_tokens": 741
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20787,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2650,
+    "cache_read_input_tokens": 40416,
+    "cache_creation_input_tokens": 504,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 504
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d865c6b5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3 / 対応区分: 修正必須 / 内容: `get_note` は閲覧数を、トランザクションの外で読んだ値 `views` に 1 を足して書いている（`UPDATE notes SET views = ? ... (views + 1, ...)`）。そのため同時に閲覧されると数え漏れが起きる。 / 成立条件: 別々の接続で 2 つの閲覧が、読み出しと書き込みの間に交錯したとき。 / 影響: 仕様「同時に閲覧されても数え漏れがないこと」に違反する。 / 根拠: `notes/service.py` の `get_note`（`views = row[\"views\"]` から `hooks.before_write(\"view\")`、続く UPDATE まで）。`before_write(\"view\")` の差し込み口から別接続の閲覧を 1 回入れて再現した。閲覧数は 1 になり、期待は 2 だった（スクリプトは scratchpad 内で実行し、リポジトリは変更していない）。上流の保証はない。BEGIN IMMEDIATE は UPDATE の直前から始まるだけで、読み出した値は古いままになる。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` に直す。または読み出しをトランザクション内に移す。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは 12 件すべて正常系が中心で、受け入れ条件とリスクを確かめていない。具体的には次のものがない。 / 影響: 重大1の欠陥も検出されず、gate が通っている。 / 根拠: `tests/test_notes.py`。次の検証が見当たらない。\n  - 閲覧数（AC2）: 同時閲覧と数え漏れのテスト。\n  - 見え方（AC2・AC3・AC4、K1）: 他組織・他人の非公開メモが NotFound になるテスト、一覧・検索から漏れないテスト。\n  - 一覧・検索（AC3、K2）: `%` と `_`、SQL を含む検索語、page・per_page・sort の境界、タグ OR のテスト。\n  - 更新（AC4）: 楽観的ロックの Conflict、更新・削除の Forbidden のテスト。\n  - 失敗時の巻き戻し（AC1・AC5・AC10、K4）: `hooks.before_write` を使った途中失敗でのロールバックと、その後の接続の再利用のテスト。\n  - 移管（AC5、K6）: 他組織への移管が拒否されるテスト。\n  - 監査ログ（AC6、K7）: api_key の伏せ字が正しいかのテスト。`test_export_audit` は action と actor しか見ていない。\n  - 回数制限（AC7）: 枠の境界と同時呼び出しのテスト。`test_limit` の時刻は 0 と 61 で、境界の 60 を確かめていない。\n  - 共有リンク（AC8、K8）: 期限ちょうどと形の崩れたリンクのテスト。\n  - 機密情報（AC9、K5）: ログ・例外に出ないことのテスト。\n  - 設計書が用意した差し込み口（hooks と RateLimiter.hook）は、どのテストからも使われていない。\n  提案: 上の項目について、決定論的なテストを追加する。同時閲覧は hook で再現する。\n- [重大3] 区分: テスト / 対象: V1〜V10, VK1〜VK8（trace / history） / 対応区分: 証拠不足 / 内容: 検証 V1〜V10 と VK1〜VK8 がすべて同じ `unit` に紐づいているが、その中身が上のとおり空洞である。 / 影響: 要求とテストの対応が形だけで、完了判定が実質を保証しない。 / 根拠: history #76〜#93 の bind はすべて `[\"unit\"]`。 / 提案: 重大2のテストを追加し、各検証が実際に確かめる内容に対応づける。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `share.verify_link` は note_id を int に直して署名を検証する。そのため `007.…` のように先頭に 0 が付いた別の表記でも有効になる。 / 提案: 正規の表記（先頭の 0 なし）だけを通す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成と空の題名の拒否だけを確認している。タグや本文の境界、途中失敗時に何も残らないことは未確認で、不十分。\n- AC2: V2 は単独の閲覧しか確認しておらず、同時閲覧・NotFound の網羅・閲覧数の加算がない。実装にも数え漏れの欠陥があり、不十分。\n- AC3: V3 は 1 ページ目の件数と単純な検索だけで、境界・`%` `_`・タグ OR・不正入力・SQL インジェクションがなく、不十分。\n- AC4: V4 は所有者による正常な更新・削除だけで、Conflict・Forbidden・管理者・検証がなく、不十分。\n- AC5: V5 は件数だけで、所有者が移ったことも、失敗時の巻き戻しも、組織をまたぐ拒否も確かめておらず、不十分。\n- AC6: V6 は api_key を一切確認していないため不十分。\n- AC7: V7 は枠の境界（ちょうど 60 秒）も同時の呼び出しも確認しておらず、不十分。\n- AC8: V8 は期限の境界、形の崩れ、期限切れを確認していない。改ざんは 1 件だけで、不十分。\n- AC9: V9 はログや出力の確認が見当たらず、不十分。\n- AC10: V10 は例外の後に接続を使い続けられるかを確認しておらず、不十分。\n- エンジンが検出したテストの兆候はなし。ただし弱いテストファイル `tests/test_notes.py` は上のとおり。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、結合レベルの単体テストで足りる。ただし、別接続による並行テストが必要。\n### 不足しているリスク\n- K1〜K8 の大半について、反証できるテストがない。\n- 実装側で確認できた他の規則は、コードを読んだ範囲では仕様どおりに見える。対象は `_visible`・`_can_modify`、LIKE の ESCAPE とプレースホルダー、楽観的ロック、移管の組織チェック、監査ログの伏せ字、RateLimiter の境界、期限の `>=`、`transaction` のロールバック。\n- これらはテストで裏づけされていない。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12 件が成功。\n- 閲覧数の同時再現スクリプトを scratchpad で実行した。閲覧数は 1 になり、期待は 2 だった。\n- `history --since 0` で、検証の弱体化や削除がないことを確認した。bind がすべて `unit` に集中していることを確認した。\n- `git status` で、実装ファイルがすべて未追跡であることを確認した。diff による改ざんの比較はできなかった。",
+ "files_changed": [],
+ "valid": true
+}

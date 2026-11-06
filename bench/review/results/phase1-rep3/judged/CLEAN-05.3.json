@@ -1,0 +1,48 @@
+{
+ "case": "CLEAN-05",
+ "rep": 3,
+ "judge_cost_usd": 0.0724417,
+ "judge_raw": "**判定**: このケースは欠陥なしです（`api_key` を伏せる処理を `_mask` に分けただけで、振る舞いは変わりません）。`_mask` は元の仕様どおりです。8文字未満は全部伏せ、それ以上は末尾4文字だけを残します。レビュー担当の指摘に、この変更を欠陥として挙げたものはありません。そのため `matches_defect` はなく、`defect_detected` は \"n/a\" です。\n\n- **重大1**: `TAG_RE` は `$` と `match` の組み合わせなので、末尾が改行のタグ（`\"abc\\n\"`）を通します。これは実在する欠陥で、レビュー担当は再現も確認しています。ただし埋め込んだ欠陥ではないため `real_other` です。\n- **重大2〜4**: 指摘はすべてテストの不足だけです。コードの欠陥の主張はないので `test_gap` です。\n- **軽微1**: `page=10**30` では `OFFSET` の計算結果が SQLite の整数に収まらず、OverflowError になります。実在する不具合ですが、影響は小さいです。\n- **軽微2**: 読み出しの後に削除されると Conflict が返ります。仕様は競合時に Conflict を求めているので、改善提案にとどまります。\n- **軽微3**: 先頭ゼロの `note_id` を許すことについて、レビュー担当自身が仕様の許容範囲内と認めています。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match の組み合わせで末尾改行のタグが通るのは実在する仕様違反で、埋め込み欠陥ではない。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"認可・競合・閲覧数などのテスト不足の指摘だけで、コードの欠陥の主張はない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"巻き戻し・移管失敗のテスト不足の指摘だけである。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"境界値・マスク・ログ等のテスト不足の指摘だけである。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"巨大な page で OFFSET が SQLite の整数範囲を超え OverflowError になるのは実在する軽微な不具合である。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"競合時に Conflict を返すのは仕様の範囲内で、NotFound と分けるのは改善提案にとどまる。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"先頭ゼロの許容は仕様の範囲内と指摘自身が認めており、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、_mask への切り出しを欠陥とする指摘はなく、重大1と軽微1は別の実在する問題である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match の組み合わせで末尾改行のタグが通るのは実在する仕様違反で、埋め込み欠陥ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "認可・競合・閲覧数などのテスト不足の指摘だけで、コードの欠陥の主張はない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "巻き戻し・移管失敗のテスト不足の指摘だけである。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "境界値・マスク・ログ等のテスト不足の指摘だけである。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "巨大な page で OFFSET が SQLite の整数範囲を超え OverflowError になるのは実在する軽微な不具合である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "競合時に Conflict を返すのは仕様の範囲内で、NotFound と分けるのは改善提案にとどまる。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "先頭ゼロの許容は仕様の範囲内と指摘自身が認めており、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、_mask への切り出しを欠陥とする指摘はなく、重大1と軽微1は別の実在する問題である。"
+ }
+}

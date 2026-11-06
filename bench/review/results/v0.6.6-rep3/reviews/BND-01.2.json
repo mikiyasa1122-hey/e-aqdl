@@ -1,0 +1,49 @@
+{
+ "case": "BND-01",
+ "rep": 2,
+ "sec": 36.2,
+ "exit": 0,
+ "cost_usd": 0.14875,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 22406,
+  "cache_read_input_tokens": 156460,
+  "output_tokens": 4346,
+  "output_tokens_details": {
+   "thinking_tokens": 839
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22406,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2840,
+    "cache_read_input_tokens": 41314,
+    "cache_creation_input_tokens": 198,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 198
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 71ec4f30\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3 / 内容: `list_notes` の per_page 上限が 51 まで通る。仕様は 1〜50 で、51 は ValidationError にすべき。/ 根拠: notes/service.py の `not 1 <= per_page <= PER_PAGE_MAX + 1`。再現: `list_notes(conn, u, per_page=51)` が `per_page: 51` を返した（実行して確認）。/ 提案: `+ 1` を外し、境界値 0・1・50・51 のテストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10、K1〜K8 / 内容: 検証が正常系中心の12件だけで、仕様の主要な規則を確かめていない。次の項目のテストが無い。\n  - R1: 題名・本文・タグの境界値、tags に文字列を渡す、トランザクションの巻き戻し（`hooks.before_write(\"create:tags\")` で失敗させる）\n  - R2: 他組織・他人の非公開メモが NotFound になること、閲覧数の加算、同時閲覧\n  - R3: LIKE の `%` と `_`、SQL インジェクション文字列、タグの OR 絞り込み、sort\n  - R4: Forbidden、Conflict、読み出しから書き込みの間に他の更新が入る競合、削除失敗時の伝播\n  - R5: 組織またぎ、途中失敗で元のまま\n  - R6: 8文字未満と末尾4文字の伏せ方\n  - R7: 枠の境界（ちょうど window 秒）と複数スレッド\n  - R8: 期限ちょうどの境界、形の崩れたリンク、署名の改ざん\n  - R9: ログや例外に機密情報が出ないこと\n  - R10: 例外の後に接続を使い続けられること\n  / 根拠: tests/test_notes.py 全体。`hooks` と `RateLimiter.hook` の差し込み口を使うテストが1つも無い。エンジンの trace が全項目を「合格」と表示しているが、実体は空洞。/ 提案: 各 AC とリスクに、異常系・境界値・競合のテストを足す。認可の条件や version 条件を外すと失敗するものにする。\n- [重大3] 区分: テスト / 対象: R7, AC7, K3 / 内容: RateLimiter の「同時に呼ばれても上限を超えない」ことを確かめるテストが無い。枠の境界（ちょうど window 秒）のテストも無い。実装は `threading.Lock` で守られているように見えるが、未検証。/ 根拠: tests/test_notes.py の RateLimitTest は `t=61` の1ケースだけ。/ 提案: `threading.Barrier` で N スレッドを同時に `hit` させ、成功が limit 回以下であることを確かめる。`t=window-ε` と `t=window` の境界も確かめる。sleep は使わない。\n- [重大4] 区分: テスト / 対象: R8, K8, AC8 / 内容: 共有リンクの検証が、往復と note_id の改ざん1件だけ。期限ちょうど（`now == expires` で無効）、期限切れ、署名の改ざん、形式の崩れ（改行・全角数字・桁違い・16進の大文字）が無い。弱い検証のままセキュリティ要求を「合格」にしている。/ 根拠: tests/test_notes.py の ShareTest。/ 提案: 上記の境界と不正形式を網羅したテストを足す。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` が `_validate` の前に `_tag_list(tags)` を呼ぶ順序のため、他組織のメモで tags 不正を渡したときの挙動を確かめるテストが無い。現状のコードでは先に NotFound になるので実害は無い。/ 提案: 順序を仕様どおりにテストで固定する。\n- [軽微2] 区分: 実装 / 対象: R6 / 内容: `export_audit` が `users` との INNER JOIN なので、利用者が存在しない監査行は黙って落ちる。仕様上は問題にならない可能性が高いが、ログの欠落になりうる。/ 提案: LEFT JOIN にするか、前提を設計書に書く。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名だけを確かめており不十分。境界値、タグの規則、巻き戻し（K4）が無い。\n- AC2: V2 は閲覧の正常系のみで不十分。権限による NotFound、閲覧数の加算、同時閲覧が無い。K1 の検証もほぼ空。\n- AC3: V3 は一覧1ページと単純な検索のみで不十分。per_page の上限バグ（重大1）を見逃している。LIKE のエスケープ、SQL インジェクション（K2）、タグの OR が無い。\n- AC4: V4 は作成者による更新・削除の正常系のみで不十分。Forbidden、Conflict、競合、削除失敗の伝播（K3）が無い。\n- AC5: V5 は正常系と非管理者の Forbidden のみで不十分。組織またぎ（K6）と全部か何もしないかが無い。\n- AC6: V6 は action と actor しか見ておらず、api_key の伏せ方を確かめていない。不十分（K7）。\n- AC7: V7 は枠をまたぐ1ケースのみで不十分（重大3）。\n- AC8: V8 は不十分（重大4）。\n- AC9: V9 に対応するテストが無い（空洞）。\n- AC10: V10 に対応するテストが無い（空洞）。\n- エンジンが検出したテストの兆候は無し（skip・`.only` なし）。テストの改ざんや弱体化の履歴も見つからなかった。ただし元から薄い。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリなので、単体・統合テスト（SQLite のインメモリや一時ファイル、複数の接続とスレッド）で足りる。ただし、複数の接続とスレッドによる同時の更新・閲覧のテストは必須。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの NotFound を確かめるテストが無い。\n- K2: `%`・`_`・クォートを含む検索語のテストが無い。\n- K3: 同時の更新・閲覧のテストが無い。\n- K4: 途中失敗時のロールバックのテストが無い（create、delete、transfer）。\n- K5: ログ・例外に本文・署名・api_key が出ないことのテストが無い。\n- K6: 組織またぎと部分移管のテストが無い。\n- K7: 鍵の伏せ方のテストが無い。\n- K8: 期限ちょうど・改ざん・形式の崩れのテストが無い。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` → 12件 OK（通ったが、検証の網羅性は上記のとおり不足）。\n- `list_notes(conn, u, per_page=51)` を実行 → 例外にならず `per_page: 51` が返った（重大1を確認）。\n- notes/ 配下の全ソースを読み、仕様・設計と照合した。次の点は仕様どおりだった。\n  - 認可（`_visible`／`_can_modify`）\n  - LIKE の ESCAPE とプレースホルダー\n  - 楽観的ロック（UPDATE の `version` 条件と rowcount）\n  - `transaction()` の ROLLBACK と例外の再送出\n  - 共有リンクの正規表現（fullmatch）と `hmac.compare_digest`\n  - ログに本文・署名・鍵を出していないこと\n- `$AQ trace` と `$AQ history --since 0` を確認。検証条件の弱体化は無かった。\n- gate は実行していない。依存関係のインストールもしていない。",
+ "files_changed": [],
+ "valid": true
+}

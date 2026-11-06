@@ -1,0 +1,43 @@
+{
+ "case": "BND-01",
+ "rep": 2,
+ "judge_cost_usd": 0.06666570000000001,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`service.py:122` の `PER_PAGE_MAX + 1` により、per_page=51 が通ります。箇所・原因・影響がすべて一致しています。\n- **重大2**: 実在する別の欠陥です。`TAG_RE` は `^...$` と `.match` の組み合わせなので、末尾に改行のあるタグ `\"abc\\n\"` が通ります。仕様の「英小文字・数字・ハイフン」に反します。実行で確認済みです。\n- **重大3**: 実在する別の欠陥と見るのが妥当です。`update_note` は行の読み出しとトランザクションの間に隙間があります。version が最新でも、title や body を省略した部分更新では、古い値で新しい更新を上書きし得ます。ただし、再現は実行していません。\n- **重大4**: テストの不足だけを述べています。\n- **重大5**: テストの弱さだけを述べています。\n- **軽微1**: 仕様に定めがない点への確認提案です。欠陥の主張ではないので、style にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の per_page 上限が PER_PAGE_MAX + 1 で51を許す、埋め込んだ欠陥と同じ箇所・原因・影響。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match により末尾改行のタグが通る実在の欠陥で、実行確認の根拠がある。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update_note が読み出しをトランザクション外で行い、部分更新で更新が失われ得る実在の競合欠陥（再現は未実施）。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足の指摘だけで、コードの欠陥ではない。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"test_export_audit が伏せ字を確かめていないというテストの弱さの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"仕様に定めのない updated_at の扱いについての確認提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が per_page 上限の1つのずれを、箇所・原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の per_page 上限が PER_PAGE_MAX + 1 で51を許す、埋め込んだ欠陥と同じ箇所・原因・影響。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match により末尾改行のタグが通る実在の欠陥で、実行確認の根拠がある。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update_note が読み出しをトランザクション外で行い、部分更新で更新が失われ得る実在の競合欠陥（再現は未実施）。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "テストの網羅不足の指摘だけで、コードの欠陥ではない。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "test_export_audit が伏せ字を確かめていないというテストの弱さの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "仕様に定めのない updated_at の扱いについての確認提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が per_page 上限の1つのずれを、箇所・原因・影響とも正確に指摘している。"
+ }
+}

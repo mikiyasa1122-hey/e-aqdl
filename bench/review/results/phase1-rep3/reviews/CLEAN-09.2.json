@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-09",
+ "rep": 2,
+ "sec": 45.0,
+ "exit": 0,
+ "cost_usd": 0.1314478,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 16025,
+  "cache_read_input_tokens": 124218,
+  "output_tokens": 5491,
+  "output_tokens_details": {
+   "thinking_tokens": 1418
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16025,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3305,
+    "cache_read_input_tokens": 39088,
+    "cache_creation_input_tokens": 3111,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3111
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 095b6340\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査で、末尾に改行のあるタグ（例 `\"abc\\n\"`）が通る。 / 成立条件: `tags=[\"abc\\n\"]` を渡す。create_note、update_note、search_notes のどれでも起きる。正規表現が `^[a-z0-9-]{1,20}$` で、`TAG_RE.match` と組み合わせているため、`$` が末尾の改行の手前にも一致する。 / 影響: 仕様は「英小文字・数字・ハイフンの1〜20文字」だけを許す。実際には改行入りのタグが note_tags に保存される。20文字ちょうどのタグに改行を足した21文字も通る。上流にもDBにも、これを止める検査はない。 / 根拠: notes/service.py:14（TAG_RE）、:64、:152。`create_note(c,u,\"t\",\"b\",[\"abc\\n\"])` が成功し、`note_tags` に `'abc\\n'` が入ることを実行して確認した。share.py は同じ問題を避けるため fullmatch を使っており、実装内で扱いが不統一。 / 提案: `TAG_RE.fullmatch` に変えるか、正規表現を `\\Z` で終える。検査は1つの関数にまとめて、service.py の2か所から呼ぶ。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10 と K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほぼ正常系だけ。仕様が求める拒否・境界・並行・失敗時の巻き戻しを確かめるテストがない。上記の重大1も、この状態のため見逃された。 / 成立条件: 認可、境界、並行、巻き戻しのどれかを外しても、今のテストは全部通る。 / 影響: 受け入れ条件の大半が未検証で、K1〜K8 の対策が働くかも未確認。 / 根拠: tests/test_notes.py を全文確認した。他組織や他人の非公開メモが NotFound になるテスト、Forbidden のテスト（transfer の admin 以外のみ）、Conflict や version のテスト、閲覧数のテスト、境界値のテスト（題名100と101文字、タグ5個と6個、page=0、per_page=51、sort 不正、期限ちょうど、枠ちょうどの window 秒）、`%` `_` を含む検索語やSQL文字列が入った検索語のテストは、どれも見当たらない。transaction のロールバックを確かめるテストもない。service.hooks.before_write や RateLimiter.hook を使ったテストはゼロ。 / 提案: 設計の差し込み口を使い、決定論的なテストを追加する。①メモ作成時にタグ挿入で失敗させ、メモと監査ログが残らないこと。②別接続の2スレッド（ファイル DB）で閲覧数が正確に増えること。③更新で古い version と読み出し後の割り込みが Conflict になること。④削除と transfer の途中失敗で元のままになること。⑤RateLimiter の枠の境界（window ちょうどで新しい枠）と、hook を使った複数スレッドで上限を超えないこと。⑥期限ちょうどの共有リンク、改ざん、形の崩れたリンク、`\"abc\\n\"` を含むタグ。⑦api_key の伏せ字（8文字未満、8文字、それ以上）。⑧例外の後に同じ接続で次の操作ができること。⑨ログと例外メッセージに本文・署名・api_key が出ないこと。⑩LIKE の特殊文字とSQLインジェクション文字列。\n- [重大3] 区分: テスト / 対象: R4, R5, K1, K6 / 対応区分: 証拠不足 / 内容: 認可の条件を外してもテストが失敗しない。他組織への漏えいと、組織をまたぐ移管の検査が検証されていない。 / 成立条件: `_visible` の org 比較、`_can_modify`、transfer の組織一致、非公開メモの扱いのどれを削っても、テストは通る。 / 影響: K1・K6（情報漏えい・組織外への移管）の対策が機能する証拠がない。 / 根拠: テストに別組織の利用者は一人もいない。実装のコードを読むと、認可自体は仕様どおりに見える（service.py:73-79、:197-200）。欠陥は見つからず、検証が足りないだけ。 / 提案: 別組織の利用者を追加し、他組織の閲覧・一覧・検索・更新・削除が NotFound になるテストを入れる。他人の非公開メモが管理者にも NotFound になるテスト、同じ組織の member による他人メモの更新が Forbidden になるテスト、from か to が別組織の transfer が Forbidden になるテストも入れる。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: 先頭ゼロ付きの note_id（`007.…`）が、`7` の署名のまま通る。リンクの形が1通りに定まらない。 / 提案: note_id を10進の標準形に限るか、署名の対象を元の文字列にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけ。タグ・本文・題名の境界、失敗時に何も残らないこと、改行付きタグが確かめられておらず不十分。実装にも欠陥がある（重大1）。\n- AC2: V2 は閲覧の取得だけ。他組織・他人の非公開メモが NotFound になること、閲覧数の増加、同時の閲覧が確かめられておらず不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけ。入力の拒否、`%` `_`、タグでの絞り込み、SQLインジェクションが確かめられておらず不十分。\n- AC4: V4 は作成者の更新と削除だけ。Conflict、Forbidden、管理者の扱い、更新時の入力検証が確かめられておらず不十分。\n- AC5: V5 は正常な移管と管理者以外の拒否だけ。組織をまたぐ移管と、途中で失敗したときの元のままが確かめられておらず不十分。\n- AC6: V6 は監査ログの action と actor だけで、api_key の伏せ字を確かめていない。不十分。\n- AC7: V7 は limit 超過と61秒後の再開だけ。枠ちょうどの境界と並行呼び出しが確かめられておらず不十分。\n- AC8: V8 は正常と、note_id の改ざん1件だけ。期限ちょうど、期限切れ、形の崩れ、署名の改ざんが確かめられておらず不十分。\n- AC9: V9 は該当するテストがなく、未検証。\n- AC10: V10 は該当するテストがなく、未検証。\n- エンジンが検出したテストの兆候: なし。skip や弱いアサーションはない。ただしテスト自体が少なく、検証が空洞になっている。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テストと並行テストで足りる。\n\n### 不足しているリスク\n- K1: 他組織や他人の非公開メモの漏えいを確かめる検証がない。\n- K2: SQLインジェクションとLIKEのエスケープを確かめる検証がない。\n- K3: 閲覧数・更新・RateLimiter の同時実行を確かめる検証がない。\n- K4: 作成・更新・削除・移管の途中失敗によるロールバックを確かめる検証がない。\n- K5・K7: ログと監査ログへの機密情報の露出を確かめる検証がない。\n- K6: 組織をまたぐ移管と、一部だけ移ることを確かめる検証がない。\n- K8: 期限切れ・改ざん・形の崩れたリンクを確かめる検証がない。\n\n### 確認したこと\n- `trace` で要求から検証までの対応を確認した。すべて「合格・反証未実施」だった。\n- spec.md、design.md、notes/*.py の全文と tests/test_notes.py の全文を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。12件が通った。\n- `create_note` に `tags=[\"abc\\n\"]` を渡して実行した。成功し、`note_tags` に改行付きのタグが保存された（重大1）。\n- 実装の読解では、SQL はプレースホルダー、LIKE は ESCAPE、transaction は ROLLBACK して再送出、楽観的ロックは UPDATE の version 条件、RateLimiter は lock 内、共有リンクは fullmatch と compare_digest を使っていた。これらに欠陥は見つからなかったが、テストでは確かめられていない。\n- コードは変更していない。`gate` と `history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

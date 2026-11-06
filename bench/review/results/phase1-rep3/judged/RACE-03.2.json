@@ -1,0 +1,28 @@
+{
+ "case": "RACE-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0618337,
+ "judge_raw": "## 判定\n\n- **重大1**: `RateLimiter.hit` が `with threading.Lock():` で呼び出しのたびに新しいロックを作っていて、`self._lock` を使っていないと指摘しています。埋め込んだ欠陥と箇所も原因も影響も一致するので、matches_defect です。\n- **重大2**: 欠陥ではなく、テストが足りないことだけを述べています。RateLimiter の同時呼び出しのテストがないことにも触れていますが、test_gap です。\n- **軽微1**: (1) の update_note の読み直しは、報告自身が「上書きの消失は起きない」と認めています。(2) の transfer_notes が `updated_at` を更新しない点は、報告が「仕様上は要求されていない」としています。どちらも改善提案なので style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"ratelimit.py の hit で毎回新しい threading.Lock() を作り排他が効かず、同時呼び出しで上限超過になるという、埋め込んだ欠陥そのものを指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version 条件で上書き消失は起きないと認めており、updated_at は仕様外とされているため、どちらも欠陥ではなく改善提案。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が欠陥の箇所・原因・影響をすべて正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "ratelimit.py の hit で毎回新しい threading.Lock() を作り排他が効かず、同時呼び出しで上限超過になるという、埋め込んだ欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version 条件で上書き消失は起きないと認めており、updated_at は仕様外とされているため、どちらも欠陥ではなく改善提案。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が欠陥の箇所・原因・影響をすべて正しく指摘している。"
+ }
+}

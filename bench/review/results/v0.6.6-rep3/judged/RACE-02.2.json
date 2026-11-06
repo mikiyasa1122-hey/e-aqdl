@@ -1,0 +1,38 @@
+{
+ "case": "RACE-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0672437,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込み欠陥そのものです。`get_note` は閲覧数を BEGIN の前に読み、`views + 1` の絶対値を書き戻しています。原子的な加算ではないので、同時に閲覧されると数え漏れします。報告は原因・影響・箇所のすべてが一致し、再現でも views が 1 になっています。行番号の表記は実コードとずれていますが、内容は一致しています。\n\n**重大2**: テストの不足だけを指摘しています。コードの欠陥の主張ではないので test_gap です。\n\n**重大3**: 報告は、認可判定が transaction の外の古い行で行われると主張しています。ただし更新は `WHERE version = ?` で守られています。呼び出し側が渡した version が最新でなければ Conflict になり、仕様の「読み出しから書き込みの間に他の更新が入った場合も Conflict」も満たしています。移管は version を増やすので、移管後に古い version で更新しても Conflict になります。報告者自身も重大度に確信がなく、再現もしていません。仕様に反する実害は示されていないので false_positive です。`delete_note` に version 条件がないのは仕様どおりです。\n\n**軽微1**: `to_user` が存在しないと生の IntegrityError が出ることと、`updated_at` が更新されないことを挙げています。どちらも仕様違反ではなく、呼び出し側を信用する前提に含まれます。欠陥の主張というより改善提案なので style です。\n\n**軽微2**: RateLimiter が service に組み込まれていないことと、`_counts` が増え続けることを挙げています。仕様上は違反ではなく、保守性の提案なので style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が views を事前に読んで絶対値を書き戻す非原子的な加算で、同時閲覧の数え漏れという埋め込み欠陥と原因・影響・箇所が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"false_positive\", \"reason\": \"update は WHERE version = ? の楽観的ロックで守られており、移管後の古い version は Conflict になる。仕様違反の実害は示されていない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"to_user の存在確認やエラー型、updated_at の扱いは仕様外の改善提案で、欠陥の主張ではない。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"RateLimiter が未統合なことと _counts の増加は、保守性の指摘で仕様違反ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥を原因・影響・箇所とも正確に指摘し、再現も行っている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が views を事前に読んで絶対値を書き戻す非原子的な加算で、同時閲覧の数え漏れという埋め込み欠陥と原因・影響・箇所が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "false_positive",
+    "reason": "update は WHERE version = ? の楽観的ロックで守られており、移管後の古い version は Conflict になる。仕様違反の実害は示されていない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "to_user の存在確認やエラー型、updated_at の扱いは仕様外の改善提案で、欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "RateLimiter が未統合なことと _counts の増加は、保守性の指摘で仕様違反ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥を原因・影響・箇所とも正確に指摘し、再現も行っている。"
+ }
+}

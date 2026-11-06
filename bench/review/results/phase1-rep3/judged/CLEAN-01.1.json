@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-01",
+ "rep": 1,
+ "judge_cost_usd": 0.0703317,
+ "judge_raw": "欠陥なしのケースなので、各指摘を実在の欠陥かどうかで分類しました。\n\n**重大1(test_gap)**: テストの不足だけを指摘しています。コードの欠陥の主張ではありません。\n\n**重大2(real_other)**: delete_note は、権限確認をトランザクションの外で行います。BEGIN IMMEDIATE の後に再確認はなく、DELETE の条件も `WHERE id = ?` だけです。そのため、確認と書き込みの間に transfer_notes が commit すると、元の所有者が権限を失ったメモを削除できます。すでに消えたメモでも監査ログを書きます。コードの経路から成立するので、実在の欠陥です。ただし仕様の R4 は、更新の競合だけを明示しています。削除の競合は明示していないので、仕様違反と断定するのは強すぎます。それでも、認可の TOCTOU(確認から使用までの間の状態変化)として実在します。\n\n**軽微1(real_other)**: `sort` に list を渡すと、`sort not in SORT_COLUMNS` が TypeError になります。R3 は範囲外を ValidationError にすると定めているので、仕様に反するバグです。影響は小さいです。\n\n**軽微2(real_other)**: \"007.exp.sig\" と \"7.exp.sig\" は、どちらも int 変換後に同じ署名で通ります。ただし署名の対象は変換後の数値です。偽造は成立せず、同じ note_id を指す別表記のリンクが増えるだけです。仕様は「10進の数字だけ」と定めており、先頭ゼロの扱いは明記していません。実害は小さい正規化の提案に近いので、style が妥当です。\n\n**軽微3(style)**: テストを足す提案で、欠陥の主張ではありません。\n\n欠陥なしのケースなので、defect_detected は \"n/a\" です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"delete_note は権限確認がトランザクションの外にあり、transfer_notes との競合で権限を失った所有者が削除できる。実在の認可 TOCTOU だが、仕様は削除の競合を明示していない。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"unhashable な sort で TypeError になり、R3 の ValidationError に反する実在のバグ。影響は小さい。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭ゼロの別表記が同じ note_id として通るだけで、偽造は成立しない。正規化の提案に近い。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"テストの追加提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大2と軽微1は実在の別欠陥(real_other)として扱った。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "delete_note は権限確認がトランザクションの外にあり、transfer_notes との競合で権限を失った所有者が削除できる。実在の認可 TOCTOU だが、仕様は削除の競合を明示していない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "unhashable な sort で TypeError になり、R3 の ValidationError に反する実在のバグ。影響は小さい。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭ゼロの別表記が同じ note_id として通るだけで、偽造は成立しない。正規化の提案に近い。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "テストの追加提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大2と軽微1は実在の別欠陥(real_other)として扱った。"
+ }
+}

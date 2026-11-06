@@ -1,0 +1,49 @@
+{
+ "case": "VAL-01",
+ "rep": 2,
+ "sec": 40.1,
+ "exit": 0,
+ "cost_usd": 0.1510299,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22271,
+  "cache_read_input_tokens": 110899,
+  "output_tokens": 5084,
+  "output_tokens_details": {
+   "thinking_tokens": 1207
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22271,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3024,
+    "cache_read_input_tokens": 36984,
+    "cache_creation_input_tokens": 4393,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4393
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a9a69178\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, R4 / 内容: 空白だけの題名を拒否していない。仕様は「空白だけは不可」としているが、`not title` で判定しているため `\"   \"` が通る。更新時も同じ `_validate` を使うので、更新でも通る。 / 根拠: notes/service.py:57。`create_note(c,u,\"   \",\"b\")` を実行すると note_id=1 が返った（拒否されない）。 / 提案: `not title.strip()` を加える。空白だけの題名を作成と更新で拒否するテストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの正規表現が `^...$` と `match` の組み合わせで、末尾に改行のあるタグ（`\"abc\\n\"`）を通す。保存と検索のタグ検査（R1 の規則）が崩れる。share.py では fullmatch を使っているので、実装の中で一貫していない。 / 根拠: notes/service.py:14, 64, 150。`create_note(c,u,\"t\",\"b\",[\"abc\\n\"])` を実行すると note_id=2 が返った。 / 提案: `fullmatch` に変える（作成、更新、検索のすべて）。改行付きタグの拒否テストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC9, AC10, K1〜K4, K6 / 内容: テストが全体で12件しかなく、仕様の規則と異常系をほとんど確かめていない。確かめていないものは次のとおり。\n  - 入力の境界値: 題名100/101文字、本文10000文字、タグ5/6個、タグの形式\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の加算と同時閲覧\n  - 楽観的ロックの Conflict と、読み出しから書き込みの間に他の更新が入るケース\n  - 作成、削除、移管の途中で失敗したときのロールバック（`hooks.before_write` は用意されているのに未使用）\n  - 別組織への移管の拒否\n  - api_key のマスク（テストは `actor` しか見ていない）\n  - SQL インジェクション、`%` と `_` のエスケープ\n  - ログや例外メッセージに機密情報が出ないこと\n  - 例外の後に接続を使い続けられること\n  \n  そのため、重大1と重大2のバグを見逃したまま通っている。 / 根拠: tests/test_notes.py の全体（90行）。`unittest discover` は 12 件が OK。 / 提案: 上記を網羅するテストを追加する。認可、version、LIKE のエスケープ、ロールバックの条件を外すと失敗するテストにする。\n- [重大4] 区分: テスト / 対象: R7, AC7, R8, AC8, K3, K8 / 内容: 次のものを確かめていない。\n  - RateLimiter: ちょうど window 秒での枠の切り替え（境界）、複数スレッドからの同時呼び出し（`hook` を使う）、ユーザーごとの独立\n  - 共有リンク: 期限ちょうどでの無効、形の崩れ（改行、桁、大文字の16進）、署名の改ざん、別の秘密鍵、`str` 以外の入力\n  \n  期限切れのテストが一つもなく、`>=` の境界も未検証。改ざんのテストも note_id の書き換えだけ。 / 根拠: tests/test_notes.py:70-90。 / 提案: 境界値（window ちょうど、expires ちょうど、その1つ前）、スレッドを使った同時テスト、形の崩れのテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: update_note と delete_note は、可視性と権限の判定をトランザクションの外で行っている。判定後に非公開への変更や削除があっても、更新はその後の version 判定に任せている。実害は小さい。 / 提案: 判定をトランザクションの中に入れるか、設計書に許容と書く。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: transfer_notes は呼び出し側が渡した from_user と to_user の org_id を信用している。仕様の対象外（呼び出し側が確かめる）なので問題はないが、DB 上の組織との照合はしていない。 / 提案: 設計書に前提として書く。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名しか確かめておらず不十分。空白だけの題名、境界値、タグの規則、失敗時に何も残らないこと（ロールバック）が未検証。実際にバグが2件ある。\n- AC2: V2 は作成者本人の閲覧しか確かめておらず不十分。他の組織、他人の非公開、存在しないメモの NotFound、閲覧数の加算と同時閲覧が未検証。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで不十分。範囲外の ValidationError、sort、`%` と `_`、タグの OR、SQL インジェクション、非公開メモの除外が未検証。\n- AC4: V4 は所有者による更新と削除の正常系だけで不十分。Conflict、Forbidden、非公開メモの管理者への NotFound、更新時の入力検証、削除の失敗の伝播が未検証。\n- AC5: V5 は件数と、管理者以外の拒否だけで不十分。別組織の拒否と、途中で失敗したときに元のままであることが未検証。\n- AC6: V6 は `action` と `actor` しか見ておらず不十分。api_key のマスクを確かめていない（8文字未満と8文字以上の境界を含む）。\n- AC7: V7 は枠内の上限と61秒後の復帰だけで不十分。ちょうど window 秒の境界と同時呼び出しが未検証。\n- AC8: V8 は往復と、note_id の改ざん1件だけで不十分。期限の境界、期限切れ、形の崩れが未検証。\n- AC9: V9 は該当するテストがなく、検証していない。\n- AC10: V10 は例外の後の接続の再利用を確かめていない。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はないが、そもそも検証が薄い。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、SQLite を使った単体テストで足りる）。ただし、同時実行は別々の接続を持つ複数スレッドで確かめる。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。実装は `_visible` で対処しているように見える。\n- K2: LIKE のエスケープと SQL インジェクションのテストがない。\n- K3: 閲覧数、楽観的ロック、RateLimiter の同時実行を、決定論的に再現するテストがない。\n- K4: 作成、削除、移管の途中で失敗したときのロールバックを確かめるテストがない。\n- K5, K7: api_key のマスクとログの機密情報を確かめるテストがない。\n- K6: 別組織への移管、一部だけ移ること（途中失敗）を確かめるテストがない。\n- K8: 期限の境界と形の崩れを確かめるテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `git status` で notes/、tests/ などが未追跡（untracked）であることを確認した。\n- `aqdlc trace` で全要求が「合格」だが反証は未実施（`passed_but_unchallenged`）であることを確認した。`history` では検証の弱体化は見つからなかった（bind のみ）。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が OK だった。\n- 一時的な DB（`:memory:`）で `create_note(..., \"   \", ...)` を実行し、空白だけの題名が受理された（重大1）。\n- 同じく `tags=[\"abc\\n\"]` を実行し、改行付きのタグが受理された（重大2）。\n- 設計との整合は取れている。BEGIN IMMEDIATE、`version` を条件にした UPDATE、LIKE の ESCAPE、プレースホルダーを確認した。\n- コードは変更していない。gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

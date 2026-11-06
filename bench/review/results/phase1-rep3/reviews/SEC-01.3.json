@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 3,
+ "sec": 35.4,
+ "exit": 0,
+ "cost_usd": 0.1100462,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14009,
+  "cache_read_input_tokens": 120042,
+  "output_tokens": 4199,
+  "output_tokens_details": {
+   "thinking_tokens": 716
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14009,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2763,
+    "cache_read_input_tokens": 36589,
+    "cache_creation_input_tokens": 3580,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3580
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 対応区分: 修正必須 / 内容: `create_note` が、メモの本文をログに出している。 / 成立条件: メモを作成する。ログレベルが INFO 以下なら必ず出る。 / 影響: 本文はログに出してはならない（R9）。機密情報がログに漏れる。 / 確認した保証: ログのマスク処理は存在しない。 / 根拠: `notes/service.py` の `log.info(\"note created id=%s owner=%s body=%r\", note_id, user[\"id\"], body)`。設計書も「ログには ID だけを出す」としている。 / 提案: body を出力から外し、ID だけにする。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` は、末尾の改行を許す（`$` は末尾の `\\n` の前にも一致する）。そのため `\"abc\\n\"` が有効なタグとして通る。 / 成立条件: `create_note`・`update_note`・`search_notes` に、末尾が `\\n` のタグを渡す。 / 影響: 仕様はタグを英小文字・数字・ハイフンの1〜20文字と定めている。改行入りのタグが保存される。 / 確認した保証: 上流に追加の検証はない。 / 根拠: `create_note(c, u, 't', 'b'*10, ['abc\\n'])` を実行したところ、拒否されずに作成された（戻り値 1）。`share.py` は同じ理由で `fullmatch` を使っているが、`service.py` は使っていない。 / 提案: `TAG_RE.fullmatch` を使う。または正規表現を `\\Z` で終える。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心の12件だけで、受け入れ条件の核心を確かめていない。確かめていないのは次の点。 / 根拠: `tests/test_notes.py` を読んだ。確かめていない点は次のとおり。\n  - R1: 境界値、タグの規則、失敗時のロールバック。`hooks.before_write` は一度も使われていない。\n  - R2: 他の組織・他人の非公開メモが NotFound になること、閲覧数の同時加算。\n  - R3: SQL インジェクション、`%` と `_` のエスケープ、範囲外の入力、タグの OR 絞り込み。\n  - R4: Conflict、Forbidden、管理者による更新、非公開メモの扱い。\n  - R5: 他の組織への移管の拒否、途中で失敗したときの巻き戻し。\n  - R6: api_key の伏せ字。`test_export_audit` は action と actor しか確かめていない。\n  - R7: 枠の境界（ちょうど window 秒）と同時の呼び出し。\n  - R8: 期限の境界、形の崩れたリンク。\n  - R9: ログに機密情報が出ないこと（このテストがあれば重大1を検出できた）。\n  - R10: 例外の後に接続を使い続けられること。\n  \n  gate が通っても、これらの要求は検証されていない。 / 提案: 上の項目ごとにテストを追加する。並行実行や障害は `hooks.before_write` と `RateLimiter.hook` で決定論的に再現する。`assertLogs` でログを確かめる。タグの規則を弱めると失敗するテストも入れる。\n- [重大4] 区分: テスト / 対象: 検証条件のバインド（V1〜V10、VK1〜VK8）/ 対応区分: 証拠不足 / 内容: すべての検証が同じ「unit」チェックに結び付けられているだけで、個々の AC・K に対応するテストがない。 / 根拠: `history` の #79〜#93 は、すべて `checks: [\"unit\"]` を付けているだけ。 / 重大3 と同じ根本原因で、要求ごとのテストを追加し、その識別子に結び付ければ解消する。 / 提案: 要求ごとのテストを追加したうえで、V・VK をそれらに結び付け直す。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の `_validate` は、`_can_modify` の後で呼ばれる。不正な入力でも権限のない呼び出し側は Forbidden になる。仕様に反しない。 / 提案: 変更は不要。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常系しかない。境界値、タグの規則、ロールバックは未検証で不十分。実装には改行入りタグの欠陥がある。\n- AC2: 正常に閲覧できる確認しかない。NotFound の各ケースと閲覧数の同時加算は未検証で不十分。コードの確認では、`_visible` と `UPDATE views = views + 1` の構造は妥当。\n- AC3: 一覧の先頭ページと単純な検索だけで不十分。インジェクションの試行、`%` と `_`、範囲外の入力、タグの絞り込みは未検証。コードの確認では、プレースホルダーと ESCAPE は適切。\n- AC4: 所有者による更新と削除だけ。Conflict、Forbidden、競合、管理者の扱いは未検証で不十分。\n- AC5: 成功と非管理者の拒否だけ。組織をまたぐ移管と巻き戻しは未検証で不十分。\n- AC6: api_key の伏せ字を確かめていないため不十分。コードの確認では、伏せ方は仕様どおり。\n- AC7: 枠の更新と超過は確かめているが、ちょうど window 秒の境界と同時の呼び出しがなく不十分。コードの確認では、`>=` とロックは妥当。\n- AC8: 往復と改ざんの検証だけ。期限の境界と形の崩れたリンクは未検証で不十分。コードの確認では、`>=` と `fullmatch` は妥当。\n- AC9: 検証がなく、実装にも欠陥がある（重大1）。\n- AC10: 検証がない。コードの確認では、`transaction()` は ROLLBACK して例外を再送出する。\n- エンジンが検出したテストの兆候: なし。skip・`.only` はない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest の結合テスト（SQLite とスレッド）で足りる。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K6、K7、K8: 上の「受け入れ条件ごとの検証の妥当性」のとおり、これらを確かめるテストがない。\n- K5: ログに本文が出ている欠陥があり、検証もない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件が成功。\n- `create_note` に `'abc\\n'` のタグを渡して実行した。拒否されずに作成された（戻り値 1）。\n- `history --since 0`: 検証条件が弱められた形跡はなかった（チェックが「unit」に結び付けられているだけ）。\n- ソース（db.py・errors.py・ratelimit.py・share.py・service.py）を読んだ。\n- 認可（`_visible`・`_can_modify`）、楽観的ロック、トランザクション、プレースホルダー、LIKE のエスケープ、HMAC の比較、移管の組織の確認は設計どおりで、問題は見つからなかった。\n- gate と依存関係のインストールは実行していない。",
+ "files_changed": [],
+ "valid": true
+}

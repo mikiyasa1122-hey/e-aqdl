@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 1,
+ "sec": 31.2,
+ "exit": 0,
+ "cost_usd": 0.1455065,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23739,
+  "cache_read_input_tokens": 124045,
+  "output_tokens": 3813,
+  "output_tokens_details": {
+   "thinking_tokens": 463
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23739,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2629,
+    "cache_read_input_tokens": 41591,
+    "cache_creation_input_tokens": 2281,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2281
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 形の崩れたリンクを Forbidden にせず、`None` を返している。 / 成立条件: `verify_link` に `\"abc\"`、`\"\"`、`\"1.2.xyz\"`、署名が63文字のリンクなどを渡す。 / 影響: 呼び出し側が戻り値を note_id として扱うと、不正なリンクが通る恐れがある。仕様の「形の崩れたリンクは Forbidden」に違反する。 / 根拠: notes/share.py の `LINK_RE.fullmatch` が失敗すると `raise ValueError` し、直後の `except ValueError: return None` で握りつぶされる。実行結果は上記4例すべて `None`。 / 提案: `return None` を `raise Forbidden(\"不正なリンク\")` に変える。\n- [重大2] 区分: テスト / 対象: R2〜R10, AC2〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件を確かめるテストがほとんどない。tests/test_notes.py は正常系中心の12件だけである。 / 成立条件: 次の項目に対応するテストが存在しない。\n  - 閲覧権限: 他組織・他人の非公開メモ・存在しないメモが NotFound になること(AC2・K1)\n  - 閲覧数の同時加算(AC2・K3)\n  - 一覧の範囲外入力(AC3)\n  - 検索の `%`・`_` とタグ OR(AC3)\n  - SQL インジェクション(K2)\n  - 更新の Conflict と競合、削除と Forbidden の拒否(AC4)\n  - R1 の異常系(題名100文字超、タグ6個、本文10001文字、tags に文字列を渡す、途中失敗でのロールバック)\n  - 移管の組織外拒否と失敗時の巻き戻し(AC5・K6)\n  - api_key のマスク、8文字未満の鍵(AC6・K7)\n  - RateLimiter の枠の境界ちょうどと、複数スレッドからの同時呼び出し(AC7)\n  - 共有リンクの期限ちょうど、形の崩れ、署名の改ざん(AC8)\n  - ログに機密情報が出ないこと(AC9)\n  - 例外後の接続の再利用(AC10)\n\n  さらにテストは `hooks.before_write` と `RateLimiter.hook` の差し込み口を使っていない。 / 影響: 重大1のような欠陥を gate が検出できなかった。ここで gate が通っても欠陥がないことの証明にならない。 / 根拠: tests/test_notes.py 全体。`test_transfer` は件数しか見ておらず、`test_export_audit` は api_key を確認していない。`test_tampered` は期限切れ・形崩れを扱っていない。 / 提案: 上の各項目について、少なくとも各受け入れ条件に1つの異常系または境界値のテストを追加する。並行とロールバックのテストは、差し込み口を使って sleep なしで再現する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` で、可視性と権限の判定がトランザクションの外で行われている。 / 成立条件: 判定の後、書き込みの前に `transfer_notes` が `owner_id` を変更した。または、他のスレッドがメモを削除した。 / 影響: 所有者でなくなった利用者が、そのまま更新できる。`update_note` は version で Conflict になる場合があるが、`delete_note` には version の条件がなく、移管された後でも元の所有者が削除できる。 / 根拠: notes/service.py の `delete_note` で `_row` → `_visible` / `_can_modify` を `transaction` の前に実行している。DELETE 文に owner_id・org_id・private の条件はない。`update_note` も同様に、権限判定が BEGIN IMMEDIATE の前にある。 / 提案: `transaction` 内で `_row` を再読込して `_visible` / `_can_modify` を再判定する。または、DELETE / UPDATE の WHERE に `owner_id` などの条件を加えて rowcount を検査する。\n\n- [軽微1] 区分: 実装 / 対象: R1, R3 / 対応区分: 改善提案 / 内容: タグの検査ロジックが `_validate` と `search_notes` に重複している。 / 提案: 共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成の正常系と空題名の拒否だけを確かめており、不十分。長さ・タグ・tags の型の境界と、失敗時に何も残らないこと(`before_write(\"create:tags\")`)の確認がない。\n- AC2: 不十分。可視性の NotFound と閲覧数の加算(同時加算を含む)のテストがない。\n- AC3: 不十分。範囲外入力、`%` と `_` の扱い、タグ OR、インジェクションを確かめるテストがない。`test_search` は基本の部分一致だけ。\n- AC4: 不十分。Conflict、Forbidden、競合、削除の失敗時の伝播を確かめるテストがない。\n- AC5: 不十分。組織外・非管理者の拒否は一部あるが、部分的に失敗したときの元の状態の確認がない。\n- AC6: 不十分。`test_export_audit` は api_key のマスクを検証していない。\n- AC7: 不十分。枠の境界(ちょうど window 秒)と複数スレッドの同時呼び出しのテストがない。\n- AC8: 不十分。往復と改ざんだけで、期限ちょうど・期限切れ・形崩れのテストがなく、実際に重大1の欠陥を見逃している。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- テストの兆候: skip・`.only`・アサーションなしのテストファイルは検出されなかった。\n\n### E2E の要否\n- 不要(HTTP や UI を持たないライブラリであり、単体テストで確かめられる)。ただし、並行処理の単体テストは必要。\n\n### 不足しているリスク\n- K1: 権限判定がトランザクション外にある(重大3)。\n- K3: 閲覧数・更新・RateLimiter の同時実行は、実装は妥当に見えるが、決定論的なテストによる裏付けがない(重大2)。\n- K5・K7: ログ出力と api_key のマスクを確かめるテストがない(重大2)。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py の全ソースを通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が OK だった。\n- `share.verify_link` に不正な形式4例を渡し、すべて `None` が返ることを確認した。\n- `aqdlc trace` で要求・受け入れ条件・検証の対応を確認した。`history` は出力の途中で止まり、全件は読めていない。そのため、検証条件の改ざんの有無は確認していない。\n- `git status` で成果物が未コミットの新規ファイルであることを確認した。比較できる以前のテストがないため、テスト弱体化の有無は判断できない。",
+ "files_changed": [],
+ "valid": true
+}

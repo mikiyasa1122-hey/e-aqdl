@@ -1,0 +1,38 @@
+{
+ "case": "TX-02",
+ "rep": 1,
+ "judge_cost_usd": 0.06792770000000001,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `transfer_notes` がメモごとに別トランザクションで UPDATE していて、監査ログも別になっている点を指摘しています。箇所は埋め込み欠陥と同じ notes/service.py の `transfer_notes` です。原因（トランザクション分割）も影響（一部だけ移る）も一致し、実行での再現も示されているので matches_defect です。\n- **重大2**: `TAG_RE` を `match` で使っているため、末尾の改行が通ります。`$` は末尾の改行にマッチするので実在する欠陥で、埋め込み欠陥とは別物です。real_other です。\n- **重大3**: 可視性と権限の判定がトランザクションの外にあり、判定後に所有者が変わると古い判定のまま書き込めます。update は version の条件で一部防げますが、transfer は version を上げるので、update 側は Conflict になる可能性が高いです。delete は条件なしなので、実在する競合の欠陥です。real_other です。\n- **重大4**: テストの不足と弱さだけを指摘しています。test_gap です。\n- **重大5**: 報告自身が誤検知と認めています。false_positive です。\n\n埋め込み欠陥は重大1で正しく検出されています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transfer_notes のメモごとの別トランザクションという原因と、一部だけ移る影響が埋め込み欠陥と一致し、実行でも再現している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match で使っているため末尾の改行が通る実在の欠陥で、埋め込み欠陥とは別物。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"権限・可視性の判定がトランザクションの外にあり、特に delete は条件なしで書くため、判定後の所有者変更に対して脆弱。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"テストの不足と assertion の弱さだけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大5\", \"class\": \"false_positive\", \"reason\": \"報告自身が取り下げ相当の誤検知と認めており、実在する欠陥はない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が transfer_notes の途中失敗で一部だけ移る欠陥を、原因・影響・箇所とも正しく指摘し、実行で再現している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transfer_notes のメモごとの別トランザクションという原因と、一部だけ移る影響が埋め込み欠陥と一致し、実行でも再現している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match で使っているため末尾の改行が通る実在の欠陥で、埋め込み欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "権限・可視性の判定がトランザクションの外にあり、特に delete は条件なしで書くため、判定後の所有者変更に対して脆弱。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "テストの不足と assertion の弱さだけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大5",
+    "class": "false_positive",
+    "reason": "報告自身が取り下げ相当の誤検知と認めており、実在する欠陥はない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が transfer_notes の途中失敗で一部だけ移る欠陥を、原因・影響・箇所とも正しく指摘し、実行で再現している。"
+ }
+}

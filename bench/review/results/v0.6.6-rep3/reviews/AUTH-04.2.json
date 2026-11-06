@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 2,
+ "sec": 36.6,
+ "exit": 0,
+ "cost_usd": 0.13864710000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20401,
+  "cache_read_input_tokens": 110871,
+  "output_tokens": 4594,
+  "output_tokens_details": {
+   "thinking_tokens": 763
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20401,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3005,
+    "cache_read_input_tokens": 36970,
+    "cache_creation_input_tokens": 2537,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2537
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6, K1 / 内容: `transfer_notes` が移す先（to_user）の組織を検査していない。管理者が他の組織の利用者へメモを渡せる。仕様では、移す元・移す先・管理者がすべて同じ組織のときだけ許可し、それ以外は Forbidden。 / 根拠: notes/service.py:198 は `from_user[\"org_id\"]` しか見ていない。再現した。組織1の管理者が、組織1の利用者のメモを組織2の利用者へ移す操作が成功した（戻り値 1）。 / 提案: `to_user[\"org_id\"] != admin[\"org_id\"]` も Forbidden にする。from/to を DB 上の users の実際の org と照合するのも検討する。\n- [重大2] 区分: 実装 / 対象: R1, AC1, R3, R4 / 内容: タグの正規表現 `^[a-z0-9-]{1,20}$` を `match` で使っているため、末尾の改行付き（\"abc\\n\"）が通る。「英小文字・数字・ハイフンの1〜20文字」に違反し、不正なタグが保存される。 / 根拠: notes/service.py:14, 64, 150。`create_note(..., [\"abc\\n\"])` が成功した。 / 提案: `fullmatch` を使うか `\\Z` で終わらせる。作成・更新・検索の3か所とも直す。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC7, K3 / 内容: 並行実行のテストがない。閲覧数の数え漏れ、更新の Conflict（読み出しから書き込みの間の割り込み）、RateLimiter の複数スレッド同時呼び出しのどれも確かめていない。設計書は `hooks.before_write` や `RateLimiter.hook` の差し込み口を用意しているが、テストから一度も使っていない。 / 根拠: tests/test_notes.py に threading や hook の利用がない。RateLimitTest は単一スレッドで枠の開始から60秒後を確認するだけ。 / 提案: 別接続・別スレッドで get_note を N 回呼び、views が N になることを確かめる。`hooks.before_write(\"update\")` の中で別の更新を入れ、Conflict になることを確かめる。`RateLimiter.hook` で割り込ませて上限を超えないことを確かめる。\n- [重大4] 区分: テスト / 対象: AC1, AC10, K4, R10 / 内容: 失敗時のロールバックと、例外の後に接続を使い続けられることを確かめていない。`create:tags`、`delete:note`、`transfer:*` に途中の失敗を差し込むテストがなく、何も残らないこと・元のままであること・接続を再利用できることが未検証。 / 根拠: tests/test_notes.py に hooks で例外を投げるテストがない。 / 提案: hook で例外を投げ、notes・note_tags・audit が変化していないこと、その後の通常操作が成功することを確かめる。\n- [重大5] 区分: テスト / 対象: AC2, AC4, AC5, K1, K6 / 内容: 認可・漏えいの異常系がない。他組織や他人の非公開メモが NotFound になること、一般利用者の更新・削除が Forbidden になること、管理者が非公開メモを扱えず NotFound になること、組織をまたぐ移管の拒否を確かめていない。重大1の欠陥もこのため見逃された。 / 根拠: テストは同じ組織の正常系だけ（tests/test_notes.py:18-60）。 / 提案: 各認可条件を外すと失敗するテストを追加する。\n- [重大6] 区分: テスト / 対象: AC3, AC6, AC8, AC9, K2, K5, K7, K8 / 内容: 境界値・入力検証・機密情報の検証が不足している。具体的には、次のものがない。 (a) 題名・本文・タグ数・タグ形式の境界（100/101 文字、5/6 個、空白のみ、文字列そのものを tags に渡す場合）。 (b) per_page・page・sort の範囲外、% や _ を含む検索、SQL 注入文字列。 (c) api_key の伏せ字（8文字未満・ちょうど8文字）。 (d) 共有リンクの期限ちょうど、形の崩れ、署名の改ざん。 (e) 例外やログに本文・署名・api_key が出ないこと。 / 根拠: tests/test_notes.py 全体。テストは12件のみで、正常系中心。tampered のテストは note_id を書き換えるだけ。 / 提案: 各境界と異常系を追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: 更新・削除で、認可の判定をトランザクションの外で行っている（update_note は notes/service.py:158-162）。version の条件が更新の競合は防ぐが、権限の判定は読み出し時点のもの。また、更新の際、非公開に切り替わった後の再検査がない。 / 提案: 認可の判定を BEGIN IMMEDIATE の中に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空の題名の拒否だけで不十分。境界値、タグ規則、ロールバックがない。実装にもタグの改行バグがある（重大2・4・6）。\n- AC2: V2 は自分のメモの閲覧だけで不十分。他組織・他人の非公開が NotFound になる検証と、同時閲覧の数え漏れの検証がない（重大3・5）。\n- AC3: V3 は 1 ページ目と単純な検索だけで不十分。範囲外、% と _、タグの OR、SQL 注入の検証がない（重大6）。\n- AC4: V4 は作成者の更新・削除だけで不十分。Conflict、Forbidden、NotFound、削除の失敗時の伝播がない（重大3・4・5）。\n- AC5: V5 は件数の確認と管理者以外の拒否だけで不十分。他組織への移管の拒否がなく、実装も未達（重大1・4・5）。\n- AC6: V6 は伏せ字を確かめていない（action と actor しか見ていない）。不十分（重大6）。\n- AC7: V7 は単一スレッドで、枠の境界（ちょうど window 秒）も同時の呼び出しも確かめていない。不十分（重大3）。実装自体はロックと `>=` で妥当に見える。\n- AC8: V8 は往復と note_id の改ざん1件のみ。期限ちょうど、期限切れ、形の崩れがない。不十分（重大6）。\n- AC9: 検証なし。不十分（重大6）。\n- AC10: 検証なし。不十分（重大4）。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしのファイルは検出されなかった）。ただし、検証の空洞化は上記のとおり。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テストで足りる。ただし並行実行と失敗の差し込みを単体テストで追加する必要がある（重大3・4）。\n\n### 不足しているリスク\n- K1/K6: 組織をまたぐ移管（実装の欠陥あり。重大1）\n- K3: 同時の閲覧・更新・呼び出しの検証がない\n- K4: 途中の失敗による不整合の検証がない\n- K2: SQL 注入の検証がない（実装はプレースホルダーと ESCAPE で妥当に見える）\n- K5/K7/K8: 機密情報、api_key の伏せ字、共有リンクの境界の検証が不足している\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` → 12 件すべて合格。ただし上記のとおり、検証が薄い。\n- 一時スクリプトで、他組織の利用者への移管が成功すること、末尾が改行のタグが受理されることを再現した（メモリ上の DB のみで、リポジトリは変更していない）。\n- `trace` で全要求が「合格・反証未実施」になっていることを確認した。",
+ "files_changed": [],
+ "valid": true
+}
