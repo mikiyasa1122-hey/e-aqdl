@@ -12,6 +12,12 @@ jobs:
         exclude:
           - os: macos-latest
             python: "3.8"
+          # ubuntu-latest（Ubuntu 26.04）では setup-python が Python 3.8 を用意できないため、3.8 は 24.04 で確かめる
+          - os: ubuntu-latest
+            python: "3.8"
+        include:
+          - os: ubuntu-24.04
+            python: "3.8"
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
