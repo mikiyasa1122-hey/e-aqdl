@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 1,
+ "sec": 35.1,
+ "exit": 0,
+ "cost_usd": 0.1360175,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20744,
+  "cache_read_input_tokens": 110155,
+  "output_tokens": 4201,
+  "output_tokens_details": {
+   "thinking_tokens": 673
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20744,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2655,
+    "cache_read_input_tokens": 36274,
+    "cache_creation_input_tokens": 3576,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3576
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 内容: `transfer_notes` がメモ1件ごとに別々のトランザクションで UPDATE している。途中で失敗すると一部だけ移った状態が残る。仕様の「全部移すか、何も移さないか」に違反する。 / 根拠: notes/service.py の `for i in ids: ... with transaction(conn):`。`hooks.before_write(\"transfer:<id>\")` で2件目に例外を出すと、1件目は移管済みのまま残る。 / 提案: メモの取得、全件の UPDATE、監査ログの記録を1つの `transaction()` にまとめる。ids の取得もトランザクション内で行う。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 内容: タグの検証が `TAG_RE.match` と `$` の組み合わせで、末尾の改行を通す。`\"ab\\n\"` のようなタグを保存できる。仕様のタグは「英小文字・数字・ハイフンの1〜20文字」。 / 根拠: notes/service.py の `TAG_RE`、`_validate`、`search_notes`。実際に `create_note(..., ['ab\\n'])` が成功し、保存されたタグは `'ab\\n'` だった。share.py は fullmatch を使っており対応が不統一。 / 提案: `fullmatch`（または `\\Z`）を使う。作成・更新・検索で境界値のテストを加える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 内容: テストが12件で、ほぼ正常系だけである。受け入れ条件ごとの異常系・境界値・並行実行・失敗時の巻き戻しを確かめていない。設計で用意した `hooks.before_write` と `RateLimiter.hook` が使われておらず、重大1も検出できていない。trace はすべて「合格」でも、実態は未検証（passed_but_unchallenged）である。 / 根拠: tests/test_notes.py。未検証の項目は次のとおり。\n  - 他の組織・他人の非公開メモの NotFound（K1）\n  - 閲覧数の並行加算\n  - 楽観的ロックの Conflict\n  - Forbidden（更新・削除）\n  - 検索の `%` / `_` / インジェクション / タグ OR（K2）\n  - 入力の境界（題名100文字、タグ5個、本文10000文字）\n  - 作成・削除・移管の途中失敗\n  - api_key の伏せ字（AC6 と K7 は伏せ字の中身を一切確認していない）\n  - レートリミットの枠の境界と並行実行\n  - 共有リンクの期限ちょうど・形の崩れ\n  - ログに機密情報が出ないこと（AC9）\n  - 例外後の接続の再利用（AC10）\n\n  / 提案: 上記を AC・リスクごとに追加する。並行実行や失敗はフックで決定論的に再現する。\n- [重大4] 区分: テスト / 対象: AC6, AC9, AC10 / 内容: これらの受け入れ条件には対応するテストが1件もない。V6、V9、V10、VK5、VK7 は trace 上で合格になっているが、実際には何も確かめていない（空洞化）。 / 根拠: tests/test_notes.py に export_audit のマスク確認、ログ出力の確認、例外後の再利用の確認がない。 / 提案: 重大3と合わせて実テストを書き、検証を実態に合わせる。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` は権限確認のための読み出しをトランザクションの外で行う。結果は version の条件で守られているので実害は小さい。ただし version の型は検証しておらず、str などを渡すと Conflict になる。 / 提案: version が整数であることを検証する。\n- [軽微2] 区分: 実装 / 対象: R7 / 内容: `RateLimiter._counts` が利用者ごとに増え続け、期限切れの枠が掃除されない。 / 提案: 期限切れの枠を削除する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系1件と空題名1件だけ。タグの規則、各上限、重複タグ、tags に文字列を渡す場合、ロールバックの確認がない。重大2の不具合を見逃しており、不十分。\n- AC2: 閲覧数が1増えることも、他の組織・非公開メモが NotFound になることも、並行加算も確かめていない。不十分。\n- AC3: 一覧の1ページ目と単純な検索だけ。範囲外の入力、sort、`%` / `_`、インジェクション、タグ OR、他人の非公開メモの除外がない。不十分。\n- AC4: 作成者による更新と削除の正常系のみ。Conflict、Forbidden、管理者の扱い、非公開メモ、検証、削除の失敗伝播がない。不十分。\n- AC5: 正常系と非管理者の拒否のみ。組織またぐ場合、途中の失敗、原子性がない。重大1を見逃しており、不十分。\n- AC6: マスクの検証がない。不十分。\n- AC7: 上限超過と枠のリセットのみ。「ちょうど window 秒」の境界とスレッド並行がない。不十分。\n- AC8: 正常系と改ざん1件のみ。期限ちょうど、期限切れ、形の崩れがない。不十分。\n- AC9: テストなし。\n- AC10: テストなし。\n- テストの兆候: エンジンが検出した兆候（skip・.only・アサーションなし）はない。`git diff` と `history` では、検証条件を弱めた形跡はなかった（bind が新規に追加されているだけ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite のユニット／統合テストで足りる。ただし、複数スレッド＋別接続による並行テストと、ファイル DB を使った統合テストは必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: SQL インジェクションと LIKE のエスケープを確かめる検証がない。\n- K3: 閲覧数、更新、レートリミットの並行実行を確かめる検証がない。\n- K4: 作成・削除・移管の途中失敗を確かめる検証がない。移管は実装にも欠陥がある。\n- K5 / K7: 機密情報の露出と api_key のマスクを確かめる検証がない。\n- K6: 組織またぎの移管と部分移管を確かめる検証がない。\n- K8: 期限切れ・改ざん・形の崩れたリンクの検証が最小限しかない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py をすべて読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が OK だった。\n- `create_note(..., ['ab\\n'])` を実行し、末尾が改行のタグが保存されることを再現した（重大2）。\n- `aqdlc trace` と `history --since 0` を確認した。trace は全項目が「合格・反証未実施」だった。history に検証条件の弱体化はなかった。\n- `gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

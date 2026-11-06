@@ -1,0 +1,48 @@
+{
+ "case": "CLEAN-04",
+ "rep": 1,
+ "judge_cost_usd": 0.0697557,
+ "judge_raw": "欠陥なしのケース（IN 句のプレースホルダー生成の変更のみ）なので、`matches_defect` は使いません。各指摘を次のように分類しました。\n\n- **重大1**: コードの欠陥ではなく、テスト不足の指摘です。\n- **重大2**: `$` が末尾の改行に一致するため、`\"abc\\n\"` のタグが検証を通ります。仕様の「英小文字・数字・ハイフン」に反する実在のバグで、実行でも確認されています。\n- **重大3**: RateLimiter の同時実行テストと境界テストがないという、テスト不足の指摘です。\n- **軽微1**: 検証と権限確認がトランザクションの外にあります。確認後に移管や削除が入る競合は実在します。ただし、更新は version で守られます。削除は DELETE が0件でも \"delete\" が監査ログに残るという実害があります。\n- **軽微2**: `page=10**30` で OverflowError になります。仕様は範囲外を ValidationError とするので、仕様違反の実在する欠陥です。\n- **軽微3**: 自動ロールバック済みのときに ROLLBACK が失敗する可能性の指摘です。理論上の話で、実行による確認がありません。ただ、欠陥の主張であり、実在する可能性はあります。どちらとも判断できないため `ambiguous` としました。\n- **軽微4**: 先頭ゼロの note_id でも同じ署名が通るという指摘です。仕様は「数字だけ」の形を要求しており、ゼロ埋めは禁止していません。指摘も実害は小さいと認めているため、欠陥の主張とは言えず `style` としました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"テストが薄いというテスト不足のみの指摘。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"正規表現の $ が末尾の改行に一致し、タグ検証を通るバグで、実行でも確認されている。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の同時実行・境界のテスト不足だけの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"検証がトランザクション外にあり、削除済みでも delete が監査ログに残る競合は実在する。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"巨大な page で ValidationError ではなく OverflowError になり、仕様に反する。\"},\n{\"label\": \"軽微3\", \"class\": \"ambiguous\", \"reason\": \"自動ロールバック後の ROLLBACK 失敗は理論上の指摘で、実在するか確認できない。\"},\n{\"label\": \"軽微4\", \"class\": \"style\", \"reason\": \"仕様違反ではなく、実害も小さいと自認する正規形の提案。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、IN 句の変更自体への指摘はなく、実在する別の問題が3件挙がった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "テストが薄いというテスト不足のみの指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "正規表現の $ が末尾の改行に一致し、タグ検証を通るバグで、実行でも確認されている。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "RateLimiter の同時実行・境界のテスト不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "検証がトランザクション外にあり、削除済みでも delete が監査ログに残る競合は実在する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "巨大な page で ValidationError ではなく OverflowError になり、仕様に反する。"
+   },
+   {
+    "label": "軽微3",
+    "class": "ambiguous",
+    "reason": "自動ロールバック後の ROLLBACK 失敗は理論上の指摘で、実在するか確認できない。"
+   },
+   {
+    "label": "軽微4",
+    "class": "style",
+    "reason": "仕様違反ではなく、実害も小さいと自認する正規形の提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、IN 句の変更自体への指摘はなく、実在する別の問題が3件挙がった。"
+ }
+}

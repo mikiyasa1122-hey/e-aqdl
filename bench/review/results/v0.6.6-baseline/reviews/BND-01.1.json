@@ -1,0 +1,49 @@
+{
+ "case": "BND-01",
+ "rep": 1,
+ "sec": 39.8,
+ "exit": 0,
+ "cost_usd": 0.147117,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22718,
+  "cache_read_input_tokens": 115990,
+  "output_tokens": 4463,
+  "output_tokens_details": {
+   "thinking_tokens": 1103
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22718,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2771,
+    "cache_read_input_tokens": 39123,
+    "cache_creation_input_tokens": 2701,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2701
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 71ec4f30\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3 / 内容: `list_notes` が per_page=51 を受け付ける。仕様は 1〜50 で、範囲外は ValidationError にすること。 / 根拠: notes/service.py の `list_notes` にある `not 1 <= per_page <= PER_PAGE_MAX + 1`。再現: `list_notes(conn, user, per_page=51)` が例外を出さず `per_page: 51` を返した。エラーメッセージは「1〜50」と書いてあり、コードと食い違っている。 / 提案: `PER_PAGE_MAX + 1` を `PER_PAGE_MAX` に直す。51 を拒否し、50 と 1 を受け付ける境界テストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8, V1〜V10, VK1〜VK8 / 内容: tests/test_notes.py は 12 件だけで、正常系の確認が中心。受け入れ条件の大半と重要なリスクが検証されていない。このため重大1の境界バグも見逃された。gate が合格でも欠陥を検出できる根拠にならない。足りない検証は次のとおり。\n  - R1/AC1: 題名の境界（100 と 101 文字、空白だけ）、本文 10000 文字、タグ 5 個と 6 個（重複も数える）、不正なタグ、tags に文字列を渡す場合。途中で失敗したときに何も残らないこと（`hooks.before_write(\"create:tags\")`）。\n  - R2/AC2/K1: 他の組織、他人の非公開メモ、存在しないメモがすべて NotFound になること。管理者にも非公開メモは見えないこと。閲覧数が増えること。別スレッド・別接続で同時に閲覧しても数え漏れがないこと。\n  - R3/AC3/K2: sort と page の範囲外、検索語の境界、`%` と `_` のリテラル検索、タグの OR 絞り込み、SQL インジェクション文字列、他人の非公開メモが一覧・検索に出ないこと。\n  - R4/AC4/K3: 古い version での Conflict、読み出しから書き込みの間に他の更新が入った場合の Conflict、Forbidden、管理者による更新・削除、更新時の検証、削除の失敗が伝わること。\n  - R5/AC5/K6: 組織をまたぐ移管の Forbidden、途中で失敗したときに元のままであること。\n  - R6/AC6/K7: api_key を伏せる処理（8 文字未満、8 文字、それ以上）。現状は action と actor しか見ていない。\n  - R7/AC7: 枠の境界（ちょうど window 秒）と、複数スレッドの同時呼び出し（`RateLimiter.hook` を使う）。\n  - R8/AC8/K8: 期限ちょうどの境界、形の崩れたリンク（改行、非 16 進、長さ違い）、署名の改ざん。\n  - R9/AC9/K5: ログや例外に本文・署名・api_key が出ないこと。\n  - R10/AC10: 例外のあとも同じ接続が使えること。\n\n  / 根拠: tests/test_notes.py 全体（90 行）。`hooks.before_write` と `RateLimiter.hook` の差し込み口は、テストから一度も使われていない。 / 提案: 上記を決定論的に検証するテストを足す。並行実行は別スレッド・別接続と差し込み口で再現し、sleep に頼らない。足したあと、検証条件を外すと失敗することを確認する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` と `delete_note` は、可視・権限の確認をトランザクションの外で行う。更新は version 条件があるので Conflict で守られる。削除は version を持たず、確認から削除までの間に所有者が変わると、確認時点の権限で削除してしまう。 / 提案: トランザクション内で行を読み直して権限を確認する。\n- [軽微2] 区分: テスト / 対象: R8 / 内容: 改ざんテストの `link.replace(\"7.\", \"8.\", 1)` は note_id の差し替えしか確かめない。署名や期限の改ざんは確かめていない。 / 提案: 期限と署名を書き換えたケースを足す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の拒否だけで不十分。境界、タグの規則、失敗時に何も残らないことが未検証。\n- AC2: V2 は閲覧の正常系と削除後の NotFound だけで不十分。可視性の分岐、閲覧数の増加、同時閲覧が未検証。\n- AC3: V3 は不十分で、重大1の境界バグを見逃した。範囲外の拒否、LIKE エスケープ、タグ絞り込み、非公開メモの除外が未検証。\n- AC4: V4 は所有者による更新と削除の正常系だけで不十分。Conflict、Forbidden、管理者の扱いが未検証。\n- AC5: V5 は件数だけを確認しており不十分。移管後の所有者、他の組織の拒否、途中失敗のロールバックが未検証。\n- AC6: V6 は伏せ字を確認していないので不十分。\n- AC7: V7 は枠の再開（61 秒）だけで不十分。ちょうど window 秒の境界と同時呼び出しが未検証。\n- AC8: V8 は往復と、note_id の差し替えの 1 件だけで不十分。期限の境界と形の崩れが未検証。\n- AC9: V9 に該当するテストがなく、未検証。\n- AC10: V10 に該当するテストがなく、未検証。\n- K1〜K8: VK1〜VK8 に対応するテストはほぼない。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなかった。\n\n### E2E の要否\n- 不要。ライブラリで、HTTP や UI がないため。ただし並行実行・ロールバック・認可の分岐は、単体テストで決定論的に検証する必要がある。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8 は、いずれも失敗系・境界・並行実行のテストがなく、検証されていない。\n- 重大2に書いた項目はすべて未検証のリスク。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py と tests/test_notes.py を全行読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12 件が OK だった。\n- per_page=51 の再現スクリプトを実行し、拒否されず受理されることを確認した。\n- `trace` と `history` を確認した。検証条件の弱体化は見つからなかった。ただし、検証内容（V1〜V10）は「単体テストで確かめる」という一行だけで、具体性がない。\n- ratelimit.py と share.py のコードを読み、実装は仕様どおりと判断した。境界は `>=`、ロックは Lock、正規表現は fullmatch、署名比較は compare_digest で、問題は見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

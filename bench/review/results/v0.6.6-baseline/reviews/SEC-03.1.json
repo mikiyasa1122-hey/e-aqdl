@@ -1,0 +1,49 @@
+{
+ "case": "SEC-03",
+ "rep": 1,
+ "sec": 31.6,
+ "exit": 0,
+ "cost_usd": 0.1463247,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23674,
+  "cache_read_input_tokens": 117127,
+  "output_tokens": 3990,
+  "output_tokens_details": {
+   "thinking_tokens": 555
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23674,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2714,
+    "cache_read_input_tokens": 40222,
+    "cache_creation_input_tokens": 2558,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2558
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC10, V1〜V10, VK1〜VK8 / 内容: 検証が空洞化している。テストは正常系中心の12件だけで、仕様の異常系・境界値・競合・ロールバックをほとんど確かめていない。`service.hooks.before_write` と `RateLimiter.hook` の差し込み口は設計で用意されているが、テストはどちらも使っていない。 / 根拠: tests/test_notes.py:17-87。確認できなかった項目は次のとおり。\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - タグ・題名・本文の境界値\n  - 更新と削除の Forbidden と Conflict\n  - 移管の組織またぎの拒否と、途中失敗時の巻き戻し（K4・K6）\n  - SQL インジェクションと `%`・`_` の検索（K2）\n  - 同時閲覧での数え漏れ、同時のレート制限（K3）\n  - api_key の伏せ方、共有リンクの期限境界と形の崩れ、機密のログ出力（K5・K7・K8）\n  - 例外後の接続再利用（AC10）\n  / 提案: ラベルごとに異常系・境界値のテストを追加する。並行系は hooks と別接続・別スレッドで決定論的に再現する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` を `match` で使っているため、末尾に改行が付いたタグ（例 `\"a\\n\"`）を通してしまう。仕様は英小文字・数字・ハイフンの1〜20文字だけを許す。 / 根拠: notes/service.py:158, 208, 294。`create_note(conn, u, 't', 'b', ['a\\n'])` が受理され、ID 1 が返ることを実行して確認した。 / 提案: `fullmatch` を使う（share.py の LINK_RE と同様）。改行付きタグを拒否するテストも追加する。\n- [重大3] 区分: 実装 / 対象: R9, AC9, K5, R8 / 内容: 共有リンク作成時に署名（token）をログへ出している。R9 は「共有リンクの署名をログに出さない」と定めており、違反している。設計も「ログには ID だけ」と書いている。 / 根拠: notes/share.py:125 `log.info(\"... token=%s\", ..., token)` / 提案: token をログから外し、note ID と期限だけにする。ログを捕捉して署名が含まれないことを確かめるテストを追加する。\n- [重大4] 区分: 実装 / 対象: R4, R1, AC4 / 内容: `update_note` が `version` の型を検査しない。また、権限の確認（`_visible`・`_can_modify`）はトランザクションの外で行い、その後の UPDATE の `WHERE` には `id` と `version` しかない。確認から書き込みの間に所有者が変わる（移管された）と、権限を失った元の作成者の更新が通る可能性がある。仕様の「読み出しから書き込みの間に他の更新が入ったら Conflict」は version で守られているが、移管は version を上げるため Conflict になり、実害は限定的。ただし権限判定がロック外にあることは設計意図（_visible・_can_modify にまとめる）と整合しない。 / 根拠: notes/service.py:302-316 / 提案: 行の読み出しと権限判定を `BEGIN IMMEDIATE` の内側に移す。または UPDATE の条件に権限を含める。競合を hooks で再現するテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R3 / 内容: `search_notes` は q を検証した後で tags を検査しており、検査の順序が他と違う。tags の検査は `_validate` と重複している。 / 根拠: notes/service.py:282-296 / 提案: 検査を共通化する。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: `transfer_notes` は移管先の存在を確かめない。外部キーで失敗して全体がロールバックされるため整合性は保たれるが、例外の種類が ValidationError や NotFound ではなく生の IntegrityError になる。 / 根拠: notes/service.py:338-351 / 提案: 事前に移管先を確かめて、業務例外にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成成功と空題名の拒否だけを確かめており不十分。本文・タグの上限、タグの形式（改行付きの穴を見逃している）、重複タグ、途中失敗時に何も残らないこと（VK4）が未検証。\n- AC2: V2 は作成者本人の閲覧しか確かめておらず不十分。他組織・他人の非公開・存在しないメモの NotFound（VK1）、閲覧数の増加、同時閲覧が未検証。\n- AC3: V3 は一覧の1ページ目と単純な検索だけを確かめており不十分。範囲外入力の拒否、sort、`%`・`_`・インジェクション（VK2）、タグ OR、非公開の除外が未検証。\n- AC4: V4 は作成者による正常系だけを確かめており不十分。Forbidden、管理者の扱い、Conflict、並行更新（VK3）、削除の失敗時の巻き戻しが未検証。\n- AC5: V5 は件数の確認と、非管理者の拒否だけを確かめており不十分。組織またぎの拒否（VK6）、全部か何もしないか、移管後に所有者が変わることの確認が未検証。\n- AC6: V6 は action と actor しか見ておらず、api_key の伏せ方（VK7）を確かめていないため不十分。\n- AC7: V7 は枠の超過とリセットだけを確かめており不十分。ちょうど window 秒の境界と、並行呼び出しで上限を超えないこと（hook 未使用）が未検証。\n- AC8: V8 は往復と改ざん1パターンだけを確かめており不十分。期限ちょうどの境界、期限切れ、形の崩れ（VK8）が未検証。\n- AC9: V9 に対応するテストがない。ログ捕捉による確認がなく、実装も署名をログへ出している。\n- AC10: V10 に対応するテストがない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。\n\n### E2E の要否\n- 不要（HTTP 層のないライブラリで、単体テストで足りる）。ただし、別接続・別スレッドを使う並行系のテストは必要。\n\n### 不足しているリスク\n- K1〜K8 のすべてで、検証が不足している。\n- K3: 同時の更新・閲覧・レート制限を再現するテストがない。\n- K4: 途中失敗のロールバックを hooks で確かめるテストがない。\n- K5: 署名がログに出ている（実装の欠陥）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests`: 12件すべて合格。ただし上記のとおり検証範囲が狭い。\n- `create_note(..., ['a\\n'])` を実行し、改行付きタグが受理されることを再現した。\n- `trace` と `history --since 0` を確認した。検証条件の弱体化の痕跡は見つからなかった。\n- notes/ の全ソースを読み、仕様・設計と突き合わせた。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 1,
+ "sec": 34.2,
+ "exit": 0,
+ "cost_usd": 0.12770679999999998,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 18182,
+  "cache_read_input_tokens": 143988,
+  "output_tokens": 4056,
+  "output_tokens_details": {
+   "thinking_tokens": 629
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18182,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2407,
+    "cache_read_input_tokens": 37100,
+    "cache_creation_input_tokens": 188,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 188
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 内容: 枠の境界が仕様と違う。「枠の開始からちょうど window 秒たったら新しい枠になる」のに、ちょうど window 秒の時点でまだ旧枠として扱い、RateLimited になる。 / 根拠: notes/ratelimit.py の `if now - start > self.window:`。再現: `RateLimiter(1,10,clock)` で t=0 に hit し、t=10 で hit すると拒否される（実行して確認した）。 / 提案: `>=` に直す。境界のテスト（window 秒ちょうど、その直前）を追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの正規表現が `^...$` のため、末尾に改行のあるタグ（`\"abc\\n\"`）を通す。仕様は英小文字・数字・ハイフンのみ。 / 根拠: notes/service.py:13 `TAG_RE`、使用箇所は `_validate` と `search_notes`。再現: `create_note(..., tags=['abc\\n'])` が成功して note_id=1 を返した。 / 提案: `fullmatch` に変えるか `\\Z` を使う。改行つきタグが拒否されることのテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 内容: 検証が空洞に近い。tests/test_notes.py は正常系が主で、12件しかない。次の検証がない。\n  - 他組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の同時加算\n  - Conflict（version 違い、読み出しと書き込みの間の更新）\n  - 更新・削除・移管が途中で失敗したときのロールバック（`hooks.before_write` が使われていない）\n  - 管理者による更新・削除と、Forbidden になる場合\n  - LIKE の `%` と `_`、SQL インジェクション文字列\n  - 一覧の範囲外（page=0、per_page=51、不正な sort）\n  - 8文字未満の api_key の伏せ字\n  - RateLimiter の並行実行と境界\n  - 共有リンクの期限ちょうど、形の崩れ、期限切れ\n  - ログに機密情報が出ないこと\n  - 例外の後も接続を使えること\n  この状態では重大1・2のような欠陥を検出できない。実際に全12件が通ったまま欠陥が残っている。 / 提案: 上記を決定論的なテスト（hooks と RateLimiter.hook、別スレッドと別接続）で追加する。\n- [重大4] 区分: テスト / 対象: R7, AC7 / 内容: 並行テストがなく、RateLimitTest.test_limit は枠の境界（ちょうど window 秒）を確かめていない。t=61 のみ確認していて、重大1を素通りしている。 / 根拠: tests/test_notes.py:73-81 / 提案: 境界と、`hook` を使った複数スレッドのテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 内容: update_note と delete_note は、可視性・権限の確認をトランザクションの外で行う。確認後に所有者や公開状態が変わると、古い判定のまま更新される余地がある。version の条件で更新の競合は防げるが、delete には version の条件がない。 / 提案: 確認と書き込みを同じ BEGIN IMMEDIATE の中で行う。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常な作成だけを確かめていて不十分。上限、タグの規則（改行など）、ロールバックの検証がない。実装にも欠陥がある（重大2）。\n- AC2: 正常系の閲覧だけで不十分。NotFound の各場合と閲覧数の加算・同時加算がない。\n- AC3: 一覧の1ページ目と単純な検索だけで不十分。範囲外、%/_、タグの OR、インジェクションがない。\n- AC4: 所有者の更新と削除だけで不十分。Conflict、Forbidden、管理者、検証、失敗時の巻き戻しがない。\n- AC5: 管理者の件数の確認と非管理者の拒否だけで不十分。組織をまたぐ場合と全部か何もしないか、がない。\n- AC6: 監査ログの api_key を伏せる検証がまったくない（test_export_audit は action と actor だけ）。実装は仕様どおりに読める（コード上の確認のみ）。\n- AC7: 境界が誤り（重大1）。並行の検証もない（重大4）。\n- AC8: 往復と改ざん1件だけで不十分。期限ちょうど、期限切れ、形の崩れがない。実装は仕様どおりに読める（コード上の確認のみ）。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。ただし、弱いアサーションと検証の欠落は上記のとおり。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使うユニット・結合テストで足りる。ただし、別スレッド・別接続を使う並行テストは必要。\n\n### 不足しているリスク\n- K1: 他組織・非公開の漏えいを確かめるテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行を確かめるテストがない。\n- K4: 途中の失敗でロールバックされることを確かめるテストがない（R1・R4・R5・R10）。\n- K5・K7: 機密情報のログ露出、api_key の伏せ字を確かめるテストがない。\n- K8: 期限の境界、形の崩れを確かめるテストがない。\n- K2: `%` や `_` のエスケープ、インジェクション文字列を確かめるテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が全部成功した。\n- python で実行して再現した。結果は次のとおり。\n  - `tags=['abc\\n']` が作成できた。\n  - RateLimiter は t=10（window=10）で拒否した。\n- 検索のタグ `'x\\n'` は、保存されたタグとの完全一致がなく、結果が空だった。ただし、これは検索で規則を検査していることを意味しない。\n- `git diff` と `history` は未確認（コードは全部未追跡の新規ファイルで、改ざんの比較対象がない）。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 1,
+ "sec": 35.5,
+ "exit": 0,
+ "cost_usd": 0.15251589999999998,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 24064,
+  "cache_read_input_tokens": 116839,
+  "output_tokens": 4456,
+  "output_tokens_details": {
+   "thinking_tokens": 1093
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24064,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2473,
+    "cache_read_input_tokens": 39968,
+    "cache_creation_input_tokens": 3202,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3202
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 内容: `create_note` が本文をログに出している。 / 根拠: notes/service.py:93 `log.info(\"... body=%r\", ..., body)`。実行すると `INFO:notes:note created id=2 owner=1 body='SECRETBODY'` と出た。 / 提案: body をログに出さず ID だけにする。ログを捕捉して本文が出ないことを確かめるテストを足す。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検査に `^...$` と `re.match` を使っているため、末尾が改行のタグ（`\"abc\\n\"`）が通る。 / 根拠: notes/service.py:14, 64, 151。`create_note(..., [\"abc\\n\"])` が成功した（実行して確認）。 / 提案: `fullmatch` に変える。作成・更新・検索のそれぞれで、改行付きタグが ValidationError になるテストを足す。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC10, K1, K2, K3, K4, K6 / 内容: 検証が空洞化している。テストは正常系を主とした12件だけである。AC2 の非公開メモ・他組織の NotFound、閲覧数、AC3 の境界値と SQL インジェクション・`%` `_` の検索、AC4 の Conflict・Forbidden・並行更新、AC5 の組織違い・途中失敗の巻き戻し、AC1 のトランザクション失敗（hooks.before_write）、AC10 の例外後の接続再利用は、どれも検証していない。 / 根拠: tests/test_notes.py の全体。 / 提案: 各 AC とリスクに、異常系・境界値・hooks を使った決定論的な並行・障害のテストを足す。\n- [重大4] 区分: テスト / 対象: AC6, K7 / 内容: `test_export_audit` は api_key の伏せ字を確かめていない。末尾4文字を残す処理、8文字未満をすべて伏せる処理、境界の8文字のどれもテストがない。 / 根拠: tests/test_notes.py:59-63。 / 提案: 長さが 0、7、8、12 の鍵を使い、伏せ字の結果を完全一致で確かめる。\n- [重大5] 区分: テスト / 対象: AC7, AC8, K3, K8 / 内容: 枠の境界（ちょうど window 秒）、スレッドからの同時呼び出し（`RateLimiter.hook`）、期限の境界（`now == expires`）、署名の改ざん、形の崩れたリンク、期限切れが、どれもテストされていない。`test_tampered` が確かめているのは note_id の書き換えだけである。 / 根拠: tests/test_notes.py:66-86。 / 提案: 境界値・形の崩れ（改行付き・数字以外・署名の長さ違い）・複数スレッドのテストを足す。\n- [重大6] 区分: 実装 / 対象: R4, K1, K3 / 内容: `update_note` と `delete_note` は、認可（`_visible` / `_can_modify`）を `BEGIN IMMEDIATE` の外で判定している。判定から書き込みまでの間に `transfer_notes` でメモの所有者が変わると、移管前の所有者が、移管後の他人のメモを削除できる。`delete_note` には version の確認がないため防げない。 / 根拠: notes/service.py:182-191（行の読み出しがトランザクションの外）。 / 提案: トランザクションの中で行を読み直して認可を判定する。並行を再現するテストも足す。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: `int()` で解釈するため、先頭が 0 の `\"007.…\"` でも同じ署名が通る。正規形でない表現も有効になる。 / 根拠: notes/share.py:30-37。 / 提案: 先頭の 0 を拒否するか、正規形かどうかを確かめる。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: `update_note` が version の型を検査しない。`delete_note` は、並行して先に削除されていても、成功として扱い、監査ログも書く。 / 根拠: notes/service.py:157, 187-191。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名だけを確かめており不十分。タグの規則、文字数の境界、トランザクションの巻き戻しを確かめていない。さらに実装に改行タグの欠陥がある。\n- AC2: V2 は作成者本人の閲覧だけを確かめており不十分。NotFound の 3 パターンと閲覧数の加算、同時閲覧を確かめていない。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで不十分。範囲外の入力、sort、`%` `_`、タグの OR、インジェクションを確かめていない。\n- AC4: V4 は作成者による更新・削除の成功だけで不十分。Conflict、Forbidden、管理者、非公開の扱いを確かめていない。\n- AC5: V5 は成功と非管理者の拒否だけで不十分。組織違いと途中失敗の巻き戻しを確かめていない。\n- AC6: V6 は伏せ字を確かめておらず不十分。\n- AC7: V7 は基本的な動作だけで不十分。境界と複数スレッドを確かめていない。\n- AC8: V8 は成功と note_id の改ざんだけで不十分。期限の境界、期限切れ、形の崩れを確かめていない。\n- AC9: V9 に該当するテストがなく、実際に本文が漏れている。\n- AC10: V10 に該当するテストがない。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要（HTTP 層のないライブラリで、単体テストで足りる）。ただし、複数の接続とスレッドを使う並行テストは必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: インジェクションのテストがない。\n- K3: 並行テストがない。\n- K4: 途中失敗の巻き戻しのテストがない。\n- K5: ログの検査がなく、実際に漏れている。\n- K6: 移管の組織境界のテストがない。\n- K7: 伏せ字のテストがない。\n- K8: 期限・形の崩れのテストがない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、12 件が合格した（網羅性は低い）。\n- ログの出力と改行付きタグの受理を、インメモリの DB で実行して再現した。\n- `trace` と `history` を確認した。検証条件が弱められた形跡はなかった。",
+ "files_changed": [],
+ "valid": true
+}

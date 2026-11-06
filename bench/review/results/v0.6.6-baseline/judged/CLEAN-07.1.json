@@ -1,0 +1,43 @@
+{
+ "case": "CLEAN-07",
+ "rep": 1,
+ "judge_cost_usd": 0.0725597,
+ "judge_raw": "**分類の結果**\n\n- 重大1: テストの不足だけを指摘していて、コードの欠陥の主張ではないので test_gap。\n- 重大2: `TAG_RE` は `^...$` で、`.match` と組み合わせると末尾の改行を通す。実在の欠陥なので real_other。ただし、今回の変更（回数制限の内部の名前を変える）とは無関係。\n- 重大3: update と delete の権限・可視性の判定が `transaction` の外にある。delete は `DELETE` の rowcount も見ない。この競合は実在するので real_other。update は version の条件で守られ、transfer も version を増やすため、update についての主張は過大。\n- 軽微1: `updated_at` の更新は仕様にない。移管先ユーザーの存在確認は、呼び出し側を信用する対象外の範囲。仕様違反ではないので false_positive。\n- 軽微2: hook の位置とテストの書きやすさの指摘なので test_gap。\n- 軽微3: 仕様にもスキーマにもユーザー削除の機能はなく、推測にもとづく保守性の提案なので style。\n\nこのケースは欠陥なしなので、defect_detected は n/a。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match の組み合わせで、末尾が改行のタグ \\\"abc\\\\n\\\" を通すのは実在の仕様違反。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note の判定が transaction の外にあり、delete は rowcount も version も見ない競合は実在する（update への主張は version で守られるため過大）。\"},\n{\"label\": \"軽微1\", \"class\": \"false_positive\", \"reason\": \"updated_at の更新は仕様にない。移管先の存在確認は呼び出し側を信用する対象外の範囲。\"},\n{\"label\": \"軽微2\", \"class\": \"test_gap\", \"reason\": \"hook の位置とテストの書きやすさの指摘で、コードの欠陥ではない。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"ユーザー削除は仕様にない機能で、推測にもとづく保守性の指摘。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、実在の別欠陥（重大2・重大3）は指摘されたが、埋め込んだ変更に関する誤指摘はない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match の組み合わせで、末尾が改行のタグ \"abc\\n\" を通すのは実在の仕様違反。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update_note と delete_note の判定が transaction の外にあり、delete は rowcount も version も見ない競合は実在する（update への主張は version で守られるため過大）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "false_positive",
+    "reason": "updated_at の更新は仕様にない。移管先の存在確認は呼び出し側を信用する対象外の範囲。"
+   },
+   {
+    "label": "軽微2",
+    "class": "test_gap",
+    "reason": "hook の位置とテストの書きやすさの指摘で、コードの欠陥ではない。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "ユーザー削除は仕様にない機能で、推測にもとづく保守性の指摘。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、実在の別欠陥（重大2・重大3）は指摘されたが、埋め込んだ変更に関する誤指摘はない。"
+ }
+}

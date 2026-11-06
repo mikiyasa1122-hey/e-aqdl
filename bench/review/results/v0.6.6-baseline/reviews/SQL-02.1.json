@@ -1,0 +1,49 @@
+{
+ "case": "SQL-02",
+ "rep": 1,
+ "sec": 30.5,
+ "exit": 0,
+ "cost_usd": 0.1189004,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 6,
+  "cache_creation_input_tokens": 18602,
+  "cache_read_input_tokens": 72504,
+  "output_tokens": 3723,
+  "output_tokens_details": {
+   "thinking_tokens": 597
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18602,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3176,
+    "cache_read_input_tokens": 28455,
+    "cache_creation_input_tokens": 9253,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9253
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 67ae1954\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 内容: タグの検査が改行付きのタグを通してしまう。`TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、`\"abc\\n\"` が通る。仕様は「英小文字・数字・ハイフンの1〜20文字」。share.py は同じ問題を避けて `fullmatch` を使っており、実装の一貫性もない。/ 根拠: notes/service.py:158, 208, 294（`TAG_RE.match`）。再現は `create_note(..., tags=[\"a\\n\"])` が成功するかの確認（コードを読んで判断した。実行はしていない）。/ 提案: `TAG_RE.fullmatch` に変えるか `\\Z` を使う。改行付きタグを拒否するテストを加える。\n- [重大2] 区分: テスト / 対象: AC2, AC4, AC5, AC7, AC10, K3, K4 / 内容: 並行・途中失敗・ロールバックを確かめるテストが1件もない。設計書は `hooks.before_write` と `RateLimiter.hook` の差し込み口を用意しているが、tests/test_notes.py はどちらも使っていない。次の項目が未検証: 同時閲覧での閲覧数の数え漏れ、version 競合の Conflict（読み出しと書き込みの間に他の更新が入る場合を含む）、作成・削除・移管の途中失敗での全巻き戻し、例外の後に接続が使えること、RateLimiter の複数スレッド同時呼び出しと枠の境界（ちょうど window 秒）。/ 根拠: tests/test_notes.py 全体（テスト13件、すべて正常系か1つの拒否だけ）。/ 提案: 差し込み口を使って決定論的に再現するテストを書く（sleep には頼らない）。判定条件を外したら失敗することも確かめる。\n- [重大3] 区分: テスト / 対象: R2, R3, R4, R5, R6, R8, R9, AC2, AC3, AC4, AC5, AC6, AC8, AC9, K1, K2, K5, K6, K7, K8 / 内容: 認可・入力の境界・機密情報の検証が空洞になっている。次の項目にテストがない。\n  - 他の組織・他人の非公開メモが NotFound になること（get / list / search / update / delete）。\n  - 非公開メモは管理者にも NotFound になること。\n  - 他人のメモの更新・削除が Forbidden になること。\n  - 一覧の page・per_page・sort の範囲外が拒否されること。\n  - 検索の `%` と `_` が普通の文字として扱われること、SQL インジェクション、タグ OR 絞り込み。\n  - 移管が別の組織に対して Forbidden になること、移管が失敗したら元のままになること。\n  - api_key の伏せ字（末尾4文字、8文字未満は全部伏せる）。現状は `test_export_audit` が `actor_key` を見ていない。\n  - 共有リンクの期限ちょうど、形の崩れ（改行・桁数）、署名の改ざん。\n  - ログや例外に本文・署名・api_key が出ないこと。\n  - タイトル・本文・タグの上限と境界値。\n  /根拠: tests/test_notes.py:17-87。/ 提案: 各 AC ごとに、異常系・境界値のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R5 / 内容: 移管で `updated_at` を更新していない。`version` は上がるので、楽観的ロックには影響しない。/ 根拠: service.py:349。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: `update_note` は、読み出しと検査（`_visible` / `_can_modify`）をトランザクションの外で行っている。version の条件で Conflict になるので整合性は保たれるが、検査が古い状態に基づく可能性が残る。/ 根拠: service.py:302-312。\n- [軽微3] 区分: 実装 / 対象: R4 / 内容: version の型を検査していない。呼び出し側が不正な型を渡すと、ValidationError ではなく Conflict になる。/ 根拠: service.py:314。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。`test_create_and_get` と空題名の拒否だけで、境界値（100文字・10000文字・タグ5個・タグの重複・改行付きタグ・文字列タグ）と失敗時に何も残らないことが未検証。重大1・2。\n- AC2: 不十分。閲覧数の増加も、他組織・非公開の NotFound も、同時閲覧の数え漏れも確かめていない。\n- AC3: 不十分。ページングの正常系1件と検索1件だけ。範囲外の拒否、非公開の除外、`%` `_`、SQL インジェクション、タグ OR は未検証。\n- AC4: 不十分。所有者の更新と削除の正常系だけ。Conflict、Forbidden、管理者の扱い、更新時の検証、削除失敗の巻き戻しが未検証。\n- AC5: 不十分。正常系の件数と非管理者の拒否だけ。別組織への拒否と途中失敗時の元のままが未検証。\n- AC6: 不十分。`test_export_audit` は api_key の伏せ字を確かめていない。\n- AC7: 不十分。単一スレッドで枠の境界を見ているが、境界はちょうど window 秒ではなく 61 秒。同時呼び出しのテストがない。\n- AC8: 不十分。往復と、数字を1つ変えた改ざんだけ。期限ちょうど、期限切れ、形の崩れは未検証。\n- AC9: 未検証（テストなし）。実装は ID だけをログに出しており、静的には問題なさそう。\n- AC10: 未検証（テストなし）。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はないが、アサーションが弱い・不足している（上記）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite への実接続を使う単体・統合テストで足りる。ただし並行・巻き戻しのテストは必須。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 の検証が上記のとおり不足している（重大2・3）。\n- 同時閲覧・同時更新は、SQLite のファイル DB で別接続・別スレッドを使った検証が必要。`:memory:` では接続ごとに別の DB になる。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- 静的に、認可・SQL のプレースホルダー・LIKE のエスケープ・transaction() の巻き戻し・RateLimiter のロック・share の検証を設計と照合した。実装の大筋は設計と整合している。\n- テストの実行、`$AQ trace`、`$AQ history`、gate の実行はしていない（コードの読み取りのみ）。タグの改行の件は、コードを読んで判断した。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-10",
+ "rep": 1,
+ "judge_cost_usd": 0.0650877,
+ "judge_raw": "各指摘の判定です。\n\n- **重大1**: テストの不足だけを指摘しているので test_gap です。\n- **重大2**: `$` は末尾の改行にも一致するため、`\"abc\\n\"` が通るという指摘は実在します。`TAG_RE.match` と `^...$` では改行付きタグを拒否できず、仕様の「英小文字・数字・ハイフンの1〜20文字」に反します。変更前から残る欠陥で、埋め込み対象ではないので real_other です。\n- **重大3**: update_note と delete_note はトランザクションの外で認可を判定しています。delete は version の確認もなく、transfer 後に元の所有者が削除できる余地があります。ただし transfer 後に元の所有者が削除できるのは、トランザクション外の読み取りとの競合が起きたときだけです。この競合は実在し、仕様の R4・K3 に反するので real_other です。\n- **軽微1**: tags の検査が複数箇所に重複しているという保守性の提案で、欠陥の主張ではないので style です。\n- **軽微2**: list_notes の COUNT と SELECT が別クエリという指摘です。仕様は一覧の整合を求めていません。実害も小さいので、欠陥の主張としては弱く false_positive です。\n- **欠陥の検出**: 欠陥なしのケースなので n/a です。fetchall への変更は誰も指摘していません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"`$` と match により末尾改行付きタグが通るのは実在し、仕様のタグ規則に反する。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update/delete の認可判定がトランザクション外で行われ、delete に version 確認がないため、競合時に古い状態で認可される。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"検査の重複と共通化の提案で、欠陥の主張ではない。\"},\n{\"label\": \"軽微2\", \"class\": \"false_positive\", \"reason\": \"仕様は一覧の total と items の厳密な整合を求めておらず、欠陥とは言えない。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、移管の取り出しを fetchall にした変更は指摘されていない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "`$` と match により末尾改行付きタグが通るのは実在し、仕様のタグ規則に反する。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update/delete の認可判定がトランザクション外で行われ、delete に version 確認がないため、競合時に古い状態で認可される。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "検査の重複と共通化の提案で、欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "false_positive",
+    "reason": "仕様は一覧の total と items の厳密な整合を求めておらず、欠陥とは言えない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、移管の取り出しを fetchall にした変更は指摘されていない。"
+ }
+}

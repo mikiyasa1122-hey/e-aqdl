@@ -1,0 +1,53 @@
+{
+ "case": "EXC-01",
+ "rep": 1,
+ "judge_cost_usd": 0.0681937,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`get_note` が見えないメモに Forbidden を返すため、NotFound と区別でき、存在が分かります。箇所(notes/service.py:105-106)も原因・影響も一致しています。\n- **重大2**: 実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせで、末尾が改行のタグが通ります。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: テストの不足だけを指摘しています。\n- **重大5**: テストの不足だけを指摘しています。\n- **重大6**: テストの不足だけを指摘しています。\n- **軽微1**: 実在する欠陥です。可視性と権限の判定がトランザクション外にあり、判定から書き込みの間に所有者が変わると、削除が防げません。\n- **軽微2**: 実在する欠陥です。`007.…` のように先頭ゼロの別表記のリンクが、同じ署名で通ります。仕様は「10進の数字だけ」としか書いていないので、厳密には微妙です。ただ、別の文字列のリンクが通ること自体は事実なので、real_other としました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し、NotFound と区別できて存在が分かる点が、埋め込んだ欠陥と同じ箇所・同じ原因です。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで、末尾が改行のタグが通る実在のバグです。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘しています。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字に対するテストがないという指摘です。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のテストの境界値・並行実行の不足を指摘しています。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"共有リンクのテストの境界値・異常系の不足を指摘しています。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note の権限判定がトランザクション外にあり、判定から書き込みの間に所有者が変わる競合が実在します。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"先頭ゼロの note_id で、別の文字列のリンクが同じ署名で通る点は実在します。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥(get_note の Forbidden による存在の漏えい)を正しく指摘しています。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し、NotFound と区別できて存在が分かる点が、埋め込んだ欠陥と同じ箇所・同じ原因です。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで、末尾が改行のタグが通る実在のバグです。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘しています。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字に対するテストがないという指摘です。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "RateLimiter のテストの境界値・並行実行の不足を指摘しています。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "共有リンクのテストの境界値・異常系の不足を指摘しています。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "update_note と delete_note の権限判定がトランザクション外にあり、判定から書き込みの間に所有者が変わる競合が実在します。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "先頭ゼロの note_id で、別の文字列のリンクが同じ署名で通る点は実在します。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥(get_note の Forbidden による存在の漏えい)を正しく指摘しています。"
+ }
+}

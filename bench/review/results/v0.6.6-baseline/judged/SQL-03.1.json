@@ -1,0 +1,43 @@
+{
+ "case": "SQL-03",
+ "rep": 1,
+ "judge_cost_usd": 0.0629177,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `list_notes` の `SORT_COLUMNS.get(sort, sort)` が、許可した値以外の `sort` をそのまま ORDER BY に入れる点を指摘しています。埋め込んだ欠陥と箇所も原因も影響も一致します。\n- **重大2**: テスト不足の指摘だけで、コードの欠陥の主張はありません。\n- **重大3**: `test_export_audit` がマスクを確認していないという、テストの弱さの指摘です。\n- **重大4**: 同時実行のテストがないという指摘で、テスト不足です。\n- **軽微1**: 検証コードの重複と共通化の提案で、保守性の話です。\n- **軽微2**: 削除済みメモの更新が Conflict になる場合があるという指摘です。仕様上は許容範囲と自ら述べており、欠陥の主張としては弱いです。更新の UPDATE は rowcount が 0 なら Conflict にするので、実際の挙動を述べたものです。欠陥としては扱えないため style にします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の sort を許可した値に限らず ORDER BY に埋め込む点を、同じ箇所・同じ原因で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足の指摘で、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"監査ログのマスクを確認しないテストの弱さの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"同時実行のテストが無いという指摘で、テスト不足。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"検証コードの重複と共通化の提案で、保守性の話。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"仕様上は許容範囲と自ら述べており、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が sort の未検証による ORDER BY への埋め込みを正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の sort を許可した値に限らず ORDER BY に埋め込む点を、同じ箇所・同じ原因で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足の指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "監査ログのマスクを確認しないテストの弱さの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "同時実行のテストが無いという指摘で、テスト不足。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "検証コードの重複と共通化の提案で、保守性の話。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "仕様上は許容範囲と自ら述べており、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が sort の未検証による ORDER BY への埋め込みを正しく特定している。"
+ }
+}

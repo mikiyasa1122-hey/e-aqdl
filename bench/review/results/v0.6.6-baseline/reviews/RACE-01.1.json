@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 1,
+ "sec": 36.5,
+ "exit": 0,
+ "cost_usd": 0.15215090000000003,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 23177,
+  "cache_read_input_tokens": 158629,
+  "output_tokens": 4356,
+  "output_tokens_details": {
+   "thinking_tokens": 591
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23177,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2656,
+    "cache_read_input_tokens": 41749,
+    "cache_creation_input_tokens": 534,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 534
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 内容: 楽観的ロックが読み出しから書き込みの間の更新を検出しない。version の確認は transaction の外で行っている。UPDATE の WHERE は `id = ?` だけで、`version = ?` が入っていない。そのため `rowcount != 1` の判定は、メモが削除されたときしか働かない。後から書いた側が先の更新を消す。 / 根拠: notes/service.py の update_note の `if row[\"version\"] != version`（transaction の外）と、続く `UPDATE notes SET ... WHERE id = ?`。設計書の「UPDATE の条件に version を入れて rowcount で判定する」とも食い違う。再現: 2接続で、before_write(\"update\") のフックの中から別接続が version=1 で更新した。元の呼び出しは Conflict にならず version 2 を返した。本文は後から書いた側のものになり（先の更新は消えた）、version は 3 になった。 / 提案: UPDATE の条件を `WHERE id = ? AND version = ?` にして、rowcount が 0 なら Conflict にする。権限と version の確認は BEGIN IMMEDIATE の中でやり直すと、さらに安全。\n- [重大2] 区分: テスト / 対象: AC4, K3, V4, VK3 / 内容: 更新の競合（古い version、読み書きの間の割り込み）、Forbidden、非公開メモの管理者、削除の失敗時の巻き戻しを確かめるテストが1つもない。重大1の欠陥は、このせいで gate を通った。 / 根拠: tests/test_notes.py に Conflict の import も使用もない。 / 提案: ①古い version で Conflict。②hooks.before_write で割り込んで Conflict。③`AND version` を外すと失敗することを確かめる。④他人の更新・削除は Forbidden。⑤管理者による非公開メモの更新は NotFound。⑥delete:note のフックで例外を出し、タグが残ることを確かめる。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC5, AC9, AC10, K1, K2, K4, K6, V1, V2, V3, V5, V9, V10 / 内容: 検証が正常系中心で空洞化している。次の項目が未検証。\n  - R1: 題名・本文・タグの境界値（100/101文字、空白だけ、タグ6個、不正なタグ、文字列のタグ）。create の途中で失敗したときに何も残らないこと。\n  - R2: 他の組織や他人の非公開メモが NotFound になること。閲覧数が増えること、同時でも漏れないこと。\n  - R3: page・per_page・sort の範囲外。%・_ の扱い。タグの OR 絞り込み。SQL インジェクションの入力。他人の非公開メモが一覧・検索に出ないこと。\n  - R5: 組織をまたぐ移管の拒否。途中で失敗したときに元のまま残ること。\n  - R6・R9: api_key の伏せ字。本文・署名がログに出ないこと。\n  - R10: 例外の後に接続が使えること。 / 根拠: tests/test_notes.py（全12テスト）。 / 提案: 上記を、hooks で決定論的に再現するテストとして追加する。\n- [重大4] 区分: テスト / 対象: AC7, AC8, K3, K8, V7, V8, VK8 / 内容: RateLimiter は同時呼び出し（RateLimiter.hook や複数スレッド）のテストがなく、ちょうど window 秒の境界もテストしていない（61秒のみ）。share は期限ちょうど（now == expires）、期限切れ、形の崩れ（改行、桁違い、大文字の16進、不足）のテストがない。署名の改ざんは note_id の書き換えだけ確かめている。 / 根拠: tests/test_notes.py の RateLimitTest と ShareTest。 / 提案: 境界値と異常系のテストを追加する。limit を超えない並行テストは、hook を使って順序に頼らず再現する。\n- [軽微1] 区分: 実装 / 対象: R2 / 内容: get_note で、可視性の最初の確認と閲覧数の更新の間に隙間がある。内側で再確認しているので漏えいはしない。ただし、確認が transaction の外に出ているため、更新側と同じ種類の問題が起きやすい。 / 提案: 確認を transaction の中にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名1件だけで不十分。境界値・タグ検査・失敗時に何も残らないことを確かめていない。\n- AC2: V2 は自分のメモを見るだけで不十分。NotFound への統一、閲覧数、同時閲覧を確かめていない。\n- AC3: V3 は一覧の1ページ目と検索1件だけで不十分。範囲外、LIKE の特殊文字、タグ、インジェクション、非公開の除外が未検証。\n- AC4: V4 は正常な更新と削除だけで不十分。Conflict が1件もなく、実装も欠陥を持つ（重大1）。\n- AC5: V5 は件数を確かめるだけで不十分。組織をまたぐ移管とロールバックが未検証。\n- AC6: V6 は伏せ字を確かめていない。action と actor だけを見ていて空洞化している。\n- AC7: V7 は単一スレッドで、境界が61秒のみのため不十分。同時の呼び出しが未検証。\n- AC8: V8 は往復と1種類の改ざんだけで不十分。期限の境界、期限切れ、形の崩れが未検証。\n- AC9: 機密情報がログに出ないことを確かめるテストがなく、V9 は実質なし。\n- AC10: 例外の後の接続の再利用を確かめるテストがなく、V10 は実質なし。\n- エンジンが検出したテストの兆候（skip、.only、アサーションなし）はなかった。テストや検証条件を弱めた形跡もない（history は new 登録のみ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite をインメモリか一時ファイルで使う結合的な単体テストで足りる。ただし、複数接続・複数スレッドのテストは必要。\n\n### 不足しているリスク\n- K3: 更新の競合が実装でも検証でも漏れている。閲覧数と RateLimiter の同時呼び出しも未検証。\n- K1・K2・K4・K6: 検証がほぼない。\n- K5・K7: 伏せ字とログの検証がない。\n- K8: 期限の境界と形の崩れの検証がない。\n\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` は12件すべて成功した（検証が浅いことの裏付け）。\n- 一時スクリプト（スクラッチパッド内）で、2接続・SQLite の一時ファイルを使い、重大1の失われた更新を再現した。リポジトリは変更していない。\n- `$AQ trace` と `$AQ history` を確認した。history の出力は途中で切れたため、後半は未確認。",
+ "files_changed": [],
+ "valid": true
+}
