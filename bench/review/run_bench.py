@@ -232,9 +232,15 @@ def judge_one(rev_path, out):
     prompt = JUDGE.format(case_id=c["id"], truth=truth, spec=D.SPEC_MD, code=case_code(c["id"], out), review=rev["result"])
     p = subprocess.run(["claude", "-p", prompt, "--tools", "", "--output-format", "json"], capture_output=True,
                        text=True, timeout=900, cwd=out)
-    res = json.loads(p.stdout)
+    try:
+        res = json.loads(p.stdout)
+    except ValueError:
+        return rev["case"], "judge_error"
     m = re.findall(r"```json\s*(\{.*?\})\s*```", res.get("result") or "", re.S)
     parsed = json.loads(m[-1]) if m else None
+    if res.get("is_error") or parsed is None:
+        # 利用上限・判定役の失敗は保存しない（次の judge でやり直す。判定済みとして扱わない）
+        return rev["case"], "judge_error: " + (res.get("result") or "")[:80]
     rec = {"case": rev["case"], "rep": rev["rep"], "judge_cost_usd": res.get("total_cost_usd"),
            "judge_raw": res.get("result"), "parsed": parsed}
     with open(dest, "w", encoding="utf-8") as f:
