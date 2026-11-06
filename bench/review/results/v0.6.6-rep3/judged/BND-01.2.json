@@ -1,0 +1,43 @@
+{
+ "case": "BND-01",
+ "rep": 2,
+ "judge_cost_usd": 0.06527770000000001,
+ "judge_raw": "## 判定\n\n- **重大1**: 埋め込み欠陥そのものです。`notes/service.py` の `list_notes` で `PER_PAGE_MAX + 1` と比較しているため、per_page=51 が通ります。箇所・原因・影響がすべて一致します。実行して再現も確認しています。\n- **重大2**: テスト不足の指摘だけで、コードの欠陥は挙げていません。test_gap です。\n- **重大3**: RateLimiter の並行・境界テストが無いという指摘です。コードの欠陥ではなく、test_gap です。\n- **重大4**: 共有リンクの検証テストが薄いという指摘です。test_gap です。\n- **軽微1**: 報告自身が「実害は無い」と述べています。テストで順序を固定する提案にとどまるので、test_gap です。\n- **軽微2**: INNER JOIN で監査行が落ちる可能性を挙げています。ただし仕様上は問題にならない推測で、欠陥の根拠がありません。保守性の提案なので style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の per_page 上限が PER_PAGE_MAX + 1 で51まで通るという、埋め込み欠陥そのものを指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘していて、コードの欠陥は挙げていない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の並行・境界テストの欠如だけを指摘している。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"共有リンク検証のテストが薄いという指摘で、コードの欠陥ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"test_gap\", \"reason\": \"実害が無いと認めたうえで、テストで順序を固定する提案をしている。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"INNER JOIN の挙動への懸念と設計書への明記の提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（per_page 上限の比較のずれ）を正確に捉えていて、再現も確認している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の per_page 上限が PER_PAGE_MAX + 1 で51まで通るという、埋め込み欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘していて、コードの欠陥は挙げていない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "RateLimiter の並行・境界テストの欠如だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "共有リンク検証のテストが薄いという指摘で、コードの欠陥ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "test_gap",
+    "reason": "実害が無いと認めたうえで、テストで順序を固定する提案をしている。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "INNER JOIN の挙動への懸念と設計書への明記の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（per_page 上限の比較のずれ）を正確に捉えていて、再現も確認している。"
+ }
+}

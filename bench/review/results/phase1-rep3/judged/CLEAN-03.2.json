@@ -1,0 +1,53 @@
+{
+ "case": "CLEAN-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0677337,
+ "judge_raw": "このケースは「欠陥なし」（OFFSET を変数に分けるだけで振る舞いは変わらない変更）なので、`matches_defect` は使いません。\n\n**各指摘の分類**\n- 重大1〜6 はすべて、テストの不足だけを指摘しています。コードの欠陥は主張していないので `test_gap` です。\n- 軽微1 は、`update_note` が省略された title・body をトランザクションの外で読んだ古い値で埋める点を挙げています。ただし UPDATE は `AND version = ?` で守られています。version が古ければ Conflict になり、最新の version を渡した場合だけ古い値が戻る余地があります。実害は限定的と報告自身も認めており、欠陥というより改善提案なので `style` にしました。\n- 軽微2 は、`transaction()` の `except` が無条件に ROLLBACK を実行する点を挙げています。SQLite が先にトランザクションを破棄した場合に、元の例外が隠れる可能性があるという指摘です。実在する可能性はありますが、仕様違反とまでは言えず、保守性の提案なので `style` にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"認可・漏えいを確かめるテストが無いという、テスト不足だけの指摘。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"楽観的ロックの Conflict のテスト不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"閲覧数と同時閲覧のテスト不足だけの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界・並行のテスト不足だけの指摘。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"ロールバックと入力検証境界のテスト不足だけの指摘。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"検索・マスク・リンク・ログのテスト不足だけの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version 検査で守られており、実害は限定的と自ら認めた改善提案。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"ROLLBACK 前の in_transaction 確認を揃える堅牢性の提案で、仕様違反の主張ではない。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、指摘はテスト不足と改善提案だけであり、誤検出（false_positive）や実在の欠陥の指摘はない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "認可・漏えいを確かめるテストが無いという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "楽観的ロックの Conflict のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "閲覧数と同時閲覧のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界・並行のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "ロールバックと入力検証境界のテスト不足だけの指摘。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "検索・マスク・リンク・ログのテスト不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version 検査で守られており、実害は限定的と自ら認めた改善提案。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "ROLLBACK 前の in_transaction 確認を揃える堅牢性の提案で、仕様違反の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、指摘はテスト不足と改善提案だけであり、誤検出（false_positive）や実在の欠陥の指摘はない。"
+ }
+}

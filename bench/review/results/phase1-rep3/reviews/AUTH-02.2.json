@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-02",
+ "rep": 2,
+ "sec": 35.4,
+ "exit": 0,
+ "cost_usd": 0.1096405,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13702,
+  "cache_read_input_tokens": 120065,
+  "output_tokens": 4281,
+  "output_tokens_details": {
+   "thinking_tokens": 715
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13702,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3124,
+    "cache_read_input_tokens": 36577,
+    "cache_creation_input_tokens": 3294,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3294
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7a4e3663\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 / 対応区分: 修正必須 / 内容: `list_notes` が `org_id = ?` だけで絞っていて、他人の非公開メモが一覧に出る。 / 成立条件: 同じ組織の利用者 A が `private=True` でメモを作り、同じ組織の B が `list_notes` を呼ぶ。 / 影響: B に A の非公開メモの題名と ID が見える。`total` にも含まれる。仕様の R3「他人の非公開メモは含めない」と R2 に反する。`get_note` は NotFound を返すので、一覧と閲覧で結果が食い違う。 / 確認した保証: 呼び出し元や DB の制約に、非公開を除く処理はない。`search_notes` は `(private = 0 OR owner_id = ?)` を持つが、`list_notes` にはない。 / 根拠: notes/service.py:104-109 の `where = \"org_id = ?\"`、`args = (user[\"org_id\"],)`。件数取得と一覧取得の両方がこの条件を使う。 / 提案: `where = \"org_id = ? AND (private = 0 OR owner_id = ?)\"`、`args = (user[\"org_id\"], user[\"id\"])` にする。非公開メモが一覧にも `total` にも出ないテストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち AC1, AC2, AC4, AC5, AC6, AC7, AC8, AC9, AC10 と K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系の確認が中心で、受け入れ条件の中核を確かめていない。重大1のバグも、テストが通ったまま残っている。不足している検証は次のとおり。\n  - 他の組織・非公開メモの NotFound\n  - Forbidden（更新・削除・移管）\n  - Conflict（古い version、`hooks.before_write` を使った読み出しと書き込みの間の割り込み）\n  - 作成・削除・移管の途中失敗でのロールバックと、その後の接続の再利用（R10）\n  - R1 の入力境界（題名100/101文字、タグ5/6個、タグの形式、tags に文字列そのものを渡す場合）\n  - 閲覧数の並行加算\n  - `%` `_` と SQL インジェクション文字列の検索、`page` `per_page` `sort` の範囲外\n  - RateLimiter の枠の境界（ちょうど window 秒）とスレッド同時実行（`hook` を使う）\n  - 共有リンクの期限ちょうど、形の崩れ、署名の改ざん\n  - api_key の伏せ字（8文字未満・8文字以上）。現在の `test_export_audit` は api_key を見ていない\n  - ログや例外に本文・署名・api_key が出ないこと\n / 成立条件: 実装を壊しても現在の12件は通る。 / 影響: 仕様の必須要求が空洞のままで、リスクを確かめた証拠がない。 / 根拠: tests/test_notes.py 全体（90行・12件）。`unittest discover` は 12件 OK だが、`Forbidden` を確かめるのは `test_transfer_requires_admin` の1件だけ。Conflict・並行・ロールバック・境界の検証はない。 / 提案: 上記の観点で、決定論的な（sleep に頼らない）テストを追加する。\n- [重大3] 区分: テスト / 対象: V1〜V10, VK1〜VK8（検証条件の紐付け）/ 対応区分: 証拠不足 / 内容: `history` を見ると、すべての検証 ID に `checks: [\"unit\"]` が付いているだけである。上記の12件が全受け入れ条件・全リスクの検証として紐付いており、対応するテストがないものまで検証済みに見える。 / 影響: 完了判定が実態より緩くなる。 / 根拠: `aqdlc history --since 0`（#79〜#93）。 / 提案: 重大2のテストを追加した上で、各検証 ID を対応するテストに結び直す。\n\n- [軽微1] 区分: 実装 / 対象: notes/service.py:update_note, `_can_modify` / 対応区分: 改善提案 / 内容: `_can_modify` は `_visible` を通った後でしか使われないため、現状では動作に問題はない。ただし単独で呼ばれた場合に備え、非公開の判定が `_can_modify` 側にもあると安全である。 / 提案: 任意。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。境界値、タグの規則、重複タグ、途中失敗でのロールバックの検証がない。\n- AC2: `test_create_and_get` は閲覧だけを確かめている。他の組織・非公開の NotFound、閲覧数の増加、並行加算の検証がなく不十分。\n- AC3: `test_list_first_page` と `test_search` は正常系のみで不十分。非公開の除外を確かめていないため、重大1のバグを検出できなかった。`%` `_`・注入・OR タグ・範囲外の検証もない。\n- AC4: `test_update_by_owner` と `test_delete_by_owner` は正常系のみで不十分。Conflict、Forbidden、管理者の扱い、削除の失敗伝播の検証がない。\n- AC5: `test_transfer` は件数を見るだけで不十分。所有者が変わったかを確認しておらず、組織違いの Forbidden、途中失敗でのロールバックの検証もない。管理者以外の拒否は `test_transfer_requires_admin` で確かめている。\n- AC6: `test_export_audit` は api_key を確かめておらず不十分。\n- AC7: `test_limit` は上限と枠の更新を確かめているが、ちょうど window 秒の境界とスレッド同時実行の検証がなく不十分。\n- AC8: `test_roundtrip` と `test_tampered` だけで不十分。期限ちょうど、期限切れ、形の崩れの検証がない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。ライブラリで HTTP 層も UI もなく、SQLite のインメモリと unittest で実在のリスクを再現できる。必要なのは結合的な単体テストの追加である。\n\n### 不足しているリスク\n- K1: 重大1の漏えいが実在し、テストでも検出されない。\n- K2: 注入文字列が値としてのみ扱われる検証がない（実装はプレースホルダーと ESCAPE を使っており、コード上は問題なし）。\n- K3: 閲覧数・更新・RateLimiter の同時実行を再現するテストがない。\n- K4: 途中失敗の巻き戻しのテストがない。\n- K5: 本文・署名・api_key の露出のテストがない。\n- K6: 組織またぎの移管、一部だけ移る場合のテストがない。\n- K7: api_key の伏せ字のテストがない。\n- K8: 期限の境界・改ざん・形の崩れのテストがない。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py 全体と tests/test_notes.py を精読した。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて OK。\n- `aqdlc history --since 0`: 検証条件の弱体化（削除や緩和）は見つからなかった。ただし全検証 ID に同じ `unit` が紐付いている。\n- コード上の確認\n  - 更新・移管・削除・閲覧数のトランザクション、version を条件にした楽観的ロック、`BEGIN IMMEDIATE` による直列化は設計どおり。\n  - share.py の期限の境界（`>=`）と `compare_digest`、ratelimit.py の枠の境界（`>=`）とロックも仕様どおり。\n  - 例外メッセージとログに本文・署名・api_key は含まれていない。\n- 実行はしていない。重大1は静的な読解で立証した。",
+ "files_changed": [],
+ "valid": true
+}

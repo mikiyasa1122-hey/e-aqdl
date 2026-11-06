@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 3,
+ "sec": 41.0,
+ "exit": 0,
+ "cost_usd": 0.1412865,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18797,
+  "cache_read_input_tokens": 130125,
+  "output_tokens": 5307,
+  "output_tokens_details": {
+   "thinking_tokens": 880
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18797,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3570,
+    "cache_read_input_tokens": 42045,
+    "cache_creation_input_tokens": 2914,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2914
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8（notes/share.py `verify_link`） / 対応区分: 修正必須 / 内容: 期限の境界が仕様と逆。仕様は「期限の時刻ちょうど以降は無効」だが、`int(now) > expires` で判定しているため、now == expires のリンクが有効になる。 / 成立条件: `verify_link(secret, link, now=expires)` を呼ぶ。 / 影響: 期限切れのリンクが1秒分だけ通る。K8（期限切れリンクを通す）に当たる。 / 根拠: notes/share.py の `if int(now ...) > expires`。実行して確認した。`make_link(\"k\",1,ttl_sec=10,now=100)` のリンクを `verify_link(\"k\",l,now=110)` で検証すると note_id の 1 が返り、Forbidden にならない。docstring は「期限の時刻ちょうどを含む」と書いていて、コードと食い違っている。 / 提案: `>=` に直し、now == expires と now == expires-1 の境界テストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4（notes/service.py:14 `TAG_RE`、:64 と :151 の `TAG_RE.match`） / 対応区分: 修正必須 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` を `match` で使っているので、末尾の改行を通す（`$` は末尾の `\\n` の手前にも一致する）。仕様は英小文字・数字・ハイフンだけと定めている。share.py は同じ問題を知って `fullmatch` を使っており、service.py だけ漏れている。 / 成立条件: tags に `\"ab\\n\"` を渡す（create、update、search のどれでも）。 / 影響: 仕様外のタグが保存される。入力検証の抜けで、検索の絞り込みにも影響する。 / 根拠: 実行して確認した。`create_note(c,u,\"t\",\"b\",[\"ab\\n\"])` が ValidationError にならず、note_id の 1 が返った。 / 提案: `TAG_RE.fullmatch(t)` に変える（_validate と search_notes の2箇所）。末尾改行のタグを拒否するテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, V1〜V10, VK1〜VK8（tests/test_notes.py） / 対応区分: 証拠不足 / 内容: 12件のテストはほぼ正常系の1ケースずつで、仕様が求める境界・異常系・並行を確かめていない。重大1・2の欠陥もこのため素通りした。以下の検証がない。\n  - AC1/K4: 題名・本文・タグ数の境界（100/101 文字、10000 文字、5/6 個、空白だけ）、tags に文字列を渡す、`hooks.before_write(\"create:tags\")` での途中失敗時に何も残らないこと。\n  - AC2/K1: 他組織・他人の非公開・存在しないメモが NotFound になること、閲覧数の加算。\n  - AC3/K2: per_page・page・sort の範囲外、`%` `_` を含む検索語、他人の非公開が一覧・検索に出ないこと、タグ OR 絞り込み、インジェクション文字列。\n  - AC4/K3: 非作成者・管理者の Forbidden、Conflict（古い version と、読み出しから書き込みの間の割り込み）、削除失敗時の例外伝播。\n  - AC5/K6: 別組織への移管の拒否、途中失敗時に元のまま残ること。\n  - AC6/K7: api_key の伏せ字（8文字未満・末尾4文字）。\n  - AC7/K3: 枠の境界のちょうど window 秒、複数スレッドの同時呼び出し。\n  - AC8/K8: 期限の境界、形の崩れたリンク、署名が16進の小文字64文字でないリンク。\n  - AC9: ログに本文・署名・api_key が出ないこと。\n  - AC10: 例外の後で同じ接続を使い続けられること。\n\n  設計書は hooks（`service.hooks.before_write`、`RateLimiter.hook`）でこれらを再現するとしているが、使うテストが1件もない。 / 成立条件: 該当する受け入れ条件・リスクの回帰が、検出されないまま起きる。 / 影響: gate の合格が受け入れ条件の充足を示さない。特に認可（K1・K6）、並行（K3）、ロールバック（K4）、機密情報（K5・K7）は必須のリスク。 / 根拠: tests/test_notes.py の全体（90行）。skip や `.only` はないが、境界・異常系・並行のテストが存在しない。 / 提案: 上の項目ごとにテストを追加する。並行は `hook` で順序を決定論的に作り、sleep に頼らない。重大1・2の修正を落とすと失敗するテストも含める。\n- [重大4] 区分: テスト / 対象: R7, AC7, K3（RateLimiter） / 対応区分: 証拠不足 / 内容: 実装は Lock で守られていて、コードを読む限り妥当に見える。しかし AC7 が明示する「枠の境界（ちょうど window 秒）」と「複数スレッドの同時呼び出し」を確かめるテストがない。既存の `test_limit` は t=61 で枠が更新されることしか見ておらず、60 ちょうどと 59.99 は未検証。 / 成立条件: `>=` が `>` に変わる、または Lock が外れる変更。 / 影響: AC7 の中心が検証されない。 / 根拠: tests/test_notes.py:66-75。notes/ratelimit.py の `now - start >= self.window` と `with self._lock`。 / 提案: t=59.999 で RateLimited、t=60 で成功するテストを書く。N スレッドから `limit` 回を超えて呼び、成功数がちょうど `limit` になることを `hook` で順序を揃えて確かめる。\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py `update_note`） / 対応区分: 改善提案 / 内容: 更新の対象が読み出しから書き込みの間に削除された場合、rowcount が 0 になって NotFound ではなく Conflict になる。仕様の範囲内（競合として扱える）で動作に問題はない。 / 提案: 方針をコメントか仕様に明記する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否しか確認しておらず不十分（境界、タグ検査、ロールバックがない。実装にもタグ検査の欠陥がある。重大2・3）。\n- AC2: V2 は作成者本人が閲覧できることしか確認しておらず不十分（NotFound の3パターンと閲覧数がない）。実装は `_visible` と加算が1つのトランザクションにあり妥当に見える。\n- AC3: V3 は1ページ目の件数と単純検索だけで不十分（範囲外、`%` `_`、非公開除外、タグ、インジェクションがない）。\n- AC4: V4 は作成者による更新・削除の正常系だけで不十分（Forbidden、Conflict、削除失敗がない）。\n- AC5: V5 は件数の戻り値と非管理者の拒否だけで不十分（組織またぎ、全部か何もしないか、移管後の所有者を確認していない）。\n- AC6: V6 は actor 名しか見ておらず不十分（api_key の伏せ字を一切確認していない）。実装は仕様どおりに見える。\n- AC7: 重大4のとおり不十分。\n- AC8: 往復と改ざん1件のみで不十分。期限の境界は未検証で、実装が仕様と逆になっている（重大1）。形の崩れたリンクもない。\n- AC9: 検証がない（logging の出力を確認するテストなし）。実装はログに ID だけを出しており問題は見つからなかったが、証拠はない。\n- AC10: 検証がない（例外後に接続を再利用するテストなし）。`transaction()` は ROLLBACK してから再送出しており、実装は妥当に見える。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はない。ただし弱さは上記のとおり。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テスト（実 SQLite の `:memory:` とスレッド）で必要な検証ができる。必要なのは単体テストの拡充。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: インジェクション文字列や LIKE のワイルドカードを使うテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行テストがない。\n- K4: ロールバック（create・delete・transfer の途中失敗）のテストがない。\n- K5・K7: api_key とログの機密情報のテストがない。\n- K6: 組織またぎの移管と部分移管のテストがない。\n- K8: 期限の境界のテストがなく、実装も誤っている。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` は 12 件すべて OK だった。\n- `$AQ trace` を実行し、全要求が V と対応していて gate が合格であることを確認した。反証テストは無効。\n- `$AQ history` の先頭を確認した。検証の追加のみで、弱体化は見つからなかった。\n- 一時スクリプトで 2 件の欠陥を再現した。\n  - `create_note(... tags=[\"ab\\n\"])` が成功した。\n  - `verify_link` が now == expires で note_id を返した。\n- 実装は変更していない。",
+ "files_changed": [],
+ "valid": true
+}

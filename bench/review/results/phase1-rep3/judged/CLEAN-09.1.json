@@ -1,0 +1,43 @@
+{
+ "case": "CLEAN-09",
+ "rep": 1,
+ "judge_cost_usd": 0.0757757,
+ "judge_raw": "**判定: 欠陥なしのケース（CLEAN-09）。埋め込んだ欠陥はないので、matches_defect は使わない。**\n\n- 重大1: `TAG_RE` の `$` は末尾の改行の前にも一致する。そのため `.match` で `'abc\\n'` のようなタグが通る。仕様のタグ規則に反する、コード上の実在する欠陥。\n- 重大2: テストの不足だけを述べていて、コードの欠陥の主張ではない。\n- 重大3: `delete_note` は、認可の確認をトランザクションの外で行う。DELETE は rowcount も owner も見ない。そのため、競合した削除や移管の後でも成功し、監査ログが残る。実在する競合の欠陥。\n- 軽微1: `page` が非常に大きいとオフセットが SQLite の整数上限を超え、OverflowError になる。ValidationError にならないので、実在する境界の欠陥。\n- 軽微2: 先頭ゼロ付きの note_id を通すと指摘している。しかし仕様は「10進の数字だけ」としており、署名は int 化した値に対するものなので、仕様違反ではない。正規表記を求める提案にとどまり、欠陥の主張ではない。\n- 軽微3: `update_note` に `private` の変更はない。また `_tag_list` は NotFound と Forbidden の確認の後に走るので、「認可の確認の前に検証が走る」という指摘はコードの読み違い。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"`$` と `.match` の組み合わせで末尾が改行のタグが通る、仕様に反する実在の欠陥。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note は認可の確認がトランザクションの外にあり、rowcount も owner も見ないので、競合した削除や移管の後でも成功する。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"page が極端に大きいと OverflowError になり、ValidationError にならない実在の境界の欠陥。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭ゼロは仕様の「10進の数字」に合っており、正規表記を求める提案にとどまる。\"},\n{\"label\": \"軽微3\", \"class\": \"false_positive\", \"reason\": \"update_note に private の変更はなく、_tag_list は認可の確認の後に走るので、指摘は読み違い。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1・重大3・軽微1は実在する別の欠陥、軽微3は誤検出。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "`$` と `.match` の組み合わせで末尾が改行のタグが通る、仕様に反する実在の欠陥。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note は認可の確認がトランザクションの外にあり、rowcount も owner も見ないので、競合した削除や移管の後でも成功する。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "page が極端に大きいと OverflowError になり、ValidationError にならない実在の境界の欠陥。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭ゼロは仕様の「10進の数字」に合っており、正規表記を求める提案にとどまる。"
+   },
+   {
+    "label": "軽微3",
+    "class": "false_positive",
+    "reason": "update_note に private の変更はなく、_tag_list は認可の確認の後に走るので、指摘は読み違い。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1・重大3・軽微1は実在する別の欠陥、軽微3は誤検出。"
+ }
+}

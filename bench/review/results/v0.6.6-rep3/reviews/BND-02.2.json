@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 2,
+ "sec": 35.9,
+ "exit": 0,
+ "cost_usd": 0.14407360000000002,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22827,
+  "cache_read_input_tokens": 115996,
+  "output_tokens": 4115,
+  "output_tokens_details": {
+   "thinking_tokens": 1003
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22827,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2546,
+    "cache_read_input_tokens": 39116,
+    "cache_creation_input_tokens": 2817,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2817
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3 / 内容: `list_notes` が page=0 を受け付ける。仕様は「page は1以上、範囲外は ValidationError」。 / 根拠: notes/service.py の `page < 0`。`list_notes(conn, user, page=0)` を実行すると ValidationError にならず結果が返る（実行して確認）。内部では OFFSET が -per_page になる。 / 提案: 条件を `page < 1` に直し、page=0・-1・bool・巨大な整数の拒否テストを足す。\n- [重大2] 区分: テスト / 対象: AC3, AC4, AC2, K1, K2, K3 / 内容: 仕様の規則に対するテストがほとんどない。上の page=0 の欠陥も検出できていない。 / 根拠: tests/test_notes.py は 12 件で、ほぼ正常系だけ。次のものが 1 件もない。 ①他の組織・他人の非公開メモの NotFound（K1） ②一覧・検索の org・非公開の除外 ③per_page・sort・page の境界の拒否 ④`%` `_` と SQL インジェクション文字列の検索（K2） ⑤タグの OR 検索 ⑥Conflict（古い version、読み出しと書き込みの間の更新）と Forbidden ⑦並行の閲覧数 ⑧hooks を使った途中失敗のロールバック（create・delete・transfer） ⑨transfer の組織外の拒否 / 提案: 各受け入れ条件・リスクについて、異常系・境界値・並行（hooks で決定的に再現）のテストを書く。 \n- [重大3] 区分: テスト / 対象: AC6, AC7, AC8, K7, K8, AC9, AC10, K5 / 内容: 周辺の受け入れ条件の検証が不足している。 / 根拠: ①AC6: api_key のマスク結果を一度も assert していない（8文字未満・ちょうど8文字・末尾4文字）。 ②AC7: 枠の境界（ちょうど window 秒で新しい枠）と、複数スレッドでの同時呼び出しがない。 ③AC8: 期限ちょうど（now==expires）、期限切れ、不正な形（改行付き・全角数字・署名の長さ違い・None）がない。改ざんは 1 件だけ。 ④AC9: ログや例外メッセージに本文・署名・api_key が出ないことを確かめるテストがない。 ⑤AC10: 例外後に同じ接続を使い続けられることを確かめるテストがない。 / 提案: 各 AC の境界・異常系を確かめるテストを追加する。\n- [重大4] 区分: テスト / 対象: AC1, AC5, K4, K6 / 内容: 失敗時に何も残らないこと、全部移すか何も移さないことが検証されていない。AC1 の入力規則の境界（タイトル100／101文字、空白のみ、タグ5／6個、重複、不正なタグ、文字列の tags、本文10000／10001文字）もない。 / 根拠: tests/test_notes.py の create 系は正常系と空題名の 2 件だけ。hooks.before_write の障害注入テストがない。 / 提案: hooks で途中失敗を起こし、notes・note_tags・audit の件数が変わらないことを確認する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: update_note と delete_note の可視性・権限の確認がトランザクションの外にある。確認後に transfer で所有者が変わると、古い所有者の権限で更新が通りうる。version の競合検出は有効で、実害は小さい。 / 提案: 権限の判定をトランザクションの内側で行う。\n- [軽微2] 区分: 実装 / 対象: R8 / 内容: 共有リンクの数字部分の先頭ゼロ（例 `07.…`）が int 化され、同じ署名で別の文字列として検証を通る。また、page に巨大な整数を渡すと OFFSET が桁あふれする。 / 提案: 正規形（先頭ゼロなし）だけを許す。page の上限を設ける。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名だけで不十分（境界・タグ・本文・ロールバックなし）。\n- AC2: V2 は正常な閲覧だけ。他の組織・非公開・存在しないメモの NotFound と、閲覧数の同時加算がなく不十分。実装はコード上は妥当（`views = views + 1` を 1 つのトランザクションで実行）。\n- AC3: V3 は第1ページと検索 1 件だけで不十分。実装は page=0 の欠陥があり、検証もそれを検出できない。\n- AC4: V4 は作成者による更新・削除の正常系だけ。Conflict・Forbidden・管理者・非公開・入力検証がなく不十分。\n- AC5: V5 は件数と管理者以外の拒否だけ。組織外の拒否と途中失敗の巻き戻しがなく不十分。\n- AC6: V6 は action と actor しか見ていない。api_key のマスクを確認しておらず空洞。\n- AC7: V7 は単純な超過と枠の再開（t=61）だけ。ちょうど window 秒の境界と同時呼び出しがなく不十分。\n- AC8: V8 は往復と改ざん 1 件だけ。期限の境界、期限切れ、形の崩れがなく不十分。\n- AC9: V9 に該当するテストなし。\n- AC10: V10 に該当するテストなし。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションなしのテストは見つからなかった。\n### E2E の要否\n- 不要（HTTP や UI がないライブラリで、unittest で足りる）。ただし並行・途中失敗の単体テストが必要。\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8 の検証が不足している。\n- K1: org・非公開の拒否テストなし。\n- K2: 注入文字列と `%` `_` のテストなし。\n- K3: 並行の閲覧・更新・RateLimiter のテストなし。\n- K4・K6: 障害注入テストなし。\n- K5・K7: ログと出力の機密確認テストなし。\n- K8: 形の崩れ・期限ちょうどのテストなし。\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` → 12 件すべて成功。\n- `list_notes(page=0)` を実行 → ValidationError にならず結果が返った（欠陥の再現）。\n- `aqdlc trace` で全 AC が「合格・反証未実施」であることを確認した。`history` は出力を途中で止めたため全件は見ていない。確認した範囲では検証条件の弱体化は見つからなかった。\n- git はコミット 1 件（初期状態）のみ。notes/ と tests/ は未追跡。",
+ "files_changed": [],
+ "valid": true
+}

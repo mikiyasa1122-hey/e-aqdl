@@ -1,0 +1,49 @@
+{
+ "case": "EXC-02",
+ "rep": 2,
+ "sec": 38.0,
+ "exit": 0,
+ "cost_usd": 0.15027669999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23833,
+  "cache_read_input_tokens": 117187,
+  "output_tokens": 4321,
+  "output_tokens_details": {
+   "thinking_tokens": 817
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23833,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2820,
+    "cache_read_input_tokens": 40477,
+    "cache_creation_input_tokens": 2462,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2462
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 763c4b09\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4 / 内容: `delete_note` が例外を握りつぶす。仕様は「失敗したら例外を呼び出し側に伝える（握りつぶさない）」と定めているのに、失敗しても戻り値で成功に見える。 / 根拠: notes/service.py:331-338（`except Exception` で `log.warning` するだけで再送出しない）。`hooks.before_write(\"delete:note\")` で例外を起こせば再現できる。 / 提案: except を外して例外を伝える。ロールバックは `transaction()` が行う。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 内容: タグの検査に使う `TAG_RE = ^[a-z0-9-]{1,20}$` と `.match` では、末尾に改行を付けた \"ab\\n\" が通る（実行して True を確認）。仕様は英小文字・数字・ハイフンの1〜20文字だけを許す。作成・更新・検索のすべてに影響する。 / 根拠: notes/service.py:158, 208, 295。 / 提案: `fullmatch` を使うか `\\Z` で終わらせる。同じ修正を3か所に適用する。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC9, AC10, K1〜K4, K6, K7 / 内容: 検証が空洞に近い。12件のテストはほぼ正常系だけである。次のものが1件もない。\n  - タイトル・本文・タグの境界値と異常系（空白だけのタイトル、101文字、タグ6個、不正なタグ、文字列のタグ）\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - Forbidden、Conflict（古い version）\n  - 同時閲覧で数え漏れがないこと\n  - 途中で失敗したときのロールバック（create・transfer・delete）\n  - 組織をまたぐ移管の拒否\n  - `%` と `_` の検索、SQL インジェクション\n  - 例外の後も接続を使えること（AC10）\n  - ログと出力に機密情報が出ないこと\n  実際、重大1と重大2はこれらのテストがないために見逃されている。 / 根拠: tests/test_notes.py の全体（90行、テスト11件に加えて roundtrip を含む計12件）。設計が用意した `hooks.before_write` は一度も使われていない。 / 提案: 各 AC・K ごとに、条件を外すと失敗する異常系・境界値のテストを追加する。並行実行は `hooks` を使って決定論的に再現する。\n- [重大4] 区分: テスト / 対象: AC7, AC8, K3, K8 / 内容: 境界と同時実行を確かめていない。\n  - RateLimiter: 枠の開始からちょうど window 秒で新しい枠になる境界と、複数スレッドからの同時呼び出しを確かめていない。\n  - 共有リンク: 期限ちょうどでの無効化、期限切れ、形の崩れたリンク（改行付き・非数字・署名の長さ違い・大文字）を確かめていない。tampered は note_id を変えるケース1件だけである。\n  / 根拠: tests/test_notes.py:66-90。 / 提案: 境界の前後（window-ε / window / expires-1 / expires）と、スレッドを使った上限超過の有無のテストを追加する。\n- [重大5] 区分: テスト / 対象: AC9, AC10, R9, R10 / 内容: AC9（機密情報が出ない）と AC10（例外後に接続が使える）を確かめるテストが存在しない。上の表のとおり「合格」と記録されているが、証拠が空洞である。 / 根拠: tests/test_notes.py に `assertLogs` も、例外後の再操作もない。 / 提案: ログと例外メッセージに本文・署名・api_key が含まれないことを検査する。失敗の直後に次の操作が成功することを確かめる。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: 先頭に0を付けた note_id（\"007.…\"）は、`int()` で正規化した値で署名が一致するので有効になる。リンクの形が一意でない。 / 根拠: notes/share.py:115, 137。 / 提案: 正規形（先頭0なし）だけを許すか、受け取った文字列そのもので署名する。\n- [軽微2] 区分: 実装 / 対象: R3 / 内容: `list_notes` の COUNT と SELECT が別々の読み取りなので、total と items が一時的にずれることがある。 / 根拠: notes/service.py:272-274。 / 提案: 許容するなら理由を書く。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名1件だけで不十分。境界値、タグの規則、失敗時に何も残らないことを確かめていない。重大2も検出できていない。\n- AC2: V2 は同時閲覧の数え漏れ、他組織・非公開の NotFound を確かめておらず不十分。閲覧数が増えることすら検証していない。\n- AC3: V3 は1ページ目と単純な検索だけで不十分。page・per_page・sort の範囲外、`%`・`_`、タグの OR、非公開の除外、SQL インジェクションを確かめていない。\n- AC4: V4 は所有者による更新と削除だけで不十分。Conflict、Forbidden、管理者の扱い、削除失敗の伝搬を確かめていない。重大1を見逃している。\n- AC5: V5 は件数の確認だけで不十分。失敗時に元のまま、組織をまたぐ移管の拒否、メモの所有者の確認がない。\n- AC6: V6 は action と actor だけを確認している。api_key の伏せ字（末尾4文字、8文字未満）を確かめておらず不十分。\n- AC7: V7 は基本の動作しか確かめておらず不十分。ちょうど window 秒の境界と同時呼び出しがない。\n- AC8: V8 は正常系と改ざん1件だけで不十分。期限の境界と形の崩れたリンクがない。\n- AC9: V9 は検証が存在せず不十分。\n- AC10: V10 は検証が存在せず不十分。\n- エンジン検出のテスト兆候: なし。skip や弱いアサーションはないが、そもそもテストの数と範囲が足りない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと実際の SQLite の接続（`:memory:`）で十分に確かめられる。必要なのは E2E ではなく、単体テストの拡充である。\n\n### 不足しているリスク\n- K1: 他組織・非公開メモの NotFound を確かめるテストなし。\n- K2: SQL インジェクションと LIKE のエスケープを確かめるテストなし。\n- K3: 同時の閲覧・更新・rate limit のテストなし。\n- K4: ロールバックのテストなし（`hooks` を使っていない）。\n- K5, K7: api_key の伏せ字とログの検証なし。\n- K6: 組織をまたぐ移管のテストなし。\n- K8: 期限の境界・形の崩れたリンクのテストなし。\n\n### 確認したこと\n- spec.md、design.md、`trace`、`history` を読んだ。検証条件を弱めた形跡は見つからなかった。ただしテストが最初から薄い。\n- notes/ の全ファイルと tests/test_notes.py を全行読んだ。\n- `python3 -m unittest discover` を実行し、12件が OK だった（`PYTHONDONTWRITEBYTECODE=1`）。\n- `TAG_RE.match('ab\\n')` を実行し、True（不正なタグが通る）を確認した。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

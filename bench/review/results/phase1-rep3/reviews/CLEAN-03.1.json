@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-03",
+ "rep": 1,
+ "sec": 34.5,
+ "exit": 0,
+ "cost_usd": 0.1387264,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21613,
+  "cache_read_input_tokens": 113084,
+  "output_tokens": 4095,
+  "output_tokens_details": {
+   "thinking_tokens": 1176
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21613,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2721,
+    "cache_read_input_tokens": 36110,
+    "cache_creation_input_tokens": 5636,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5636
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8a9e0a9d\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC10, K1〜K8, V1〜V10, VK1〜VK8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件だけで、すべて正常系か最小限の拒否だけ。仕様の中心になっている次の検証がない。\n  - **認可（K1）**: 他組織・他人の非公開メモの get / 一覧 / 検索 / 更新 / 削除が NotFound か Forbidden になるテストがない。管理者が非公開メモに触れないこと、管理者以外の Forbidden もない。\n  - **SQL インジェクション・LIKE（K2）**: `%` `_` `\\` の検索と、不正なタグ・検索語・page・per_page・sort の拒否がない。`list_notes` の page / per_page / sort の境界値テストもない。\n  - **並行処理・競合（K3, AC2, AC4, AC7）**: 閲覧数の同時加算、Conflict（version 不一致、`hooks.before_write` による割り込み）、RateLimiter のスレッド競合がない。`hooks.before_write` と `RateLimiter.hook` はこのために設計されたのに一度も使われていない。RateLimiter の枠の境界（ちょうど window 秒）もない。\n  - **ロールバック（K4, AC1, AC5, AC10）**: create・delete・transfer の途中失敗で何も残らないこと、例外の後に接続を使い続けられることがない。\n  - **機密情報（K5, K7, AC6, AC9）**: api_key の伏せ字は一度も確かめていない。`test_export_audit` は action と actor 名しか見ていない。ログと例外に本文・署名・api_key が出ないことの検証もない。\n  - **共有リンク（K8, AC8）**: 期限ちょうど、期限切れ、形の崩れ（改行を含むものなど）がない。改ざんは note_id の置換1件だけ。\n  - 認可の条件を外してもテストは落ちない。`trace` の「証拠の状態」もすべて passed_but_unchallenged で、検証が空洞に近い。\n  - 成立条件: 実装のどの規則を壊しても、現状のテストは通る。\n  - 影響: 受け入れ条件の達成を、テストでは確かめられない。\n  - 根拠: tests/test_notes.py 全90行。`python3 -m unittest discover -s tests -t .` は12件OK。\n  - 提案: AC / K ごとに次のテストを足す。\n    - 他組織・他人の非公開・管理者のメモへのアクセスで NotFound / Forbidden になること。\n    - LIKE の特殊文字と不正入力の拒否。\n    - `hooks.before_write` で別接続の更新を割り込ませたときの Conflict。\n    - 複数スレッド（別の接続）での閲覧数の加算。\n    - RateLimiter のスレッド競合と境界（window ちょうど）。\n    - create・delete・transfer を途中で失敗させたときのロールバックと接続の再利用。\n    - 伏せ字（8文字未満・8文字以上）とログ出力。\n    - リンクの期限ちょうど・形の崩れ。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py / 対応区分: 改善提案 / 内容: `007.…` のように先頭ゼロを付けたリンクも、同じ署名で有効になる（署名は `int` 化した値で計算するため）。仕様の形の規則には反しないが、リンクが一意でなくなる。 / 提案: 正規形（先頭ゼロなし）かどうかを検査する。\n- [軽微2] 区分: 実装 / 対象: R4, delete_note・update_note / 対応区分: 改善提案 / 内容: 認可の確認（`_visible` と `_can_modify`）をトランザクションの外で行っている。update は version で守られている。delete は確認の後に所有者が移管されると、元の所有者が削除できる余地がある。 / 提案: 確認を `transaction` の中へ移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけで不十分（文字数・タグ・失敗時に何も残らないことがない）。\n- AC2: V2 は閲覧自体は確認しているが、非公開・他組織・NotFound・閲覧数・同時の加算がなく不十分。\n- AC3: V3 は一覧と検索の正常系だけで不十分（範囲外・LIKE の特殊文字・タグ OR・他人の非公開の除外がない）。\n- AC4: V4 は作成者の更新・削除だけで不十分（Conflict・Forbidden・管理者・非公開がない）。\n- AC5: V5 は件数と管理者以外の拒否だけで不十分（組織またぎ・途中失敗・元のままがない）。\n- AC6: V6 は伏せ字を見ておらず不十分。\n- AC7: V7 は単一スレッドの上限と枠の更新だけで不十分（ちょうど window 秒・並行呼び出しがない）。\n- AC8: V8 は往復と改ざん1件だけで不十分（期限ちょうど・期限切れ・形の崩れがない）。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなし。\n\n### E2E の要否\n- 不要（HTTP のないライブラリで、SQLite を使うユニットテストで十分）。ただし、並行処理と途中失敗はユニットテストで足りる。\n\n### 不足しているリスク\n- K1: 認可の網羅テストがない。\n- K2: LIKE と SQL の入力検証テストがない。\n- K3: 競合と並行処理のテストがない。\n- K4: ロールバックのテストがない。\n- K5, K7: 機密情報のテストがない。\n- K6: 組織またぎの移管のテストがない。\n- K8: 期限と形のテストがない。\n\n### 確認したこと\n- notes/*.py の全ソースを読み、設計との整合を確認した。実装そのものには、仕様違反の欠陥を立証できなかった（上記の軽微2件のみ）。SQL は ? のプレースホルダー、LIKE は ESCAPE、transaction は ROLLBACK と再送出、楽観的ロックは UPDATE の version 条件と rowcount、閲覧数は BEGIN IMMEDIATE の中の加算、RateLimiter はロック内の判定、リンクは fullmatch と `compare_digest` で実装されている。\n- `python3 -m unittest discover -s tests -t .`: 12件OK。\n- `aqdlc trace` と `history --since 0`: 検証条件の弱体化や改ざんは見当たらない。bind は新規のみ。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 3,
+ "sec": 46.2,
+ "exit": 0,
+ "cost_usd": 0.1425002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18086,
+  "cache_read_input_tokens": 121202,
+  "output_tokens": 5802,
+  "output_tokens_details": {
+   "thinking_tokens": 1104
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18086,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3804,
+    "cache_read_input_tokens": 39284,
+    "cache_creation_input_tokens": 2908,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2908
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 内容: 期限の時刻ちょうどでリンクが有効になる。仕様は「期限の時刻ちょうど以降は無効」。 / 根拠: `notes/share.py` の `if int(now ...) > expires`。`make_link('k',1,ttl_sec=10,now=100)` を `verify_link(..., now=110)` に渡すと、Forbidden にならず note_id=1 が返った（私が実行して確認）。`share.py` の docstring は「ちょうどを含む」と書いていて、コードと食い違っている。 / 提案: `>=` に直す。`int(now)` で端数を切り捨てているため、`now=109.9` のような小数でも境界がずれる。切り捨てをやめて数値のまま比較する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検査に `^...$` を使っているので、末尾に改行のあるタグ（`\"abc\\n\"`）を通す。仕様は「英小文字・数字・ハイフンの1〜20文字」。 / 根拠: `notes/service.py` の `TAG_RE` と `TAG_RE.match`。`create_note(conn,u,'t','b',['abc\\n'])` が成功して note_id=1 を返した（私が実行して確認）。`update_note` と `search_notes` も同じ正規表現を使うので同じ穴がある。`share.py` は fullmatch を使っていて、この問題を避けている。 / 提案: `fullmatch` を使うか `\\Z` で終わらせる。\n- [重大3] 区分: テスト / 対象: AC1–AC10, K1–K8 / 内容: 検証が正常系と最小限の異常系だけで、検証条件のほとんどが空洞になっている。テストは12件しかない。 / 根拠: `tests/test_notes.py`。次の項目のテストがない。\n  - 境界値: 題名100/101文字、本文10000/10001文字、タグ5/6個、重複タグ、不正なタグ文字、tags に文字列を渡す場合。\n  - R2 の可視性: 他の組織や他人の非公開メモが NotFound になること。閲覧数の増加と並行時の数え漏れ。\n  - 一覧・検索の範囲外の入力（page=0、per_page=51、不正な sort）。`%`・`_`・SQL 注入文字列、タグの OR 検索、他人の非公開メモが結果に出ないこと。\n  - R4 の Conflict（古い version、競合）と、管理者の更新・削除、他人の Forbidden。\n  - R5 の組織をまたぐ移管の Forbidden と、失敗時のロールバック。\n  - R6 の api_key の伏せ字（末尾4文字、8文字未満）の中身。\n  - R7 の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出し。\n  - R8 の期限の境界、形の崩れたリンク、期限切れ。\n  - R9 の機密情報がログに出ないこと。\n  - R10 の例外の後に接続を使い続けられること。\n  - 設計書が用意した差し込み口（`hooks.before_write`、`RateLimiter.hook`）を使うテストが1件もない。\n  - 重大1・2の欠陥がテストをすり抜けた。 / 提案: 上の項目をすべてテストにする。同時実行と途中の失敗は、差し込み口を使って sleep に頼らず決定論的に再現する。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K3 / 内容: 認可の判定がトランザクションの外にある。`update_note` と `delete_note` は、トランザクションの前に行を読んで `_visible` と `_can_modify` を判定している。その間に別の接続が `transfer_notes` でメモの所有者を変えたり、非公開にしたりすると、古い判定のまま書き込める。`delete_note` には version の条件も存在確認もないので、判定後に削除されたメモにも監査ログを書き、成功を返す。 / 根拠: `notes/service.py` の `update_note`（読み取りが `transaction` より前）、`delete_note`（`DELETE ... WHERE id = ?` だけで rowcount を見ていない）。 / 提案: 権限の判定を `transaction`（BEGIN IMMEDIATE）の中で再読み込みして行う。`delete_note` は rowcount が1でなければ NotFound にする。\n- [重大5] 区分: テスト / 対象: R7, AC7, K3 / 内容: RateLimiter の同時呼び出し（上限を超えて許さない）と、ちょうど window 秒の境界を確かめるテストがない。既存のテストは枠の境界を61秒でしか見ていない。 / 根拠: `tests/test_notes.py` の `RateLimitTest`。 / 提案: 境界は `clock` を使い、60秒ちょうどで新しい枠になることを確かめる。同時呼び出しは、`hook` で順序を制御し、`limit` を超えないことを確かめる。\n- [重大6] 区分: テスト / 対象: R9, AC9, K5, R6, K7 / 内容: 機密情報（本文・署名・api_key）がログや例外に出ないことを確かめるテストも、api_key の伏せ字の中身を確かめるテストも存在しない。`test_export_audit` は action と actor しか見ておらず、`actor_key` を一度も検査していない。 / 根拠: `tests/test_notes.py:42-46`。 / 提案: `assertLogs` でログを集めて機密文字列が含まれないことを確かめる。伏せ字は、8文字未満と8文字以上のそれぞれで期待値を直接比較する。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: リンクの桁数を1〜18桁に制限している。仕様の「10進の数字だけ」とは違う。実害は小さい。 / 提案: 仕様どおりにするか、仕様に桁数の上限を書く。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: `update_note` で `tags` を渡した場合に重複を数えるのは `len(tags)` で正しいが、検査の順序が一部、型の検査より先に走る。 / 提案: 変更なしでもよい。\n- [軽微3] 区分: 設計 / 対象: R2 / 内容: `get_note` の `hooks.before_write(\"view\")` が、トランザクションの外で、`_visible` を確かめた後に呼ばれる。差し込み位置が実際の競合点（UPDATE の直前）と違うため、テストでの再現に使いにくい。 / 提案: トランザクションの内側に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名が空の拒否と正常な作成だけを確かめている。境界値、タグの規則、失敗時に何も残らないことは確かめていない。実装にも改行タグを通す欠陥がある（重大2）。不十分。\n- AC2: V2 は作成者本人が読めることだけを確かめている。他組織・非公開・存在しない場合の NotFound、閲覧数の増加と並行時の数え漏れは確かめていない。不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけを確かめている。範囲外の入力、`%` と `_`、タグでの絞り込み、SQL 注入は確かめていない。不十分。\n- AC4: V4 は作成者の更新と削除の成功だけを確かめている。Conflict、Forbidden、管理者の扱い、非公開メモ、タグの検査、削除が失敗した場合は確かめていない。不十分。\n- AC5: V5 は成功と非管理者の拒否だけを確かめている。組織をまたぐ場合の Forbidden と、失敗時の巻き戻しは確かめていない。不十分。\n- AC6: V6 は `actor_key` の中身を一切確かめていない。api_key の伏せ字は未検証。不十分。\n- AC7: V7 は 61 秒後の再開だけを確かめている。ちょうど60秒の境界と同時呼び出しは確かめていない。不十分。\n- AC8: V8 は往復と改ざんを確かめている。期限の境界、期限切れ、形の崩れは確かめていない。実装にも期限の境界の欠陥がある（重大1）。不十分。\n- AC9: V9 は該当するテストが存在しない。未検証。\n- AC10: V10 は該当するテストが存在しない。未検証。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストは見つからなかった。ただし弱いアサーションの問題は上記のとおり。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テストと SQLite のテスト用データベースで十分に確かめられる。ただし単体テストの不足は重大。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL 注入と `%`・`_` のテストがない。実装は LIKE の ESCAPE とプレースホルダーを使っていて、コード上は妥当に見える。\n- K3: 同時の閲覧・更新・呼び出しは未検証。認可のトランザクション外判定（重大4）もある。\n- K4: 途中で失敗したときの巻き戻し（作成・削除・移管）は未検証。差し込み口は用意されているが使われていない。\n- K5: 機密情報の露出は未検証。\n- K6: 移管で組織の外に渡ることは未検証。\n- K7: 監査ログの api_key は未検証。\n- K8: 期限の境界で欠陥あり（重大1）。\n\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を全部読んだ。\n- `$AQ trace` と `$AQ history --since 0` を実行した。検証条件を弱めた変更は見つからなかった。ただし V1〜V10 の検証内容は「単体テストで確かめる」と書かれているだけで、中身がない。\n- `python3 -B -m unittest discover -s tests -t .`: 12件が通った。ただし網羅は不十分。\n- 再現:\n  - `verify_link` を期限ちょうど（now=110、expires=110）で呼ぶと、note_id が返る（Forbidden にならない）。\n  - タグ `'abc\\n'` で `create_note` が成功する。\n- `gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

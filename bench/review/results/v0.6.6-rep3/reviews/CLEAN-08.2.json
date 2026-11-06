@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-08",
+ "rep": 2,
+ "sec": 45.5,
+ "exit": 0,
+ "cost_usd": 0.1580339,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23234,
+  "cache_read_input_tokens": 116219,
+  "output_tokens": 5346,
+  "output_tokens_details": {
+   "thinking_tokens": 1331
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23234,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3223,
+    "cache_read_input_tokens": 39254,
+    "cache_creation_input_tokens": 3086,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3086
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8cfb3494\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC4, AC7, K3, V2, V4, V7, VK3 / 内容: 並行の検証が1件もない。設計書はテストの差し込み口（`service.hooks.before_write`、`RateLimiter.hook`）を用意しているが、どのテストも使っていない。次の3つを確かめるテストがない。閲覧数の数え漏れ、更新の Conflict（version 不一致、読み出しと書き込みの間の割り込み）、RateLimiter の複数スレッドでの上限。 / 根拠: tests/test_notes.py（全90行、12テスト）に `hooks`・`threading`・`Conflict` の参照がない。`RateLimitTest` は直列に呼ぶだけ。 / 提案: 差し込み口で割り込みを決定論的に再現するテストを足す。具体的には、`before_write(\"update\")` の中で別の接続から更新し、Conflict になることを確かめる。`before_write(\"view\")` や `RateLimiter.hook` でも同様にする。sleep には頼らない。\n- [重大2] 区分: テスト / 対象: AC1, AC5, AC10, K4, K6, V1, V5, V10, VK4, VK6 / 内容: ロールバックと原子性の検証がない。`create:tags`、`delete:note`、`transfer:{id}` の途中で失敗させても、何も残らないことや元のままであることを確かめていない。例外の後に接続を使い続けられることも確かめていない。 / 根拠: tests/test_notes.py に、フックから例外を投げるテストや `in_transaction` の確認がない。`test_transfer` は件数が2件であることしか見ていない。 / 提案: 各フックから例外を投げ、メモ・タグ・監査ログの件数が変わらないことと、次の操作が成功することを確かめる。\n- [重大3] 区分: テスト / 対象: AC2, AC3, AC4, AC5, K1, K2, K6, VK1, VK2, VK6 / 内容: 認可と拒否の異常系が未検証。次のものがすべてテストにない。他の組織や他人の非公開メモが NotFound になること。一覧・検索から漏れないこと。member による更新・削除が Forbidden になること。管理者が非公開メモを扱うと NotFound になること。組織をまたぐ移管が Forbidden になること。page・per_page・sort の範囲外が ValidationError になること。`%`・`_` の扱い。SQL インジェクション文字列。タグの OR 絞り込み。 / 根拠: tests/test_notes.py は正常系と `test_empty_title_rejected`・`test_transfer_requires_admin` だけ。 / 提案: 上記を網羅し、認可の条件を外したら失敗するテストにする。\n- [重大4] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 内容: タグの検証が末尾の改行を通す。`TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っており、`$` が末尾の `\\n` に一致するため、`\"abc\\n\"` が有効なタグとして保存される。仕様は「英小文字・数字・ハイフンの1〜20文字」。 / 根拠: notes/service.py:14、:67、:152。再現では `create_note(..., ['abc\\n'])` が成功し、note_tags に `'abc\\n'` が入った。share.py は `fullmatch` で同じ落とし穴を避けている。 / 提案: `TAG_RE.fullmatch`、または `\\Z` を使う。更新時と検索時の検査も同じ関数にまとめ、`\"abc\\n\"` を拒否するテストを足す。\n- [重大5] 区分: テスト / 対象: AC6, AC8, K7, K8, AC9, K5, V6, V8, V9, VK5, VK7, VK8 / 内容: 次の検証がない。api_key の伏せ字（末尾4文字だけ残す、8文字未満は全部伏せる、境界の8文字）。共有リンクの期限ちょうどでの無効、期限切れ、形の崩れ（改行付き、桁違い、大文字の16進）、署名の改ざん。ログや例外に本文・署名・api_key が出ないこと。 / 根拠: `test_export_audit` は action と actor しか見ていない。`ShareTest` はラウンドトリップと note_id の改ざんだけ。R9 のテストは存在しない。 / 提案: 境界値と異常系を足す。`assertLogs` で出力に機密情報がないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 内容: `update_note` と `delete_note` の認可チェックがトランザクションの外にある。`transfer_notes` や削除との競合時、古い行で認可が決まる。version 判定があるので更新は Conflict になるが、削除は対象が既に消えていても成功する。 / 根拠: notes/service.py:157-170、:182-190 / 提案: 認可の確認をトランザクション内で再度行うか、削除の rowcount を確認する。\n- [軽微2] 区分: 実装 / 対象: R8 / 内容: 先頭ゼロ付きの note_id（`007.…`）が int に直して署名されるため、正規化前の形でも通る。害は小さい。 / 根拠: notes/share.py:14、:30 / 提案: 正規形（`str(int)` と一致）を要求する。\n- [軽微3] 区分: テスト / 対象: 全体 / 内容: 受け入れ条件ごとの追跡では全 V が「合格」だが、実体は12件の正常系中心のテストで、反証テストも無効。合格の根拠として弱い。 / 提案: 上の重大1〜3・5を直した後に再度 gate を通す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成成功と空題名の拒否だけで不十分。長さの境界、タグの規則、原子性が未検証で、実装にもタグの欠陥がある。\n- AC2: V2 は閲覧そのものと閲覧数の同時増加がどちらも未検証で不十分。他組織・非公開の NotFound もない。\n- AC3: V3 は一覧の先頭ページと単純な検索だけで不十分。範囲外の拒否、`%`・`_`、タグの OR、インジェクション、非公開の除外がない。\n- AC4: V4 は作成者の更新・削除の正常系だけで不十分。Forbidden、NotFound、Conflict、管理者の扱い、削除失敗の伝播が未検証。\n- AC5: V5 は管理者であることと件数だけで不十分。組織をまたぐ拒否、全部か何もしないか、他組織の移管が未検証。\n- AC6: V6 は api_key を一切確かめておらず、空洞化している。\n- AC7: V7 は直列の上限と枠の入れ替わりだけで不十分。枠の境界ちょうどの時刻（`now-start == window`）と複数スレッドが未検証。\n- AC8: V8 は正常系と note_id の改ざんだけで不十分。期限ちょうどと期限切れ、形の崩れが未検証。\n- AC9: V9 に対応するテストがない。\n- AC10: V10 に対応するテストがない。\n- エンジンが検出したテストの兆候は「なし」。skip・.only は見つからず、テストの改ざんや弱体化も見当たらない（`git status` ではすべて未追跡で、diff の対象がない）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、検証は SQLite を使った単体テストで足りる。ただし並行・異常系のテストが必要で、現状は不足している。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。実装は `_visible` で絞っており、読んだ限りでは問題なかった。\n- K2: SQL インジェクションのテストがない。実装は読んだ限りプレースホルダーで、`ORDER BY` は許可リストを使っていた。\n- K3: 並行の閲覧・更新・呼び出しは再現できていない（未検証）。\n- K4・K6・K10: ロールバックと原子性のテストがない。\n- K5・K7・K8: 検証がほぼない。\n- R9: ログ出力の検証がない。実装は ID だけをログに出しており問題は見つからなかった。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を全文読んだ。\n- `python3 -B -m unittest discover -s tests` を実行した。12件が OK。\n- 再現: `create_note(c,u,'t','b',['abc\\n'])` が成功し、note_tags に `'abc\\n'` が保存された。\n- `aqdlc trace` と `history --since 0` を確認した。検証条件の弱体化は見当たらない。\n- `gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

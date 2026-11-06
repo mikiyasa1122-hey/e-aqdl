@@ -1,0 +1,33 @@
+{
+ "case": "VAL-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0637737,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込んだ欠陥そのものです。`_validate` にタグの個数の検査がなく、作成と更新で6個以上のタグが保存されます。報告は `service.py:56-62` を挙げ、原因と影響が正解データと一致しています。実行結果の根拠もあります。\n\n**重大2**: テストの不足だけを指摘しており、`test_gap` です。コードの欠陥の主張ではありません。\n\n**重大3**: 報告者自身が取り下げています。`update_note` は権限判定を `transaction()` の外で行いますが、version 条件があり、`transfer_notes` も version を増やします。顕在化する経路は確認されていないため、欠陥とは言えません。レビュー担当は軽微1へ移したので、`false_positive` ではなく `style` とします。\n\n**軽微1**: transaction 内での再読み込みと `DELETE` の rowcount 確認は、将来の変更への強さを狙う改善提案で、`style` です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_validate にタグの個数の検査がなく6個以上が保存されるという、埋め込んだ欠陥と同じ箇所・同じ原因・同じ影響の指摘。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"style\", \"reason\": \"報告者自身が取り下げており、実害の経路が確認できない保守性の提案に留まる。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"transaction 内での再読み込みと rowcount 確認は、欠陥ではなく改善提案。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、タグの個数の検査がない欠陥を、箇所・原因・影響まで正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_validate にタグの個数の検査がなく6個以上が保存されるという、埋め込んだ欠陥と同じ箇所・同じ原因・同じ影響の指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "style",
+    "reason": "報告者自身が取り下げており、実害の経路が確認できない保守性の提案に留まる。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "transaction 内での再読み込みと rowcount 確認は、欠陥ではなく改善提案。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、タグの個数の検査がない欠陥を、箇所・原因・影響まで正確に捉えている。"
+ }
+}

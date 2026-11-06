@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 2,
+ "sec": 35.8,
+ "exit": 0,
+ "cost_usd": 0.1123073,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14370,
+  "cache_read_input_tokens": 119113,
+  "output_tokens": 4290,
+  "output_tokens_details": {
+   "thinking_tokens": 667
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14370,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3214,
+    "cache_read_input_tokens": 36105,
+    "cache_creation_input_tokens": 4426,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4426
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7 / 対応区分: 修正必須 / 内容: `RateLimiter.hit` の枠切り替えの比較が `now - start > self.window` になっている。仕様は「枠の開始からちょうど window 秒たったら新しい枠」なので `>=` が必要。 / 成立条件: 枠の開始から経過時間がちょうど window 秒のとき（例: limit=1, window=60 で t=0 に1回、t=60 に1回）。 / 影響: 新しい枠のはずの呼び出しが `RateLimited` で拒否される。利用者が不当に書き込みを止められる。 / 確認した保証: 上流に補正はなく、既存テストは t=61 しか見ていない。 / 根拠: notes/ratelimit.py:21 / 提案: `>` を `>=` に直し、t=window ちょうどと window-ε の境界テストを追加する。\n- [重大2] 区分: 実装 / 対象: R2, AC2, K3 / 対応区分: 修正必須 / 内容: `get_note` の可視性判定が1回目は transaction の外、2回目は transaction の中に分かれている。1回目に通ったあと、UPDATE の前に他の接続が削除・非公開化すると、UPDATE は0件になる。2回目の `_visible` で NotFound になるので、見えないメモは返らない。ただし閲覧数の更新後の row を使っており、更新件数は確認していない。行がなければ `_visible(None)` が False になって NotFound になるので、実害は小さい。 / 影響: 実害が確認できていないので、証拠不足としてこの項目は[重大3]に統合する。 / 提案: [重大3]を参照。\n- [重大3] 区分: テスト / 対象: AC1〜AC10 / 対応区分: 証拠不足 / 内容: テストは12件で正常系が中心。受け入れ条件のうち次の異常系・境界・競合・失敗時の検証がない。\n  - AC1: タグ6個や不正タグ、本文が10000文字を超える場合の拒否。`before_write` で途中失敗させて何も残らないこと\n  - AC2: 他の組織・他人の非公開メモの NotFound。閲覧数の加算と、同時閲覧での数え漏れなし\n  - AC3: 範囲外の page / per_page / sort。`%` や `_` を含む検索語。SQL インジェクション文字列。タグ OR。他人の非公開メモが一覧に出ないこと\n  - AC4: Conflict（古い version）、Forbidden、管理者による更新・削除。更新時のタグ検証。削除失敗の伝播\n  - AC5: 他の組織への移管の拒否。途中失敗でのロールバック\n  - AC6: api_key の伏せ字（末尾4文字、8文字未満）。`test_export_audit` は action と actor しか見ていない\n  - AC7: 同時呼び出し。`hook` を使った決定論的な再現\n  - AC8: 期限ちょうど、期限切れ、形の崩れたリンク。`test_tampered` は改ざん1パターンだけ\n  - AC9: ログ・例外に本文・署名・api_key が出ないこと\n  - AC10: 例外の後に同じ接続を使い続けられること\n\n  これらは K1〜K8 の主要リスクに対応する必須の検証で、空洞化している。重大1の境界バグもこの不足のため検出されていない。設計が用意した `service.hooks.before_write` と `RateLimiter.hook` は、テストで一度も使われていない。 / 根拠: tests/test_notes.py 全体（90行）。`python3 -m unittest` は12件通過したが、上の項目を確かめていない。 / 提案: 上記の項目ごとに、期待される失敗を確認するテストを追加する。競合は sleep ではなく hook で再現する。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` は row の読み出しと認可判定を transaction の外で行い、`_validate` の既定値にも読み出し時点の title / body を使う。UPDATE の条件は `version = ?` だけなので、version の一致は保証されるが、この点は仕様の範囲で成立している。実害のある欠陥は確認できていないため、この項目は取り下げる（[重大5]とは別。件数に含めない場合は下記の集計を参照）。\n- [重大5] 区分: 実装 / 対象: R1, R4（タグの検証）/ 対応区分: 修正必須 / 内容: `_validate` では `len(tags) > 5` の判定があり、タグの重複も数える仕様どおり。しかし `search_notes` の `tags` が文字列そのもの（例 `\"abc\"`）の場合は `_tag_list` で拒否されるので問題ない。実在する欠陥は確認できなかった。取り下げる。\n\n上の[重大2]・[重大4]・[重大5]は、確認の結果、実在する欠陥にならなかったので取り下げる。有効な重大指摘は次の2件。\n\n- [重大1] RateLimiter の枠の境界（上記）\n- [重大3] 受け入れ条件の検証の空洞化（上記）\n\n集計は、重大2件・軽微1件として扱う。\n\n- [軽微1] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: `transfer_notes` は `updated_at` を更新しない。仕様に更新日時の記載はないので動作の不備ではない。 / 提案: 一覧の updated 順に反映したいなら更新日時も更新する。\n\n### 重大な指摘の確定（エンジンが読み取る数）\n重大な指摘: 2（[重大1]、[重大3]）。ヘッダの「5」は誤り。正しくは次のとおり。\n\n```\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\n```\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。タグ・本文の境界、途中失敗でのロールバックが未検証。\n- AC2: 作成者本人の閲覧しか確かめていないので不十分。NotFound の隠蔽、閲覧数、同時閲覧が未検証。\n- AC3: 一覧は1ページ目と件数、検索は1件の一致だけで不十分。異常系、LIKE のエスケープ、タグ OR、非公開の除外が未検証（実装はコード上は仕様どおり）。\n- AC4: 作成者による更新・削除だけで不十分。Conflict、Forbidden、管理者の操作が未検証。\n- AC5: 件数だけを見ており不十分。拒否とロールバックが未検証。\n- AC6: 伏せ字を一切確かめていないので不十分。\n- AC7: 枠の境界（ちょうど window 秒）と同時呼び出しが未検証で、境界のバグを見逃している。\n- AC8: 往復と改ざん1件だけで不十分。期限ちょうど、期限切れ、形の崩れが未検証。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。\n\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリで、unittest の結合テストで足りる）。ただし並行処理は別接続・別スレッドのテストが必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモが見えないことの検証がない。\n- K2: インジェクション文字列を使う検証がない。\n- K3: 更新・閲覧・RateLimiter の同時実行の検証がない。\n- K4: ロールバックの検証がない（hooks が未使用）。\n- K5・K7: api_key の伏せ字、ログ・例外の機密情報の検証がない。\n- K6: 他の組織への移管の拒否と、一部だけ移ることがないことの検証がない。\n- K8: 期限の境界と形の崩れたリンクの検証がない。\n\n### 確認したこと\n- 仕様・設計と notes/*.py の全ソースを読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件通過。\n- `aqdlc history --since 0` で、テストや検証条件を弱めた変更は見つからなかった。\n- 実装の確認結果:\n  - SQL はプレースホルダーで、LIKE は ESCAPE されている。\n  - 認可は `_visible` と `_can_modify` にまとまっている。\n  - 共有リンクは `fullmatch` と `compare_digest` で検証している。\n  - ratelimit の境界比較が仕様と食い違っている（重大1）。\n- 並行実行や hook を使うテストは実行していない（存在しないため）。",
+ "files_changed": [],
+ "valid": true
+}

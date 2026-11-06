@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-01",
+ "rep": 1,
+ "sec": 44.5,
+ "exit": 0,
+ "cost_usd": 0.1474013,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20687,
+  "cache_read_input_tokens": 114073,
+  "output_tokens": 5323,
+  "output_tokens_details": {
+   "thinking_tokens": 1165
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20687,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3599,
+    "cache_read_input_tokens": 36630,
+    "cache_creation_input_tokens": 4190,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4190
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3985b563\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC10、K1〜K8、V1〜V10・VK1〜VK8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件だけで、正常系を1本ずつ確かめるにとどまる。異常系・境界値・同時実行・途中の失敗は1件もない。V1〜V10 と VK1〜VK8 はすべて同じ `unit` チェックに紐づけてあるが、実際にはほとんど空洞だ。 / 成立条件: 仕様が求める拒否・境界・競合の挙動を壊しても、gate が通る。 / 影響: 次の受け入れ条件とリスクが未検証のまま完了扱いになる。 / 根拠: tests/test_notes.py の全90行を確認した。未検証の項目は次のとおり。\n  - AC1/K4: 題名100文字・101文字や空白のみ、本文10000文字、タグ6個・不正文字、tags に文字列を渡した場合の拒否は未検証。タグ重複の除去も未検証。`hooks.before_write(\"create:tags\")` で途中失敗させて何も残らないことを確かめるテストもない。\n  - AC2/K1/K3: 他の組織・他人の非公開・存在しないメモが NotFound になることは未検証。閲覧数が1ずつ増えること、同時閲覧で数え漏れがないことも未検証。\n  - AC3/K2: page=0、per_page=51、不正な sort の拒否は未検証。`%` と `_` の扱い、タグ OR 絞り込み、他人の非公開メモの除外、SQL インジェクション文字列も未検証。\n  - AC4/K3: 古い version での Conflict、`hooks.before_write(\"update\")` で割り込んだ更新との競合、member の Forbidden、管理者による更新・削除、非公開メモの NotFound は未検証。更新時のタグ検証も未検証。削除の途中失敗が例外として伝わり、ロールバックされることも未検証。\n  - AC5/K6: 組織外への移管の Forbidden と、途中失敗時に元のままになる巻き戻しは未検証。test_transfer は件数しか見ておらず、所有者が実際に変わったかも見ていない。\n  - AC6/K7: test_export_audit は action と actor しか見ない。`actor_key` の伏せ字（末尾4文字、8文字未満は全部伏せ）は未検証。\n  - AC7: ちょうど window 秒での枠の切り替え（t=60）は未検証。test_limit は t=61 しか見ていない。`RateLimiter.hook` を使った並行テストもない。\n  - AC8/K8: 期限ちょうど（now==expires）、期限切れ、署名の改ざん、形の崩れたリンクは未検証。test_tampered が確かめているのは note_id の書き換えだけ。\n  - AC9/K5: ログや例外メッセージに本文・署名・api_key が出ないことを確かめるテストがない。\n  - AC10: 例外の後で同じ接続を使い続けられることを確かめるテストがない。\n  提案: 上の項目ごとに、期待値を厳密に見るテストを追加する。並行系と途中失敗系は `service.hooks` と `RateLimiter.hook` を使い、sleep に頼らず決定論的に再現する。巻き戻しのテストは、`hooks.before_write` で例外を出して件数が元のままであることを見る形にする。\n\n- [重大2] 区分: 実装 / 対象: R4・K3・K1、notes/service.py の delete_note（約158〜168行）/ 対応区分: 修正必須 / 内容: delete_note は、権限確認（`_row` → `_visible` → `_can_modify`）をトランザクションの外で行う。BEGIN IMMEDIATE の後は再確認しない。そのため、確認から書き込みまでの間に管理者が `transfer_notes` でメモを別の利用者へ移すと、古い所有者（member）がもう権限のないメモを削除できてしまう。DELETE の条件は `WHERE id = ?` だけで、所有者を絞っていない。すでに削除されたメモでも、0行の DELETE のあとに「delete」の監査ログを書いてしまう。 / 成立条件: 利用者Aが所有するメモで A の delete_note が `_can_modify` を通過し、BEGIN IMMEDIATE を取る前に、管理者の transfer_notes が commit する。 / 影響: 移管後は他人のメモになっているのに、削除権限のない member がそれを消せる。認可がサーバー側の最新状態に基づかず、データも失われる。 / 確認した保証: 上流の検証や DB の制約は無い（DELETE に所有者条件も version もない）。update_note には UPDATE の version 条件があるので同種の問題は起きない。これは delete_note にだけ当てはまる。コードの経路だけで立証できる。再現は実行していない。 / 提案: transaction 内で行を再取得して `_visible` と `_can_modify` を再判定する。行がなければ NotFound にする。または DELETE の条件に owner_id か権限条件を加え、rowcount で判定する。あわせて、`hooks.before_write` で割り込む決定論的なテストを追加する。\n\n- [軽微1] 区分: 実装 / 対象: R3、service.py の list_notes / 対応区分: 改善提案 / 内容: `sort` に list などの unhashable な値を渡すと、`sort not in SORT_COLUMNS` が ValidationError ではなく TypeError になる。 / 提案: 先に `isinstance(sort, str)` を確かめる。\n\n- [軽微2] 区分: 実装 / 対象: R8、share.py の verify_link / 対応区分: 改善提案 / 内容: note_id を `int()` に変換してから署名するため、先頭にゼロを付けた \"007.exp.sig\" と \"7.exp.sig\" が同じ署名で通る。 / 提案: 正規形（先頭ゼロなし）だけを受け付けるか、元の文字列で署名する。\n\n- [軽微3] 区分: 実装 / 対象: R2、service.py の get_note / 対応区分: 改善提案 / 内容: `hooks.before_write(\"view\")` が、トランザクションの外の可視性確認と BEGIN の間にある。同時実行テストの差し込みには使えるが、`views` の更新が UPDATE の相対加算で原子的であることを確かめるテストがまだない。 / 提案: 重大1のテストに含める。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで不十分。境界値、タグ規則、途中失敗時のロールバックを確かめていない。\n- AC2: 不十分。閲覧のたびに閲覧数が増えることも、非公開・他組織の NotFound も、同時閲覧も確かめていない。\n- AC3: test_list_first_page と test_search だけで不十分。範囲外の拒否、LIKE のエスケープ、タグ OR、インジェクション、非公開の除外が未検証。\n- AC4: test_update_by_owner と test_delete_by_owner だけで不十分。Conflict、Forbidden、競合、削除の失敗が未検証。実装にも重大2の欠陥がある。\n- AC5: test_transfer と test_transfer_requires_admin だけで不十分。組織の境界、所有者が実際に変わったこと、全部か何もしないか、が未検証。\n- AC6: 不十分。伏せ字を一切確かめていない。\n- AC7: 部分的。上限を超えて拒否することと、枠が明けた後の通過は確かめている。ちょうど window 秒の境界と並行呼び出しは未検証。\n- AC8: 部分的。正常系と note_id 改ざんだけで、期限の境界、期限切れ、形の崩れは未検証。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。skip・only はなく、アサーションもある。ただし数が少なく、V1〜V10 と VK1〜VK8 を実際に裏付けていない。\n- 検証条件の弱体化: `history` に、弱める変更は見当たらない。すべて初回の bind。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使う unittest で十分に確かめられる。必要なのは、並行・巻き戻しを決定論的に再現する統合テスト。\n\n### 不足しているリスク\n- K1（delete の認可の TOCTOU。重大2）\n- K3（閲覧数・更新・rate limit の並行）\n- K4（作成・削除・移管の途中失敗）\n- K5/K7（機密の伏せ字・ログ）\n- K8（共有リンクの境界）\n- K2（インジェクション・LIKE エスケープ）\n  上のいずれも検証がない（重大1を参照）。\n\n### 確認したこと\n- spec.md と design.md を全文読んだ。\n- notes/*.py と tests/test_notes.py を全行読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件すべて OK だった（ただし、上のとおり検証範囲が狭い）。\n- `aqdlc history --since 0` で、検証条件が弱められていないことを確認した。\n- 実装の他の部分は、仕様と設計に沿っていると判断した。\n  - プレースホルダーと ESCAPE の使い方、`transaction()` のロールバック、update の version 条件、枠の境界 `>=`、期限の境界 `>=`、`compare_digest`、ログに機密を出さない点を確認した。\n  - 伏せ字の規則（8文字未満は全部、それ以外は末尾4文字以外）にも誤りは見つからなかった。\n- コードは変更していない。gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

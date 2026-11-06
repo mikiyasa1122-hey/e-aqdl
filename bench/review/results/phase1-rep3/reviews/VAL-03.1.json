@@ -1,0 +1,49 @@
+{
+ "case": "VAL-03",
+ "rep": 1,
+ "sec": 30.9,
+ "exit": 0,
+ "cost_usd": 0.1213245,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18200,
+  "cache_read_input_tokens": 113185,
+  "output_tokens": 3719,
+  "output_tokens_details": {
+   "thinking_tokens": 465
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18200,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2793,
+    "cache_read_input_tokens": 36162,
+    "cache_creation_input_tokens": 2171,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2171
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0f27a8ba\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4, K2 / 対応区分: 修正必須 / 内容: タグの正規表現 `TAG_RE = r\"^[a-z0-9-]{1,20}\"` に末尾の固定（`$` や fullmatch）がなく、`TAG_RE.match` は先頭の一致だけで通る。そのため21文字以上のタグ、`ab!` のような不正な文字を含むタグ、末尾に改行があるタグが検査を通る。 / 成立条件: `create_note`、`update_note`、`search_notes` の tags に、21文字以上の文字列か、先頭だけ規則に合う文字列を渡す。 / 影響: 「各タグは英小文字・数字・ハイフンの1〜20文字」という仕様に反して、不正なタグが note_tags に保存される。検索の絞り込みにも不正なタグを渡せる。 / 根拠: notes/service.py:13 と、`_validate`（service.py:60 付近）、`search_notes` の検査。実行結果は `TAG_RE.match('a'*30)`、`match('ab!')`、`match('ab\\n')` がすべて True。上流で別の検証はなく、DB の制約もない。 / 提案: `TAG_RE.fullmatch` を使うか、パターンを `^[a-z0-9-]{1,20}\\Z` にする。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, K1, K3, K4, K6 / 対応区分: 証拠不足 / 内容: テストは正常系の12件だけである。次の検証が1件もない。\n  - 異常系の検証がない: タグ・題名・本文の境界値、他の組織・他人の非公開メモが NotFound になること、一覧の page・per_page・sort の範囲外、`%` と `_` の検索、タグの OR 絞り込み、SQL インジェクション。\n  - 権限・競合の検証がない: 更新・削除の Forbidden と Conflict（version 不一致と読み出し〜書き込みの間の割り込み）、移管で別の組織が拒否されること、途中で失敗したときのロールバック（`hooks.before_write` を使う）、閲覧数の同時加算。\n  - 弱い検証もある: `test_transfer` は移管件数しか見ておらず、移管後の owner を確認していない。`test_delete_by_owner` はタグが消えたことを確認していない。 / 提案: 上記を決定論的なテスト（hooks を使い、sleep に頼らない）で追加する。また、更新条件・認可条件を外したら失敗することを確かめる。\n- [重大3] 区分: テスト / 対象: AC6, AC7, AC8, AC9, AC10, K3, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。\n  - api_key の伏せ字（8文字未満・ちょうど8文字・末尾4文字）。\n  - RateLimiter の枠の境界（ちょうど window 秒で新しい枠になること）と、複数スレッドの同時呼び出しで上限を超えないこと（`RateLimiter.hook` を使う）。\n  - 共有リンクの期限の境界（期限ちょうどが無効）、形の崩れたリンク、署名の改ざん、note_id や期限が数字でないリンク。\n  - ログ・例外に本文・署名・api_key が出ないこと（caplog 相当）。\n  - 例外の後に接続が使い続けられること。 / 提案: 上記のテストを追加する。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 証拠不足 / 内容: 読み出しから書き込みの間の割り込みに対する Conflict は、UPDATE の `WHERE version = ?` で判定している。この設計自体は妥当である。ただし、更新後に権限を失う場合や、削除との競合で NotFound か Conflict かを区別する検証がない。`hooks.before_write(\"update\")` の差し込み口はあるが、使うテストがない。AC4 の主要な保証が未検証である。 / 提案: `before_write(\"update\")` の中で別の接続から更新・削除し、Conflict になることと先の更新が残ることを確認する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` は `tags=None` のとき既存タグを維持するが、`title`/`body` が None の扱いと合わせた仕様の記述がない。また、可視性と権限の確認がトランザクションの外にある。UPDATE の version 条件があるため、動作上は問題にならない。 / 提案: 仕様書に `None` の意味を一行足す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、不十分。タグの規則違反、境界値、ロールバックの検証がなく、実装にもタグの欠陥がある（重大1・2）。\n- AC2: 検証がない。可視性、NotFound の統一、閲覧数の同時加算とも未検証。不十分（重大2）。\n- AC3: `test_list_first_page` と `test_search` の正常系だけ。範囲外・LIKE のエスケープ・タグ OR・SQL インジェクションが未検証。不十分。\n- AC4: 所有者の更新・削除の正常系だけ。Forbidden・Conflict・非公開が未検証。不十分。\n- AC5: 管理者でないときの拒否と件数だけ。他の組織の拒否と途中の失敗時の巻き戻しが未検証。不十分。\n- AC6: 実際の伏せ字を確認しておらず、不十分。\n- AC7: 逐次の境界は一部検証している（limit=2 で拒否し、61秒後に許可）。ただしちょうど window 秒の境界と同時呼び出しがなく、不十分。\n- AC8: 往復と改ざんのみ。期限の境界と形の崩れが未検証。不十分。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし（skip や `.only` もない）。\n- 検証条件・テストの改ざんや弱体化: git に履歴がなく、確認できる範囲では見当たらない。\n\n### E2E の要否\n- 不要（HTTP のないライブラリで、SQLite の単体・結合テストで足りる）。ただし並行実行のテストは別の接続・別のスレッドで必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモが漏れないことの検証がない。\n- K2: SQL インジェクションの検証がない（実装はプレースホルダーと ESCAPE を使っている）。\n- K3: 同時の更新・閲覧・呼び出しで更新や数が失われないことの検証がない。\n- K4: 途中の失敗での不整合がないことの検証がない。\n- K5, K7: api_key とログの機密情報の検証がない。\n- K6: 移管で組織の外にメモが渡らないことと、全部か何もしないかの検証がない。\n- K8: 共有リンクの期限・改ざん・形の崩れの検証が不足している。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover` で12件が OK だった。\n- `TAG_RE.match` に 30文字、`ab!`、`ab\\n` を渡し、すべて True になることを確認した（重大1）。\n- `$AQ trace`、`$AQ history`、gate は実行していない。実装報告は読んでいない。",
+ "files_changed": [],
+ "valid": true
+}

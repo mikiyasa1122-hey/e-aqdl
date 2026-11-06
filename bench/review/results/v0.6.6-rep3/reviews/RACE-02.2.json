@@ -1,0 +1,49 @@
+{
+ "case": "RACE-02",
+ "rep": 2,
+ "sec": 38.0,
+ "exit": 0,
+ "cost_usd": 0.15685680000000002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 24010,
+  "cache_read_input_tokens": 159368,
+  "output_tokens": 4486,
+  "output_tokens_details": {
+   "thinking_tokens": 761
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24010,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2781,
+    "cache_read_input_tokens": 42739,
+    "cache_creation_input_tokens": 377,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 377
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d865c6b5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3 / 内容: 閲覧数が同時の閲覧で数え漏れする。`get_note` は閲覧数を BEGIN の前に読み出し、`UPDATE notes SET views = ? ` で `views+1` の絶対値を書いている。読み出しから書き込みの間に別の接続が閲覧すると、片方の増分が消える。 / 根拠: notes/service.py:209-212。再現: 一時 DB に接続を2つ作り、`hooks.before_write(\"view\")` の中で別の接続から `get_note` を呼ぶ。閲覧は2回なのに views が 1 になった（期待は 2）。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` とし、可視性の確認は transaction 内で読み直した行で行う。事前の `views` の読み出しは削除する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 内容: テストが12件しかなく、ほとんどの受け入れ条件とリスクを確かめていない。正常系が中心で、仕様が求める異常系・境界値・並行・失敗の注入がない。特に次が欠けている。 (a) R1: 題名100/101文字、空白だけの題名、本文10000文字、タグ5/6個、重複タグ、不正なタグ、tags に文字列を渡す、途中失敗で何も残らないこと。 (b) R2/K1: 他の組織・他人の非公開・存在しない id が NotFound になること、閲覧数の同時加算。 (c) R3/K2: page・per_page・sort の範囲外、`%` と `_` のリテラル検索、タグ OR、SQL インジェクション文字列、他人の非公開が結果に出ないこと。 (d) R4/K3: Forbidden、管理者に非公開メモが見えないこと、Conflict（古い version・更新の割り込み）、削除の失敗が呼び出し側に伝わること。 (e) R5/K6: 他の組織への移管の拒否、途中失敗時に元のままであること。 (f) R6/K7: api_key のマスク（8文字未満・境界）。`test_export_audit` は action と actor しか見ておらず、マスクを確認していない。 (g) R7: 枠の境界ちょうど window 秒、スレッド並行。 (h) R8/K8: 期限ちょうど、期限切れ、形の崩れ、末尾の改行。 (i) R9: ログや例外に本文・署名・api_key が出ないこと。 (j) R10: 例外後の接続の再利用。このため重大1のバグも検出されなかった。 / 根拠: tests/test_notes.py:16-87。`hooks.before_write` と `RateLimiter.hook` の差し込み口は、tests から一度も使われていない。 / 提案: 上記を AC・K ごとに追加する。並行は sleep ではなく差し込み口で決定論的に再現する。更新条件・認可条件を外したら失敗することを確かめる。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3 / 内容: `update_note` は、認可と可視性を transaction の外で読んだ行で判定している。そのため、読み出し後に所有者や公開設定が変わっても（例: 移管やメモの削除）、古い判定のまま更新が通る。version は `transfer_notes` で増えるので Conflict にはなるが、`transfer` が先に完了しても、呼び出し側が古い version を渡していなければ検出されない。また `delete_note` には version 条件がなく、認可の判定と DELETE が別々。 / 根拠: notes/service.py:263-282, 286-296。 / 提案: 認可の確認を `BEGIN IMMEDIATE` の中で読み直した行で行う。確認は軽微な可能性もあるため、再現テストを用意してから重大度を最終判断する。\n- [軽微1] 区分: 実装 / 対象: R5 / 内容: `transfer_notes` は `to_user` の存在を DB で確認していない（呼び出し側を信用する前提どおりだが、外部キーのエラーが生の sqlite3.IntegrityError で出る）。移管の `updated_at` も更新されない。 / 根拠: notes/service.py:305-311。\n- [軽微2] 区分: 設計 / 対象: R7 / 内容: RateLimiter が service に組み込まれていない（仕様は単体の部品として定義しているので違反ではない）。`_counts` が利用者の数だけ増え続ける。 / 根拠: notes/ratelimit.py:90。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名1件だけで不十分。境界値、タグ、本文、途中失敗時のロールバックを確かめていない。\n- AC2: V2 は自分のメモを読む正常系だけで不十分。NotFound の3パターンも並行加算も確かめていない。実際に数え漏れのバグがある（重大1）。\n- AC3: V3 は1ページ目の件数と1語の検索だけで不十分。範囲外の拒否、LIKE のエスケープ、タグ OR、非公開の除外、インジェクションが未検証。実装を読む限り、プレースホルダーと ESCAPE は使われている。\n- AC4: V4 は所有者の更新と削除の正常系だけで不十分。Conflict・Forbidden・削除失敗の伝播が未検証。\n- AC5: V5 は件数と非管理者の拒否だけで不十分。他の組織の拒否と途中失敗時の元のままが未検証。\n- AC6: V6 はマスクを確認しておらず、空洞。\n- AC7: V7 は枠の内側と外側だけで不十分。ちょうど window 秒と並行呼び出しが未検証。実装は `>=` で境界が正しく、ロックもある。\n- AC8: V8 は往復と1つの改ざんだけで不十分。期限ちょうど、期限切れ、形の崩れが未検証。実装は fullmatch と `>=` で妥当に見える。\n- AC9: V9 は対応するテストがない。空洞。\n- AC10: V10 は対応するテストがない。空洞。\n- エンジン検出のテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリ。必要なのは、並行・失敗注入を含む単体テストの追加）。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: インジェクション文字列を使った検証がない。\n- K3: 閲覧数・更新の同時実行と、RateLimiter のスレッド並行の検証がない。実際に閲覧数の欠落がある。\n- K4: 途中失敗（`hooks.before_write`）でのロールバック検証がない。\n- K5・K7: ログ・例外・監査ログのマスクの検証がない。\n- K6: 他の組織への移管と途中失敗の検証がない。\n- K8: 期限ちょうど、改ざん、形の崩れの検証がない。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を全て読んだ。\n- `aqdlc.py trace` と `history --since 0` を確認した。検証条件が弱められた形跡はなく、V/VK は新規追加のみ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が合格したが、上記のとおり内容が薄い。\n- 一時ディレクトリの DB で閲覧数の競合を再現した。views が 1 になり、期待は 2 だった。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

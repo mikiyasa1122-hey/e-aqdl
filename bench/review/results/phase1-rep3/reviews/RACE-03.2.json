@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 2,
+ "sec": 31.5,
+ "exit": 0,
+ "cost_usd": 0.09580069999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12192,
+  "cache_read_input_tokens": 119267,
+  "output_tokens": 3509,
+  "output_tokens_details": {
+   "thinking_tokens": 504
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12192,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2541,
+    "cache_read_input_tokens": 36197,
+    "cache_creation_input_tokens": 2158,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2158
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 対応区分: 修正必須 / 内容: RateLimiter.hit が `with threading.Lock():` で毎回新しいロックを作っているため、排他制御が働いていない（`self._lock` は使われていない）。 / 成立条件: 同じ user_id に対して複数スレッドが同時に hit を呼ぶ（読み取りから書き込みの間に別スレッドが入る）。 / 影響: 全スレッドが n < limit と判定して通過し、上限を超えて許可される。または数え漏れが起きる。仕様の「同時に呼ばれても上限を超えて許さない」に違反する。 / 根拠: notes/ratelimit.py の hit 内 `with threading.Lock():`。`self._counts.get` から `self._counts[user_id] = ...` までが無防備。`self.hook()` はこの区間にあり、テストで割り込みを再現できる位置にある。 / 提案: `with self._lock:` に直す。あわせて、hook で別スレッドの hit を割り込ませても limit を超えないことを確かめるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のほぼ全部（特に AC2, AC4, AC5, AC7, AC8, AC10 / K1〜K8） / 対応区分: 証拠不足 / 内容: テストは正常系のスモークが12件だけで、受け入れ条件と重要なリスクを確かめていない。不足しているのは次のとおり。(a) 閲覧数の同時加算。(b) Conflict（古い version、読み出しと書き込みの間への割り込み）。(c) 他の組織・他人の非公開メモが NotFound になること、他人の更新・削除が Forbidden になること。(d) R1 の境界値（title 100/101 文字・空白のみ、body 10000/10001、tags 5/6 個・不正タグ・文字列そのもの）。(e) 作成・削除・移管の途中失敗で何も残らないこと（hooks.before_write が未使用）。(f) 検索の % と _ のエスケープ、タグの OR 絞り込み、SQL インジェクション文字列。(g) page・per_page・sort の範囲外。(h) 移管の組織またぎの拒否。(i) api_key のマスク（8文字未満を含む）。test_export_audit は actor_key を一切検査していない。(j) 共有リンクの期限ちょうど、形の崩れ、期限切れ。(k) ログへの機密情報の非出力。(l) 例外後に接続を再利用できること。(m) RateLimiter の同時呼び出しと枠の境界ちょうど（60秒）。 / 成立条件: 該当する規則を外したり壊したりしても、現在のテストはすべて通る。重大1がテストで検出されていないことがその実例。 / 影響: 認可・同時実行・ロールバックなど、仕様が必須としているリスクの検証が空洞で、完了の根拠にならない。 / 根拠: tests/test_notes.py（90行）の全体。`python3 -m unittest` は12件OKだが、上記を確かめるものはない。 / 提案: 上記の受け入れ条件・リスクごとに、異常系・境界値のテストを追加する。並行・途中失敗は設計どおり hooks.before_write と RateLimiter.hook で決定論的に再現する（sleep に頼らない）。\n- [軽微1] 区分: 実装 / 対象: R3, R4 / 対応区分: 改善提案 / 内容: 次の2点。(1) update_note は version をトランザクションの外で読んだ行の title・body とマージしている。version 条件があるため上書きの消失は起きないが、BEGIN IMMEDIATE の後に行を読み直せば競合の判定がより明確になる。(2) transfer_notes は updated_at を更新しないため、一覧の updated 順に移管が反映されない。仕様上は要求されていない。 / 提案: 必要に応じて検討する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。境界値・タグ・ロールバックを確かめておらず不十分。\n- AC2: 閲覧数の増加も、NotFound になる各場合も、同時閲覧も確かめておらず不十分。実装は見たかぎり妥当。\n- AC3: 正常系2件のみ。範囲外の拒否、% と _、タグの OR、他人の非公開メモの除外、SQL インジェクションを確かめておらず不十分。実装はプレースホルダー・ESCAPE を使っており妥当に見える。\n- AC4: owner の更新と削除の正常系のみ。Conflict、Forbidden、管理者の扱い、ロールバックを確かめておらず不十分。\n- AC5: 正常系と非管理者の拒否のみ。組織またぎ、途中失敗時の巻き戻しを確かめておらず不十分。\n- AC6: 検証なし（actor_key を検査していない）。実装は仕様どおりに見えるが、証拠がなく不十分。\n- AC7: 単スレッドの基本動作のみ。同時呼び出しは検証されておらず、実装にも欠陥がある（重大1）。枠の境界は61秒で確かめているだけで、ちょうど60秒は未確認。\n- AC8: 往復と改ざん1件のみ。期限ちょうど、期限切れ、形の崩れは未確認で不十分。実装は妥当に見える。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは検出されていない）。\n### E2E の要否\n- 不要（HTTP や UI を持たない Python ライブラリで、SQLite を使った結合テストは unittest で十分に書ける）。\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションを確かめるテストがない。\n- K3: 同時の閲覧・更新・呼び出しを確かめるテストがなく、RateLimiter には実際の欠陥がある。\n- K4: 途中の失敗による不整合を確かめるテストがない。\n- K5, K7: 機密情報の露出を確かめるテストがない（api_key のマスク、ログ）。\n- K6: 移管で組織の外にメモが渡ることを確かめるテストがない。\n- K8: 期限切れ・形の崩れた共有リンクを確かめるテストがない。\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py を全行確認した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件すべて OK だった。\n- git status では全ファイルが未追跡で、テスト弱体化の履歴比較はできなかった。弱体化を示す兆候（skip など）はなかった。\n- 並行実行は実行して再現していない。ratelimit.py のコードの経路から欠陥を判断した。\n```",
+ "files_changed": [],
+ "valid": true
+}

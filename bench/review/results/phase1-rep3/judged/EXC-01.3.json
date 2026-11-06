@@ -1,0 +1,38 @@
+{
+ "case": "EXC-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0669217,
+ "judge_raw": "各指摘の判定です。\n\n- **重大1**: 埋め込み欠陥そのものです。`get_note` が見えないメモに Forbidden を返し、存在しないメモの NotFound と区別できます。箇所は notes/service.py:105-106 で、原因も影響も一致します。\n- **重大2**: 埋め込み欠陥ではありませんが、実在する欠陥です。`$` と `match` の組み合わせで末尾改行付きのタグが通ります。これは仕様の R1 に反し、再現も示されています。\n- **重大3**: コードの欠陥ではなく、テスト不足の指摘です。\n- **重大4**: 実在する欠陥と判断します。`delete_note` はトランザクションの外で権限を判定し、DELETE の WHERE には `id` しかありません。判定後に owner が変わると、旧 owner の権限で削除できます。実行による再現はありませんが、コードの経路からは成立します。\n- **軽微1**: 先頭ゼロ付きの note_id が通ることは仕様違反ではありません。仕様は「10進の数字だけ」としており、正規形までは求めていません。保守性や厳格さの提案なので style とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し、NotFound と区別できる。埋め込み欠陥と箇所・原因・影響が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match により末尾改行付きのタグが通る。R1 の規則に反する実在のバグで、再現も示されている。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note がトランザクション外で権限を判定し、DELETE の WHERE が id だけのため、判定後に owner が変わると旧 owner の権限で削除できる。実在する競合の欠陥だが、実行による再現はない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロ付きの note_id は仕様違反ではなく、厳格化の提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（Forbidden と NotFound の区別による存在漏えい）を、箇所・原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し、NotFound と区別できる。埋め込み欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match により末尾改行付きのタグが通る。R1 の規則に反する実在のバグで、再現も示されている。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note がトランザクション外で権限を判定し、DELETE の WHERE が id だけのため、判定後に owner が変わると旧 owner の権限で削除できる。実在する競合の欠陥だが、実行による再現はない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロ付きの note_id は仕様違反ではなく、厳格化の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（Forbidden と NotFound の区別による存在漏えい）を、箇所・原因・影響とも正確に指摘している。"
+ }
+}

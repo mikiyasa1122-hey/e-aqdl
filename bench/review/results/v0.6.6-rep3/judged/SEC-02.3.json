@@ -1,0 +1,38 @@
+{
+ "case": "SEC-02",
+ "rep": 3,
+ "judge_cost_usd": 0.06567970000000001,
+ "judge_raw": "各指摘を正解データとコードに照らして分類しました。\n\n- **重大1**: `export_audit` が `api_key` をそのまま返している点を指摘しています。埋め込んだ欠陥と箇所も原因も影響も一致するので、matches_defect です。\n- **重大2**: `TAG_RE` は `^...$` を `match` で使っているため、`\"ab\\n\"` のように改行で終わるタグを通します。仕様の「英小文字・数字・ハイフン」に反する実在の欠陥ですが、埋め込んだ欠陥ではないので、real_other です。\n- **重大3**: テストの不足を述べているだけで、コードの欠陥の主張ではないので、test_gap です。\n- **軽微1**: 可視性と権限の判定がトランザクションの外にあるという指摘です。`update_note` は version 条件があるので、実害は限定的です。`delete_note` は判定後に所有者や可視性が変わる余地があります。ただし仕様の範囲では致命的とは言えず、実在の弱点を挙げているため、real_other とします。\n- **軽微2**: `transfer_notes` が `updated_at` を更新しないという指摘は、仕様に書かれていません。残りは任意の提案で、欠陥の主張ではないので、style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずに返す、という埋め込んだ欠陥そのものを、箇所・原因・影響まで合わせて指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match と $ で使うため、改行で終わるタグを通す。仕様に反する実在の欠陥だが、埋め込んだ欠陥ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを述べており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の判定がトランザクションの外にあるのは実在する弱点で、根拠も挙げているが、埋め込んだ欠陥ではない。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"updated_at の未更新は仕様にない。残りは任意の提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が api_key の未マスクを正確に指摘しており、再現も確認している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずに返す、という埋め込んだ欠陥そのものを、箇所・原因・影響まで合わせて指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match と $ で使うため、改行で終わるタグを通す。仕様に反する実在の欠陥だが、埋め込んだ欠陥ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを述べており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の判定がトランザクションの外にあるのは実在する弱点で、根拠も挙げているが、埋め込んだ欠陥ではない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "updated_at の未更新は仕様にない。残りは任意の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が api_key の未マスクを正確に指摘しており、再現も確認している。"
+ }
+}

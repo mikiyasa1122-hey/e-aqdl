@@ -1,0 +1,53 @@
+{
+ "case": "SQL-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0700997,
+ "judge_raw": "## 判定\n\n各指摘を、正解データ（search_notes の SQL インジェクション）とコードに照らして分類しました。\n\n- **重大1**: 埋め込んだ欠陥そのものです。search_notes（service.py 141-142行）が q を f 文字列で SQL に直接埋め込んでいます。原因も影響も一致していて、再現例（`x' OR '1'='1`）も実在します。行番号は多少ずれていますが、箇所は正しいです。\n- **重大2**: 実在する別の欠陥です。`_like_escape` が呼ばれず ESCAPE 句もないため、`%` や `_` が普通の文字として扱われません。これは R3 に反します。ただし、埋め込んだ欠陥（インジェクション）とは原因が別です。\n- **重大3**: 実在する別の欠陥です。`TAG_RE` は `^...$` と `match` を使っているので、末尾が改行のタグ（\"abc\\n\"）が通ります。R1 に反します。\n- **重大4**: テストの不足だけを指摘しています。\n- **重大5**: テストの不足だけを指摘しています。\n- **重大6**: テストの不足だけを指摘しています。\n- **軽微1**: 実在する弱点ですが、version 条件で保護されています。権限確認が transaction の外にあるため、transfer 後に古い権限判断で更新される余地があります。R4 の「読み出しから書き込みの間」の趣旨にも関わるので real_other とします。\n- **軽微2**: 前半の「to_user の存在を確かめない」は対象外です。後半の「updated_at が更新されない」は仕様に明記がなく、欠陥とは言えません。そのため、仕様やコードの読み違い寄りの false_positive とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes が検索語 q を f 文字列で SQL に直接埋め込む SQL インジェクションを、再現付きで指摘しており、埋め込んだ欠陥と一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"_like_escape が未使用で ESCAPE 句もなく、% と _ が普通の文字として扱われない。R3 に反する実在の欠陥だが、埋め込んだ欠陥とは別の原因。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾が改行のタグが通る実在のバグで、埋め込んだ欠陥とは別。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘している。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のテストの不足を指摘している。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"閲覧数の同時加算と Conflict のテストの不足を指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"update_note の権限確認が transaction の外にあり、transfer 後に古い権限判断で更新される余地がある。実在する弱点。\"},\n{\"label\": \"軽微2\", \"class\": \"false_positive\", \"reason\": \"to_user の存在確認は対象外（呼び出し側を信用する）で、updated_at の更新は仕様に要求がなく、欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が search_notes の SQL インジェクションを原因・箇所とも正しく指摘しており、埋め込んだ欠陥を検出している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes が検索語 q を f 文字列で SQL に直接埋め込む SQL インジェクションを、再現付きで指摘しており、埋め込んだ欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "_like_escape が未使用で ESCAPE 句もなく、% と _ が普通の文字として扱われない。R3 に反する実在の欠陥だが、埋め込んだ欠陥とは別の原因。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾が改行のタグが通る実在のバグで、埋め込んだ欠陥とは別。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘している。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "RateLimiter のテストの不足を指摘している。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "閲覧数の同時加算と Conflict のテストの不足を指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "update_note の権限確認が transaction の外にあり、transfer 後に古い権限判断で更新される余地がある。実在する弱点。"
+   },
+   {
+    "label": "軽微2",
+    "class": "false_positive",
+    "reason": "to_user の存在確認は対象外（呼び出し側を信用する）で、updated_at の更新は仕様に要求がなく、欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が search_notes の SQL インジェクションを原因・箇所とも正しく指摘しており、埋め込んだ欠陥を検出している。"
+ }
+}

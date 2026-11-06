@@ -1,0 +1,48 @@
+{
+ "case": "BND-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0676977,
+ "judge_raw": "各指摘を、埋め込み欠陥(ratelimit.py の `>` 比較)とコードに照らして分類しました。\n\n- **重大1**: 欠陥そのものを指摘しています。`now - start > self.window` が、ちょうど window 秒後を枠の中と数えます。レビューの例(limit=1、window=60、t=0 と t=60)も正しく、余分に RateLimited になります。提案の `>=` も妥当です。\n- **重大2**: 並行テストの欠如だけを指摘しているので、test_gap です。\n- **重大3**: 異常系・認可テストの不足だけを指摘しているので、test_gap です。\n- **重大4**: api_key の伏せ字・共有リンク・ログのテスト不足だけを指摘しているので、test_gap です。\n- **軽微1**: delete_note の認可判定がトランザクション外の読み出しに基づく、という指摘です。この競合はコード上に実在します。ただし根拠の行番号(158-166)は update 側で、delete の該当は 181-187 です。仕様にある「読み出しから書き込みの間の更新は Conflict」は update についての規定で、delete には version がありません。小さいながら実在する欠陥として real_other にしました。\n- **軽微2**: 先頭ゼロの note_id を int 化して署名すると、`007.…` でも検証が通ります。LINK_RE は先頭ゼロを許すので、指摘どおりの挙動になります。仕様は「10進の数字だけ」としているので、通ること自体は仕様に反しません。ただ、正規でない形が通るのは実在する挙動です。弱い指摘ですが、読み違いではないので real_other にしました。\n- **軽微3**: 動作に影響がない重複への指摘で、保守性の話なので style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"ratelimit.py の `>` 比較で、ちょうど window 秒後が新しい枠にならない欠陥そのものを、原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"並行テストの欠如だけを指摘している。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"異常系・認可・巻き戻しのテスト不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"伏せ字・共有リンク・ログのテスト不足だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の認可判定がトランザクション外の読み出しに基づく競合は、コード上に実在する。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"先頭ゼロの note_id が int 化後の署名で通る挙動は実在するが、影響は小さい。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"動作に影響しない検査の重複という保守性の指摘である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥(ratelimit.py の `>` 比較)を、原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "ratelimit.py の `>` 比較で、ちょうど window 秒後が新しい枠にならない欠陥そのものを、原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "並行テストの欠如だけを指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "異常系・認可・巻き戻しのテスト不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "伏せ字・共有リンク・ログのテスト不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の認可判定がトランザクション外の読み出しに基づく競合は、コード上に実在する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "先頭ゼロの note_id が int 化後の署名で通る挙動は実在するが、影響は小さい。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "動作に影響しない検査の重複という保守性の指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥(ratelimit.py の `>` 比較)を、原因・影響とも正しく指摘している。"
+ }
+}

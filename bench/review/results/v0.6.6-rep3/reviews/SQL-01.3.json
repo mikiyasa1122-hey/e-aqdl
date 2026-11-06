@@ -1,0 +1,49 @@
+{
+ "case": "SQL-01",
+ "rep": 3,
+ "sec": 32.7,
+ "exit": 0,
+ "cost_usd": 0.12296679999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17520,
+  "cache_read_input_tokens": 118108,
+  "output_tokens": 4106,
+  "output_tokens_details": {
+   "thinking_tokens": 309
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17520,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2890,
+    "cache_read_input_tokens": 39234,
+    "cache_creation_input_tokens": 2383,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2383
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 676349a2\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, K2, AC3 / 内容: `search_notes` が検索語 q を f 文字列で SQL に埋め込んでいる。仕様の「必ずプレースホルダー」と設計の「SQL はプレースホルダー、LIKE は ESCAPE」に反する SQL インジェクションである。 / 根拠: notes/service.py:136-137。再現では、検索語 `zz%' OR 1=1 --` を渡すと `sqlite3.OperationalError: incomplete input` が出た。SQL 文が利用者の入力で壊れており、`' OR ... ` の形で WHERE 条件を変えられる。 / 提案: `LIKE ? ESCAPE '\\'` にして、値は `'%'+_like_escape(q)+'%'` で渡す。\n- [重大2] 区分: 実装 / 対象: R3, AC3 / 内容: `%` と `_` が普通の文字として扱われない。`_like_escape` を定義しているが一度も使っておらず、ESCAPE 句もない。 / 根拠: 再現では、「100% real」と「other」の2件があるとき、検索語 `%` も `_` も両方のメモにヒットした。部分一致ではなくワイルドカードになっている。 / 提案: 重大1と同時に直す。\n- [重大3] 区分: テスト / 対象: V3, VK2, K2 / 内容: インジェクションと `%`・`_` を確かめるテストがなく、K2 の検証が空洞である。他にも、境界値・拒否系・タグ OR 検索・page/per_page の範囲外・sort の不正値を確かめるテストがない。 / 根拠: tests/test_notes.py の search テストは「予算」の1件だけ。 / 提案: 悪意ある検索語、`%`、`_`、タグ OR、範囲外の入力のテストを追加する。実装を壊すと失敗することを確かめる。\n- [重大4] 区分: テスト / 対象: V1, V2, V4, V5, VK1, VK3, VK4, VK6, VK7, V9, V10, AC1, AC2, AC4, AC5, AC6, AC9, AC10 / 内容: テストが12件で、ほぼ正常系だけである。次の項目を確かめるテストがひとつもない。\n  - 他の組織・他人の非公開メモが NotFound になること\n  - 非管理者の Forbidden\n  - version 不一致の Conflict\n  - 閲覧数の同時加算\n  - 作成・削除・移管の途中失敗でのロールバック（hooks を使うはずのものも未使用）\n  - api_key の伏せ字（`test_export_audit` は action と actor だけを見ている）\n  - ログに本文・署名が出ないこと\n  - 例外の後も接続を使えること\n  - タグの重複・個数・形式、題名・本文の長さ上限\n  / 根拠: tests/test_notes.py 全体。`hooks.before_write` を使うテストは0件。 / 提案: 設計の差し込み口（hooks と `RateLimiter.hook`）を使い、決定論的な競合・失敗のテストを AC ごとに追加する。\n- [重大5] 区分: テスト / 対象: V7, V8, AC7, AC8, K8 / 内容: RateLimiter は枠のちょうど境界（window 秒ちょうどで新しい枠）と並行呼び出しを確かめていない。共有リンクは期限ちょうど以降の無効、形の崩れ（改行・符号・桁）、署名の改ざんを確かめていない。 / 根拠: tests/test_notes.py:70-90。境界は 0→61 の1点だけ。リンクのテストは「note_id を書き換えた」1件だけ。 / 提案: t=window-ε と t=window、`now==expires` と `expires-1`、不正な形式を追加する。`RateLimiter.hook` を使い、同時呼び出しで上限を超えないことを決定論的に確かめる。\n\n- [軽微1] 区分: 実装 / 対象: R2, R4, K3 / 内容: `update_note` は `_visible` と `_can_modify` を transaction の外で判定し、`_row` で読んだ後に別のトランザクションで更新している。version 条件があるため更新の消失は防げる。ただし、読み出し後に所有者が移管されると、古い権限判定のまま更新できる。 / 提案: 権限判定を transaction 内に移すか、移管で version を増やすことと合わせて受容する旨を設計書に書く。\n- [軽微2] 区分: 実装 / 対象: R1, R4 / 内容: `update_note` の `_validate` は、title・body が str であることしか確かめていない。`version` の型は検証していない。 / 提案: `version` が整数であることを検証する。\n- [軽微3] 区分: 設計 / 対象: R5 / 内容: `transfer_notes` は from_user・to_user の dict を信用する（対象外の規定どおり）。ただし、`to_user` が DB に存在するかは外部キー任せである。 / 提案: 存在しない利用者は ValidationError か NotFound にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成の正常系と空題名の拒否だけで、不十分。タグ・長さ・失敗時の無残留（K4）が未確認。\n- AC2: V2 は閲覧の正常系しかなく、不十分。他の組織・非公開の NotFound、閲覧数の加算と同時加算が未確認。K1 も未確認。\n- AC3: V3 は一覧1件と検索1件だけで、不十分。実装にもインジェクションと `%`・`_` の欠陥がある（重大1・2）。K2 は空洞。\n- AC4: V4 は所有者の更新・削除の正常系だけで、不十分。Forbidden・Conflict・NotFound・削除の失敗伝播が未確認。K3 も未確認。\n- AC5: V5 は成功と非管理者の拒否だけで、不十分。他組織への移管と途中失敗でのロールバックが未確認。K6 も未確認。\n- AC6: V6 は api_key の伏せ字を確かめておらず、空洞。8文字未満の鍵も未確認。K7 も未確認。\n- AC7: V7 は1つの時刻で枠が切り替わることしか見ておらず、不十分。ちょうど window 秒の境界と並行呼び出しが未確認。\n- AC8: V8 は往復と1種の改ざんだけで、不十分。期限の境界と形の崩れが未確認。K8 も未確認。\n- AC9: V9 に該当するテストがなく、空洞。\n- AC10: V10 に該当するテストがなく、空洞。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はないが、弱いテストと不足が多い。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリである。ただし、別接続・別スレッドの実 SQLite ファイルを使った並行テストが必要（閲覧数、更新の競合、RateLimiter）。\n\n### 不足しているリスク\n- K1、K3、K4、K5、K6、K7、K8: 上記のとおりテストで確かめられていない。\n- K2: 実装に欠陥があり、テストもない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った。\n- `search_notes` を直接呼んで再現した。検索語 `%`・`_` が全件にヒットし、検索語 `zz%' OR 1=1 --` で `sqlite3.OperationalError` が出た。\n- `aqdlc trace` と `history --since 0` を確認した。検証条件の弱体化の履歴は見つからなかった（V の追加のみ）。\n- notes/ の全ソースを読み、仕様・設計と照合した。\n- RateLimiter、share、transaction、`export_audit` の実装は仕様どおりに見える。ただし、これらは未検証である。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-03",
+ "rep": 2,
+ "sec": 34.8,
+ "exit": 0,
+ "cost_usd": 0.13698010000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20696,
+  "cache_read_input_tokens": 110201,
+  "output_tokens": 4316,
+  "output_tokens_details": {
+   "thinking_tokens": 659
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20696,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2826,
+    "cache_read_input_tokens": 36291,
+    "cache_creation_input_tokens": 3511,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3511
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8a9e0a9d\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` で、`$` が末尾の改行を許す。`\"abc\\n\"` が「英小文字・数字・ハイフンの1〜20文字」を満たすものとして通る。 / 根拠: notes/service.py:15 の `TAG_RE` と、:56・:131 の `TAG_RE.match`。再現: `create_note(c,u,'t','b',['abc\\n'])` が成功し、`get_note` の tags が `['abc\\n']` になった。share.py は同じ問題を避けて `fullmatch` を使っているので、不統一でもある。 / 提案: `TAG_RE.fullmatch` に変えるか `\\Z` を使う。改行つきタグの拒否テストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 内容: 検証が受け入れ条件・リスクを確かめていない。tests/test_notes.py は12件で、ほぼ正常系だけ。V1〜V10 と VK1〜VK8 はすべて同じ `unit` に紐づくが、次の項目を確かめるテストがない。\n  - 拒否・境界: 題名の100文字と101文字、空白だけの題名、本文10000文字、タグ6個、不正なタグ、tags に文字列そのものを渡す場合。\n  - 一覧・検索: per_page、page、sort の範囲外。`%` `_` を含む検索語。タグ OR 検索。SQL インジェクション文字列。\n  - 認可・漏えい: 他の組織・他人の非公開メモが NotFound になること。非公開メモが一覧・検索に出ないこと。他人の更新・削除が Forbidden になること。管理者が非公開メモを扱えず NotFound になること。他の組織への移管が Forbidden になること。\n  - 失敗時の巻き戻し: `hooks.before_write` による途中失敗で何も残らないこと（K4）。\n  - 閲覧数と競合: 閲覧数の並行加算（K3）。version 不一致や読み書きの間に入った更新による Conflict。\n  - 秘密情報: api_key の伏せ方（8文字未満と、末尾4文字だけ残る場合）。ログに本文・署名・api_key が出ないこと（R9）。\n  - 例外後の接続: 例外のあとも接続を使い続けられること（R10）。\n  - R7: 枠の境界がちょうど window 秒であること。スレッド並行での上限（`hook` の差し込み口は用意されているが使われていない）。\n  - R8: 期限の境界（ちょうど期限の時刻）。形の崩れたリンク。\n  \n  設計書は決定論的に再現する差し込み口を用意しているのに、一つも使っていない。 / 根拠: tests/test_notes.py 全体（`hooks` と `RateLimiter.hook` の参照がない）。 / 提案: 上の各項目に対して、条件を外すと失敗するテストを追加する。\n- [重大3] 区分: テスト / 対象: AC4, AC5, K3, K4, K6 / 内容: 重要な要求が未検証のまま gate が「合格」になっている。ロールバックと並行実行の挙動は設計どおり書かれているように見えるが、テストがないので、実際に保証されているかが確かめられていない。 / 根拠: trace では全 V が `passed_but_unchallenged`。 / 提案: 重大2のテストを追加したうえで再度 gate を通す。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` の `_visible`・`_can_modify` の判定がトランザクションの外にある。判定後に移管などで所有者が変わっても、version が一致すれば更新が通る（version は移管でも +1 されるので、実害は小さい）。 / 根拠: notes/service.py:139-146。 / 提案: トランザクション内で再判定するか、設計書に許容と明記する。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: `transfer_notes` は from_user・to_user の dict を信用し、DB 上の組織・存在を確認しない。仕様の「対象外」の範囲内だが、to_user の存在確認がないので、外部キー制約でしか守られていない。 / 根拠: notes/service.py:180-190。 / 提案: 必要なら DB から読み直す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけで不十分。境界値・タグ規則（改行つきタグが通る実バグを見逃している）・ロールバックの検証がない。\n- AC2: V2 は閲覧の正常系の間接確認だけ。他の組織・他人の非公開メモの NotFound、閲覧数の加算、並行加算がないので不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけ。入力の拒否、`%`/`_`、タグ OR、非公開の除外、SQL インジェクションがないので不十分。\n- AC4: V4 は所有者の更新・削除の正常系だけ。Conflict、Forbidden、NotFound、タグ検証、削除失敗の検証がないので不十分。\n- AC5: V5 は管理者の件数確認と非管理者の拒否だけ。他の組織の拒否と途中失敗時の元のままが未検証で不十分。\n- AC6: V6 は伏せ方を確かめていない（action と actor しか見ていない）ので不十分。\n- AC7: V7 は単純な制限の確認だけ。境界値（ちょうど window 秒）と並行呼び出しがないので不十分。\n- AC8: V8 は往復と改ざんの1件だけ。期限の境界・期限切れ・形の崩れが未検証で不十分。\n- AC9: V9 に該当するテストが実質なし。不十分。\n- AC10: V10 に該当するテストが実質なし。不十分。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは確認できなかった）。\n\n### E2E の要否\n- 不要（HTTP なしの Python ライブラリで、SQLite のインメモリ DB を使うユニットテストで足りる）。ただし並行・巻き戻しのテストは、実際の SQLite（複数接続）とスレッドで書くこと。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションと LIKE のエスケープを確かめるテストがない。\n- K3: 並行する閲覧・更新・RateLimiter のテストがない。\n- K4: 途中失敗でロールバックされることを確かめるテストがない。\n- K5, K7: 機密情報の露出と api_key の伏せ方を確かめるテストがない。\n- K6: 移管で組織の外に渡る・一部だけ移ることを確かめるテストがない。\n- K8: 期限切れ・形の崩れたリンクを確かめるテストがない。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -B -m unittest discover -s tests -t .`: 12件すべて合格。\n- 再現スクリプト: `create_note(..., ['abc\\n'])` が成功し、タグが `['abc\\n']` で保存された（重大1）。\n- `aqdlc trace`: 全項目が `passed_but_unchallenged`。\n- `aqdlc history --since 0`: 末尾の履歴は bind の追加のみで、検証条件が弱められた形跡は見当たらなかった。\n- `aqdlc gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

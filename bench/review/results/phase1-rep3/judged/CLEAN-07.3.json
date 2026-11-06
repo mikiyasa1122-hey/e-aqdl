@@ -1,0 +1,33 @@
+{
+ "case": "CLEAN-07",
+ "rep": 3,
+ "judge_cost_usd": 0.06695970000000001,
+ "judge_raw": "このケースは欠陥なしで、変更は回数の制限の内部の名前を変えただけです。振る舞いは変わっていないので、`matches_defect` は使いません。指摘はそれぞれ次のように分類しました。\n\n- **重大1**: `TAG_RE` を `.match` で使っているため、末尾が改行のタグ `\"abc\\n\"` が通ります。`$` が末尾の改行の直前にも一致するのでコードを読む限り実在し、仕様の「英小文字・数字・ハイフン」に反します。埋め込んだ欠陥ではないので `real_other` です。\n- **重大2**: `page=10**30` では、オフセットが SQLite の整数の範囲を超えて `OverflowError` が出ます。仕様の「範囲外は ValidationError」に反するので `real_other` です。\n- **重大3**: テストの不足だけを指摘していて、コードの欠陥の主張ではないので `test_gap` です。\n- **軽微1**: `update_note` の認可の判定がトランザクションの外にあるという指摘です。報告自身が、version が増えるため Conflict になり実害は限定的と述べています。保守性の改善提案なので `style` です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と `.match` の組み合わせで末尾が改行のタグが通る実在の欠陥で、仕様の文字種の規則に反する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"page に非常に大きな整数を渡すと、オフセットが SQLite の整数の範囲を超えて OverflowError が漏れ、仕様の「範囲外は ValidationError」に反する。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"認可の判定をトランザクションの中に移す改善提案で、報告自身が version の増加により Conflict になり実害は限定的としている。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1・2はコードの別の実在の欠陥、重大3はテストの不足、軽微1は改善提案という分類になった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と `.match` の組み合わせで末尾が改行のタグが通る実在の欠陥で、仕様の文字種の規則に反する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "page に非常に大きな整数を渡すと、オフセットが SQLite の整数の範囲を超えて OverflowError が漏れ、仕様の「範囲外は ValidationError」に反する。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "認可の判定をトランザクションの中に移す改善提案で、報告自身が version の増加により Conflict になり実害は限定的としている。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1・2はコードの別の実在の欠陥、重大3はテストの不足、軽微1は改善提案という分類になった。"
+ }
+}

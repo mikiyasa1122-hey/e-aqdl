@@ -1,0 +1,49 @@
+{
+ "case": "VAL-04",
+ "rep": 1,
+ "sec": 32.8,
+ "exit": 0,
+ "cost_usd": 0.1327313,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19973,
+  "cache_read_input_tokens": 115033,
+  "output_tokens": 4132,
+  "output_tokens_details": {
+   "thinking_tokens": 806
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19973,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2532,
+    "cache_read_input_tokens": 37818,
+    "cache_creation_input_tokens": 2288,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2288
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7be71891\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4 / 対応区分: 修正必須 / 内容: `update_note` が tags を検証していない。`_validate(new_title, new_body, [])` と空のタグ列を渡しており、`new_tags` は `_tag_list` で型を見るだけ。 / 成立条件: 作成者または管理者が `tags=[\"BAD!\", \"a b\"]` や 7個のタグを渡して更新する。 / 影響: 仕様「更新でも R1 の入力検証を行う（タグを含む）」に違反する。不正なタグが保存され、5個上限も破られる。タグ検索の絞り込みの前提も崩れる。 / 根拠: notes/service.py:310。実行して確認した。`update_note(..., tags=[\"BAD!\",\"a b\",\"x\\n\"])` が成功し、そのまま保存された。7個のタグの更新も成功し、保存された件数は 7。 / 提案: 検証の前に `_validate(new_title, new_body, new_tags or [])` を呼ぶ。`new_tags` が None のときは検証しない。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。Python の `$` は末尾の改行の直前にも一致するため、`\"abc\\n\"` を通してしまう。 / 成立条件: タグの末尾に `\\n` を付ける。作成・検索のどちらでも起きる。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に違反する。改行入りのタグが保存される。 / 根拠: notes/service.py:158, 208, 294。実行して確認した。`create_note(..., [\"abc\\n\"])` が受理された。share.py は同じ理由で `fullmatch` を使っており、そちらは対策済み。 / 提案: `TAG_RE.fullmatch(t)` に変える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは tests/test_notes.py の12件だけで、ほぼ正常系のみ。設計が用意した hooks と RateLimiter.hook を使ったテストが1件もない。次のものを確かめるテストがない。 / 成立条件: 次の項目が検証されていない。(a) AC1/AC4/AC5/AC10: 途中で失敗したときのロールバックと、その後に接続を使えること。(b) AC2/AC7/AC4: 同時閲覧の数え漏れ、RateLimiter の同時呼び出し、更新の競合（Conflict）。(c) AC7: 枠の境界（ちょうど window 秒）。(d) AC8: 期限の境界（期限ちょうどの時刻）、形の崩れたリンク、改行入りのリンク。(e) AC1/AC3: 題名・本文・タグ・page・per_page・sort・検索語の境界と範囲外。(f) K1: 他の組織・他人の非公開メモが NotFound になること、管理者でも非公開メモが NotFound になること。(g) K2/AC3: `%` `_` の検索と、SQL インジェクション様の入力。(h) K6: 別の組織への移管が拒否されること。(i) K5/AC9: ログや例外に本文・署名・api_key が出ないこと。 / 影響: 重大1・2のような仕様違反が、テストを通ったまま見逃されている。検証条件を外しても失敗するテストがない。 / 根拠: `grep \"def test\"` で12件を確認した。unittest は 12件 OK。 / 提案: 上記の各項目を、hooks を使って決定論的に再現するテストとして追加する。重大1・2の再発防止テストも含める。\n\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` の `_visible`/`_can_modify` 判定がトランザクションの外にある。更新は version 条件で守られているが、削除は判定後に所有者が変わっても、古い判定のまま実行される。 / 提案: 判定を `transaction` の内側で読み直した行に対して行う。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけ。境界、タグ規則、失敗時に何も残らないことを確かめておらず不十分。実装にも重大2の欠陥がある。\n- AC2: 閲覧できることだけを確認している。他の組織・他人の非公開・存在しないメモの NotFound と、同時閲覧の数え漏れは未検証で不十分。\n- AC3: 一覧の1ページ目と検索の基本だけ。範囲外の拒否、`%` `_`、タグの OR、非公開メモの除外は未検証で不十分。\n- AC4: 所有者による更新・削除だけ。Forbidden、Conflict、競合、タグ検証は未検証で不十分。実装にも重大1の欠陥がある。\n- AC5: 移管と管理者以外の拒否だけ。他の組織への移管と、途中失敗時の巻き戻しは未検証で不十分。\n- AC6: export_audit の基本テストがある。8文字未満の鍵の扱いなどの境界は未確認。部分的にしか確かめていない。\n- AC7: 回数制限の基本だけ。枠の境界と並行実行は未検証で不十分。\n- AC8: 往復と改ざんだけ。期限の境界、形の崩れ、改行入りのリンクは未検証で不十分。\n- AC9: 検証なしで不十分。\n- AC10: 検証なしで不十分。\n- エンジンが検出したテストの兆候: なし。skip や弱いアサーションはないが、ケース数が足りない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite のユニットテストと、hooks による競合・失敗の再現で足りる。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K8 を確かめるテストが不足している（重大3）。\n\n### 確認したこと\n- spec.md と design.md、notes/*.py の全ソースを読んだ。\n- `python3 -m unittest discover` を実行した。12件が OK。\n- Python で更新時のタグ検証漏れと、改行入りタグが受理されることを再現した。\n- `git status` で未追跡のファイルを確認し、`history` で検証条件を確認した。検証を弱める変更は見当たらなかった。\n- 次の項目は、コードを読んで問題ないことを確認した。トランザクション境界、閲覧数の増加（`views = views + 1`）、楽観的ロック（UPDATE の version 条件）、LIKE の ESCAPE、プレースホルダー、RateLimiter のロック、share の `fullmatch` と `compare_digest`、api_key の伏せ字、ログに機密が出ないこと。",
+ "files_changed": [],
+ "valid": true
+}

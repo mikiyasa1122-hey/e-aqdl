@@ -1,0 +1,49 @@
+{
+ "case": "SQL-04",
+ "rep": 3,
+ "sec": 41.8,
+ "exit": 0,
+ "cost_usd": 0.1323894,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17704,
+  "cache_read_input_tokens": 130074,
+  "output_tokens": 4855,
+  "output_tokens_details": {
+   "thinking_tokens": 650
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17704,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3557,
+    "cache_read_input_tokens": 41569,
+    "cache_creation_input_tokens": 2303,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2303
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c0544cd2\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, K2, AC3, VK2 / 対応区分: 修正必須 / 内容: `search_notes` が `tags` を検査せず、SQL の文字列に直接埋め込んでいる。仕様の「SQL は必ずプレースホルダー」「タグも R1 の規則で検査する」に違反している。 / 成立条件: `tags=[\"x') OR 1=1 OR tag IN ('\"]` のように、タグに引用符を含む文字列を渡す。 / 影響: SQL インジェクション。タグ絞り込みを無効にでき、サブクエリの書き換えで他の列や表を読み出せる可能性がある（K1・K2）。 / 根拠: notes/service.py の `quoted = \", \".join(f\"'{t}'\" ...)` と、それを `sql` に連結している箇所。検査は `len(tags) > TAGS_MAX` と `_tag_list` だけで、`TAG_RE` を使っていない。私が使い捨てのメモリ DB で実行したところ、タグ `x` のメモに対して不正なタグを渡すと絞り込みを素通りして1件返った。一方、不正でない存在しないタグ `Z` では0件だった。 / 提案: 各タグを `TAG_RE`（str かつ英小文字・数字・ハイフンの1〜20文字）で検査し、`IN (?,?,…)` のプレースホルダーで渡す。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1, K3, K4, K6, K8（V1〜V10, VK1〜VK8）/ 対応区分: 証拠不足 / 内容: tests/test_notes.py（12件）は正常系が中心で、仕様が求める異常系・境界・同時実行・失敗時の巻き戻しをほぼ確かめていない。すべて「合格」と記録されているが、検証が空洞化している。 / 成立条件: 次のどれかの欠陥があっても、現状のテストは通る。 / 影響: 上記の SQL インジェクション（重大1）が実際に通ったまま gate が合格した。他の欠陥があっても同様に見逃す。 / 根拠: 以下のテストが存在しない。\n  - 他組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の同時加算（`hooks.before_write(\"view\")` を使う）\n  - Conflict（古い version、読み書きの間の割り込み）\n  - 更新・削除での Forbidden\n  - `hooks.before_write` を使った途中失敗でのロールバック（create・delete・transfer・K4・K6・AC10）\n  - 移管の組織またぎでの Forbidden\n  - api_key の伏せ字（AC6）。`test_export_audit` は action と actor しか見ていない。\n  - RateLimiter の境界（ちょうど window 秒）とスレッド同時実行（`hook` を使う）\n  - 共有リンクの期限ちょうど、形の崩れ、改行や余分な数字\n  - ログ・例外に機密情報が出ないこと（AC9）\n  - タイトルやタグなどの入力検証の境界値 / 提案: 上の項目を決定論的に再現するテストを追加する。特に、タグのインジェクション、組織またぎの閲覧、Conflict、ロールバック、api_key の伏せ字、制限と期限の境界、同時の閲覧と呼び出しは必須。\n- [重大3] 区分: 実装 / 対象: R4, K3, AC4 / 対応区分: 修正必須 / 内容: `update_note` の認可判定（`_visible`・`_can_modify`）を、トランザクションの外で読んだ行で行っている。 / 成立条件: 認可判定の後、書き込み前に `transfer_notes` でオーナーが変わる。または、判定後にメモが削除されて書き込みが0行になる。 / 影響: 判定時点で作成者だったが移管されて権限を失った利用者が、そのまま更新を通せる場合がある。version が一致していれば Conflict にならない。 / 根拠: notes/service.py の `update_note` で `_row` → 認可 → `hooks.before_write(\"update\")` → `transaction` の順になっている。transaction 内の UPDATE の条件は `version` だけで、`owner_id` を含まない。`transfer_notes` は version を +1 するので、移管後に古い version を渡せば Conflict になる。ただし、呼び出し側が移管後の最新 version を渡せば、認可は古い行のままで通る。この経路は未再現で、コードの読みからの判断。`delete_note` も同じ構造（トランザクション外の判定）。 / 提案: トランザクション開始後（BEGIN IMMEDIATE の後）に行を読み直して認可を判定する。または、UPDATE の条件に `owner_id` を含めるか、認可判定を transaction 内に移す。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` の `tags` に文字列そのものを渡した場合、`_tag_list` が弾く。これは正しい。ただしタグの要素の型・形式の検査は無い（重大1に含まれる）。 / 提案: `_validate` のタグ検査を共通関数にして使い回す。\n- [軽微2] 区分: 設計 / 対象: 設計書の要求との対応 / 対応区分: 改善提案 / 内容: `notes/__init__.py` が空で、trace 上の実装ファイルがすべて `notes/__init__.py` になっている。要求との対応を追跡しにくい。 / 提案: 設計書の対応表どおり、実際のファイル（service.py など）を trace に紐づける。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけを確かめている。長さの上限、タグ6個、不正タグ、tags に文字列を渡す場合、失敗時に何も残らないことは未検証で不十分。\n- AC2: V2 は作成者本人の閲覧だけを確かめている。他組織・他人の非公開メモが NotFound になること、閲覧数の同時加算は未検証で不十分。\n- AC3: V3 は一覧の件数と簡単な検索だけを確かめている。範囲外の page・per_page・sort、`%` と `_` の扱い、タグの絞り込み、インジェクションは未検証で不十分（重大1、2）。\n- AC4: V4 は作成者による更新と削除の正常系だけで不十分。Conflict、Forbidden、管理者の操作、非公開メモの扱い、削除の失敗時は未検証。\n- AC5: V5 は件数と管理者以外の拒否だけを確かめている。組織またぎ、途中失敗での元の状態への巻き戻しは未検証で不十分。\n- AC6: V6 は伏せ字を確認しておらず、空洞。末尾4文字以外を伏せることと、8文字未満の鍵をすべて伏せることを確かめるテストが無い。\n- AC7: V7 は上限と枠の再開だけを確かめている。ちょうど window 秒の境界とスレッド同時実行は未検証で不十分。\n- AC8: V8 は往復と改ざんの1例だけで不十分。期限ちょうど、期限切れ、形の崩れは未検証。\n- AC9: V9 に該当するテストが無く、空洞。\n- AC10: V10 に該当するテストが無く、空洞。\n- エンジンが検出したテストの兆候: なし（skip・.only などは無いことを確認）。\n\n### E2E の要否\n- 不要（HTTP 層の無い標準ライブラリだけのパッケージ）。ただし、単体テストで並行実行と途中失敗を、hooks を使って決定論的に再現する必要がある。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめる検証が無い。\n- K2: タグ経由の SQL インジェクションが実在し、検証も無い。\n- K3: 同時の閲覧・更新・呼び出しを確かめる検証が無い。\n- K4・K6: 途中失敗でのロールバックを確かめる検証が無い。\n- K5・K7: api_key の伏せ字と、ログ・例外への機密情報の露出を確かめる検証が無い。\n- K8: 期限の境界と、形の崩れたリンクを確かめる検証が無い。\n\n### 確認したこと\n- `$AQ trace` と `$AQ history`: 検証条件が弱められた形跡は見当たらなかった。ただし history の表示が BrokenPipe で途中までしか読めておらず、全件は確認できていない。\n- `python3 -m unittest discover -s tests -t .`: 12件がすべて合格。ただしこれは欠陥を検出できることの証明ではない（反証テストは無効）。\n- 使い捨てのメモリ DB で `search_notes` に不正なタグを渡し、インジェクションが成立することを確認した（重大1）。\n- ソースコード（db.py・service.py・ratelimit.py・share.py・errors.py）を読んだ。次の点は問題なし。\n  - R2 の閲覧数加算（トランザクション内で UPDATE し、可視性を再確認）\n  - R7 の境界（`>=`）とロック\n  - R8 の期限（`>=`）と `fullmatch`\n  - R6 の伏せ字ロジック\n  - `transaction()` の ROLLBACK\n- 重大3の経路は未再現（コードの読みによる判断）。",
+ "files_changed": [],
+ "valid": true
+}

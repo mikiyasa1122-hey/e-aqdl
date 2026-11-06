@@ -1,0 +1,49 @@
+{
+ "case": "SQL-01",
+ "rep": 1,
+ "sec": 37.4,
+ "exit": 0,
+ "cost_usd": 0.13796550000000002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20472,
+  "cache_read_input_tokens": 118115,
+  "output_tokens": 4425,
+  "output_tokens_details": {
+   "thinking_tokens": 363
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20472,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3506,
+    "cache_read_input_tokens": 38613,
+    "cache_creation_input_tokens": 1992,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1992
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 676349a2\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2, K1 / 対応区分: 修正必須 / 内容: `search_notes` が検索語 `q` を f 文字列で SQL に直接埋め込んでいる（`notes/service.py` の `search_notes` 内、`f\"AND (title LIKE '%{q}%' OR body LIKE '%{q}%')\"`）。プレースホルダーを使っておらず、LIKE の ESCAPE もない。 / 成立条件: 1〜100文字の任意の `q`。例は `'` を含む語、`%`、`_`、`' UNION SELECT …`。 / 影響: R3 の「SQL は必ずプレースホルダー」違反。`%` と `_` が普通の文字ではなくワイルドカードとして働く。`'` を含む語は構文エラーになる。UNION を使えば他組織や他人の非公開メモ・users.api_key を読める可能性がある（UNION 経由の漏えいは実行していないので未確認）。 / 根拠: 実行して確認した。メモ「abc」と「a%c」を作って `search_notes(q='%')` を呼ぶと両方ヒットした。仕様では「a%c」だけがヒットするはず。`q=\"' OR '1'='1\"` でも全件が返った。`_like_escape` は定義されているが呼ばれていない。上流に防ぐ層はない。tags のほうは `?` で渡している。 / 提案: `LIKE ? ESCAPE '\\'` にして、`'%' + _like_escape(q) + '%'` をパラメータとして渡す（title・body の2か所）。\n- [重大2] 区分: テスト / 対象: AC3, K2, V3, VK2 / 対応区分: 証拠不足 / 内容: SQL インジェクションと `%` `_` の扱いを確かめるテストがない。`test_search` は「予算」だけで、`%` `_` `'`、タグ OR、タグの検査、`list_notes` の page・per_page・sort の範囲外も検査していない。VK2 は `unit` に紐づくが、中身は空洞。 / 成立条件: 重大1が混入していてもこのテスト群は全件 OK になる（12件が OK だった）。 / 影響: K2 は必須のリスクだが検証がない。 / 根拠: `tests/test_notes.py` の全体。 / 提案: `%`・`_`・`'` を含むタイトルを作って完全一致で検索するテスト、インジェクション文字列で他組織のメモが返らないテスト、範囲外の入力で ValidationError になるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC7, AC8, AC9, AC10, K1, K3, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 次の必須の検証がほとんどない。\n  - 認可・NotFound の隠蔽: 他組織・他人の非公開メモが NotFound になること、他人の更新・削除が Forbidden になること。\n  - 楽観的ロックの Conflict、削除や移管の途中失敗でのロールバック。作成時のロールバックも。\n  - 同時閲覧での数え漏れ。\n  - RateLimiter の枠の境界（ちょうど window 秒）と同時呼び出し。\n  - 共有リンクの期限境界（now==expires）、署名の改ざん、形の崩れたリンク。\n  - api_key の伏せ字（8文字未満・末尾4文字）。ログに機密が出ないこと。例外後の接続の再利用。\n  - 設計は `hooks.before_write` と `RateLimiter.hook` で再現できるとしているが、テストはどちらも使っていない。 / 成立条件: すべて対象の受け入れ条件・リスクが検証なしで「合格」扱いになる。 / 影響: 例えば `export_audit` のテストは action と actor しか見ていない。鍵が伏せられていなくてもテストは通る。`test_transfer` は件数しか見ていない。移管先の owner も、他組織の拒否も確かめていない。 / 根拠: `tests/test_notes.py` は90行・12テストで、正常系が中心。 / 提案: 上の項目を hook による決定論的な競合・失敗の再現も含めて追加する。sleep には頼らない。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K4 / 対応区分: 修正必須 / 内容: `update_note` は、`version` が最新でない場合や、読んだ後の競合で、非公開メモの権限が変わっても追従しない。具体的には、`_visible` と `_can_modify` の判定がトランザクションの外で行われている。判定後、`BEGIN IMMEDIATE` の前に別スレッドが `transfer_notes` を実行して所有者が変わると、元の所有者（権限を失った人）の更新が `WHERE id=? AND version=?` に一致してしまう。`transfer_notes` は `version+1` するので、その更新自体は Conflict になる。しかし `delete_note` は version を持たず、判定がトランザクション外のため、移管直後でも旧所有者が削除できる。 / 成立条件: `delete_note` の判定後、BEGIN IMMEDIATE の前に別接続が移管または非公開化を行う。 / 影響: 権限を失った利用者が削除できる（TOCTOU）。限定的なので影響度は中。 / 根拠: `notes/service.py` の `delete_note` は `_row`→判定→`transaction` の順で、トランザクション内で再判定していない。`get_note` は内側で再確認しているので、設計意図と不揃い。 / 提案: `delete_note`（と `update_note`）のトランザクション内で `_row` を取り直し、`_visible`・`_can_modify` を再判定する。再現テストは `hooks.before_write` を使う。\n\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` が `_tag_list` の後に tags の件数・形式を手書きで検査しており、`_validate` と二重になっている。 / 提案: 検査を共通関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の拒否だけで不十分。題名の長さ・本文・タグの境界、tags が文字列の場合、失敗時に何も残らないこと（`create:tags` の hook での失敗）を確認していない。\n- AC2: V2 は閲覧の正常系だけで不十分。NotFound の隠蔽、閲覧数の増加、同時閲覧がない。\n- AC3: V3 は不十分で空洞に近い（重大1・2）。実装にも欠陥がある。\n- AC4: V4 は所有者の正常系だけで不十分。Conflict・Forbidden・管理者・非公開・タグ検査・削除の失敗伝播がない。\n- AC5: V5 は件数と管理者の拒否だけで不十分。他組織、途中失敗でのロールバックがない。\n- AC6: V6 は鍵を確認しておらず不十分。伏せ字を壊してもテストは通る。実装は仕様どおりに見える（8文字未満は全部伏せ、それ以上は末尾4文字を残す）。\n- AC7: V7 は順次の2回と枠のリセットだけで不十分。ちょうど window 秒の境界と、並行呼び出しがない。実装は `>=` で境界を満たし、ロックも持つ。\n- AC8: V8 は往復と改ざんの1ケースだけで不十分。期限の境界、期限切れ、形の崩れがない。実装は読んだ限り仕様どおり。\n- AC9: V9 の検証はなし。ログ出力を確認するテストがない。実装は ID だけを出しているように見えるが、確認はしていない。\n- AC10: V10 の検証はなし。例外の後に接続を再利用するテストがない。\n- エンジンが検出したテストの兆候: なし。skip・弱体化の履歴もなし（history は構成の追加のみ）。\n\n### E2E の要否\n- 不要（ライブラリで UI や HTTP はない）。ただし、別接続・別スレッドでの並行テストが必要（重大3）。\n\n### 不足しているリスク\n- K1・K3・K4・K5・K6・K7・K8 は、実装の読解では仕様どおりに見えるが、検証はない（重大3）。\n- K2 は実装に欠陥がある（重大1）。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t . -q`: 12件 OK。\n- `search_notes` に `%` を渡す再現スクリプト: 「abc」と「a%c」の両方が返った（仕様では「a%c」のみ）。`' OR '1'='1` でも全件が返った。\n- `notes/` 配下の全ソースと `tests/test_notes.py` を読んだ。\n- `history --since 0` を確認し、検証条件の弱体化はなかった（`unit` の追加と bind のみ）。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,53 @@
+{
+ "case": "VAL-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0678237,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `update_note` が `_validate` に空リスト `[]` を渡しており、更新時にタグが検査されません(notes/service.py:166)。埋め込んだ欠陥と箇所・原因・影響がすべて一致するため、matches_defect です。\n- **重大2**: `TAG_RE` と `match` の組み合わせで末尾の改行が通るという指摘です。`$` は末尾の改行にもマッチするので、コード上の実在する欠陥です。ただし埋め込んだ欠陥とは別なので、real_other です。\n- **重大3**: テストの不足だけを述べているので、test_gap です。\n- **重大4**: テストの不足だけを述べているので、test_gap です。\n- **重大5**: テストの不足だけを述べているので、test_gap です。\n- **重大6**: テストの不足だけを述べているので、test_gap です。\n- **軽微1**: `delete_note` の存在確認が transaction の外にあるため、並行削除のときに DELETE が 0 行でも成功扱いになります。コード上は実在しますが影響は小さいです。埋め込んだ欠陥とは別なので、real_other です。\n- **軽微2**: 仕様どおりの安全側の動作だと自分で述べていて、欠陥の主張ではありません。範囲外の観察にとどまるので、style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note が _validate に空リストを渡し、更新時にタグが検査されないという、埋め込んだ欠陥そのものを指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match の組み合わせで末尾の改行が通るのは実在するバグだが、埋め込んだ欠陥とは別である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の存在確認が transaction の外にあり、並行削除で DELETE が 0 行でも成功扱いになるのは実在する弱点で、埋め込んだ欠陥とは別である。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"仕様どおりの安全側の動作であり、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が update_note:166 のタグ未検査を、原因・影響・再現とともに正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note が _validate に空リストを渡し、更新時にタグが検査されないという、埋め込んだ欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match の組み合わせで末尾の改行が通るのは実在するバグだが、埋め込んだ欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の存在確認が transaction の外にあり、並行削除で DELETE が 0 行でも成功扱いになるのは実在する弱点で、埋め込んだ欠陥とは別である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "仕様どおりの安全側の動作であり、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が update_note:166 のタグ未検査を、原因・影響・再現とともに正確に指摘している。"
+ }
+}

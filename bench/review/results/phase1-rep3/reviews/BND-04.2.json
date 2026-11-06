@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 2,
+ "sec": 37.6,
+ "exit": 0,
+ "cost_usd": 0.1294807,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17305,
+  "cache_read_input_tokens": 124147,
+  "output_tokens": 4783,
+  "output_tokens_details": {
+   "thinking_tokens": 1271
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17305,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2661,
+    "cache_read_input_tokens": 39055,
+    "cache_creation_input_tokens": 4412,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4412
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 共有リンクの期限の時刻ちょうどでも有効と判定される。仕様は「期限の時刻ちょうど以降は無効」。 / 成立条件: `now == expires`。 / 影響: 期限切れのリンクが1秒分余計に通る。境界の仕様違反。 / 根拠: notes/share.py の `verify_link` が `int(now ...) > expires` で判定している。実行すると `make_link(now=1000, ttl=100)` のリンクが `verify_link(now=1100)` で note_id=5 を返した。 / 提案: 比較を `>=` にする。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査が `TAG_RE.match` と `$` の組み合わせで、末尾の改行を通す。 / 成立条件: タグが `\"abc\\n\"` のとき。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。 / 根拠: notes/service.py:14 と、使用箇所の :64 と :150。実行すると `TAG_RE.match(\"abc\\n\")` が True だった。share.py は同じ問題を避けて fullmatch を使っているので、実装内で一貫していない。 / 提案: `fullmatch` に変える（または `\\Z` を使う）。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 検証が受け入れ条件とリスクをほぼ確かめていない。テストは12件で、ほとんどが正常系の1ケースだけ。 / 成立条件: 現状のテストはすべて通る。そのため、重大1・2のような欠陥も検出できない。 / 影響: 次の項目を確かめるテストが1件もない。\n  - 他組織・他人の非公開メモの NotFound（K1）\n  - 閲覧数の同時加算（K3）\n  - `%` と `_` を文字として扱う検索（K2）\n  - タグの OR 絞り込み\n  - 楽観的ロックの Conflict と、読み出しから書き込みの間の割り込み\n  - Forbidden の分岐\n  - 失敗時のロールバック（K4、AC1・AC5・AC10）\n  - 移管での他組織の拒否（K6）\n  - api_key の伏せ字（AC6・K7）\n  - 秘密情報がログに出ないこと（AC9）\n  - RateLimiter の枠境界と同時実行（AC7）\n  - リンクの期限境界と形の崩れ（AC8）\n\n  / 根拠: tests/test_notes.py の全体。`hooks.before_write` と `RateLimiter.hook` の差し込み口は設計どおり用意されているが、一度も使われていない。 / 提案: 上記の各項目について、異常系・境界値・失敗の差し込みを含むテストを追加する。並行のテストは別スレッド・別接続と hook を使い、sleep に頼らない。\n- [重大4] 区分: テスト / 対象: AC6, R6, K7 / 対応区分: 証拠不足 / 内容: `export_audit` の api_key 伏せ字（末尾4文字だけ残す、8文字未満は全部伏せる）を確かめるテストがない。`test_export_audit` は action と actor しか見ていない。 / 成立条件: 伏せ字の境界値は7文字・8文字・4文字未満。 / 影響: 実装はコード上は正しそうだが、機密の漏えい防止が検証されていない。 / 根拠: tests/test_notes.py:59-63、notes/service.py:217-218。 / 提案: 7文字・8文字・短い鍵で `actor_key` を検証する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` の認可確認がトランザクションの外にある。確認の後に `transfer_notes` で所有者が変わると、元の所有者がまだ更新できる。更新は version の条件で守られているが、削除は守られていない。 / 提案: 認可の確認をトランザクション内でやり直す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空の題名の拒否だけで不十分。長さの境界、タグの規則（改行つきのタグを含む）、tags が文字列のとき、途中の失敗で何も残らないこと、がない。\n- AC2: V2 は作成者本人の閲覧だけで不十分。NotFound の各ケースと、閲覧数の加算・同時加算がない。\n- AC3: V3 は一覧の件数と1語の検索だけで不十分。範囲外の入力、sort、`%` と `_`、タグ OR、他人の非公開メモの除外がない。\n- AC4: V4 は所有者の更新と削除だけで不十分。Conflict、Forbidden、管理者、検証、ロールバックがない。\n- AC5: V5 は成功と非管理者の拒否だけで不十分。他組織の拒否と、途中失敗で元のままになることがない。\n- AC6: 上記の重大4のとおり不十分。\n- AC7: V7 は単一スレッドの超過と、61秒後のリセットだけで不十分。ちょうど window 秒の境界と、同時の呼び出しがない。\n- AC8: V8 は往復と改ざん1件だけで不十分。期限の境界（重大1の欠陥を見逃している）、形の崩れ、期限切れがない。\n- AC9: V9 は対応するテストがなく空洞。\n- AC10: V10 は例外の後に接続を使い続けられることを確かめるテストがなく空洞。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、sqlite を使った単体テストと並行テストで足りる。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8: 上記のとおり、ほとんど検証がない。\n- 並行の閲覧数加算（R2）と楽観的ロックの割り込み（R4）: 差し込み口はあるが、使った再現テストがない。未検証。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .`: 12件すべて合格。ただし上記のとおり、テストが弱い。\n- `verify_link` を `now == expires` で実行: 有効と判定された（重大1）。\n- `TAG_RE.match(\"abc\\n\")` を実行: True（重大2）。\n- 仕様、設計、`notes/*.py` の全行、`tests/test_notes.py` を読んだ。\n- `history --since 0`: 検証条件の弱体化は見つからなかった。\n- 次の項目は、コード上は仕様どおりに見えた。\n  - SQL のプレースホルダーと LIKE の ESCAPE\n  - 閲覧のトランザクション\n  - `transfer_notes` の組織検査\n  - RateLimiter のロックと枠の判定\n  - 例外メッセージに本文・署名が入らないこと",
+ "files_changed": [],
+ "valid": true
+}

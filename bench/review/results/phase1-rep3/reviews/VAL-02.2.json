@@ -1,0 +1,49 @@
+{
+ "case": "VAL-02",
+ "rep": 2,
+ "sec": 36.6,
+ "exit": 0,
+ "cost_usd": 0.1274659,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17348,
+  "cache_read_input_tokens": 128779,
+  "output_tokens": 4518,
+  "output_tokens_details": {
+   "thinking_tokens": 896
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17348,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2939,
+    "cache_read_input_tokens": 40930,
+    "cache_creation_input_tokens": 2579,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2579
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f2b7a217\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: タグが5個までという検査が作成・更新にない。`_validate` (notes/service.py:56-62) はタグ1個ごとの形式しか見ず、個数を見ない。`search_notes` だけが個数を検査している。 / 成立条件: `create_note` か `update_note` に6個以上のタグを渡す（重複も数える仕様なので `[\"a\"]*6` でも該当）。 / 影響: 仕様は ValidationError で拒否することを求めているが、メモが保存される。 / 根拠: 次の実行で、6個のタグが ValidationError にならず保存された（実行結果: `create_note(..., [\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"])` → 1、`[\"a\"]*6` → 2）。上流や DB 制約に個数の検査はない。 / 提案: `_validate` に `len(tags) > TAGS_MAX` なら ValidationError を足す（重複を除く前の個数で数える）。作成・更新の両方に効く。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件だけで、ほとんどが正常系の確認である。次のものを確かめるテストがない。\n  - 作成・更新・削除・移管の途中で失敗したときのロールバック (K4, AC1, AC5, AC10)\n  - 他の組織・他人の非公開メモが NotFound になること、一覧・検索から除かれること (K1, AC2, AC3)\n  - 楽観的ロックの Conflict と、読み出しから書き込みの間に更新が入る場合 (AC4, K3)\n  - 閲覧数の同時加算 (AC2, K3)\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドからの呼び出し (AC7)\n  - 共有リンクの期限ちょうど、形の崩れ、期限切れ (AC8, K8)\n  - `%` `_` と SQL インジェクションの入力 (K2)\n  - api_key の伏せ字、8文字未満の鍵、ログへの機密情報の漏えい (AC6, AC9, K5, K7)\n  - 入力の境界値（題名100/101文字、本文10000/10001文字、tags に文字列を渡す、page・per_page・sort の範囲外）\n  - 管理者以外・他の組織への移管の拒否 (K6)\n  \n  設計書が用意した `hooks.before_write` と `RateLimiter.hook` も一度も使われていない。 / 成立条件: これらの規則が壊れても、現在のテストは通る。 / 影響: 重大1の欠陥もテストで検出できていなかった。 / 根拠: tests/test_notes.py の全90行を確認した。`transfer_requires_admin` だけが拒否系で、それも管理者以外の1ケースしか見ていない。 / 提案: 上の項目ごとに、決定論的なテストを追加する。`hooks.before_write` で例外を出してロールバックを確かめる。別スレッド・別接続と `hook` で競合を再現する。sleep には頼らない。\n- [重大3] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` は、閲覧・権限の判定 (`_visible` と `_can_modify`) を `transaction()` の外で行い、その行を使っている。トランザクション内では version の条件だけを見る。 / 成立条件: 判定の後、更新の前に、並行する移管などで version が変わらないまま権限が変わる、または非公開フラグが変わる場合。 / 影響: 判定が古い状態のまま更新が通る可能性がある。ただし `transfer_notes` は version を増やすので、移管との競合は Conflict になり、実害は限定的。`private` や `org_id` を変更する操作は現状ない。このため、現状では顕在化する経路は未確認である。 / 提案: 実害の経路が確認できないため、この項目は重大の対象外とする。下の [軽微1] に移す（本件を数に含めない）。\n\n注: [重大3] は上のとおり重大の根拠がないので取り下げる。重大は [重大1] と [重大2] の2件。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: 上記の権限判定を transaction 内で再読み込みして行うと、get_note と同じ作りになり、将来の変更に強くなる。`delete_note` も、`DELETE` の rowcount を見ない。同時に消された場合でも監査ログが残る。 / 提案: transaction 内で行を読み直す。`DELETE` の rowcount を確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空の題名1件だけで不十分。タグ個数の欠陥（重大1）を検出できず、失敗時に何も残らないことも確かめていない。\n- AC2: V2 は作成者本人の閲覧だけで不十分。他の組織・非公開・存在しないの NotFound、閲覧数の増加と同時加算を確かめていない。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで不十分。範囲外の拒否、`%` と `_`、タグの OR 絞り込み、非公開の除外、SQL インジェクションを確かめていない。\n- AC4: V4 は作成者による正常な更新と削除だけで不十分。Conflict、Forbidden、管理者の扱い、更新時の入力検証を確かめていない。\n- AC5: V5 は正常系と管理者以外の拒否だけで不十分。他の組織への移管、途中で失敗したときの巻き戻しを確かめていない。\n- AC6: V6 は action と actor だけを見ており、不十分。api_key の伏せ字そのものを確かめていない。\n- AC7: V7 は limit 超過と枠の経過だけで不十分。ちょうど window 秒の境界と複数スレッドからの呼び出しを確かめていない。\n- AC8: V8 は往復と改ざん1件だけで不十分。期限ちょうど・期限切れ・形の崩れを確かめていない。\n- AC9: V9 は対応するテストがなく不十分。\n- AC10: V10 は対応するテストがなく不十分。例外の後に接続を再利用できることを確かめていない。\n- リスク K1〜K8 は、拒否系・競合・漏えい系のテストがなく、いずれも検証が空洞化している。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストは見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、単体テストで足りる。ただし単体テストの不足は [重大2] のとおり。\n\n### 不足しているリスク\n- なし（K1〜K8 は仕様に列挙されている。不足しているのは検証のほう）。\n\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/*.py` と `tests/test_notes.py` の全体を読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件が OK。\n- 6個のタグでの作成を実行し、拒否されず保存されることを確認した（重大1）。\n- `trace` と `history --since 0` を確認した。検証条件の弱体化の形跡は見つからなかった。\n- 実装コードの確認では、次の点は問題なかった。\n  - SQL は値をプレースホルダーで渡している。\n  - LIKE に ESCAPE がある。\n  - 共有リンクは fullmatch・`compare_digest`・期限ちょうど以降を無効としている。\n  - RateLimiter は lock の中で数えている。\n  - `transaction()` は ROLLBACK して例外をそのまま伝える。\n  - ログには ID だけを出している。",
+ "files_changed": [],
+ "valid": true
+}

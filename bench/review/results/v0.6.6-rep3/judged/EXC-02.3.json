@@ -1,0 +1,43 @@
+{
+ "case": "EXC-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0672317,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `delete_note` の `except Exception` が `log.warning` だけを出して再送出しません。これは埋め込んだ欠陥そのものです(箇所・原因・影響がすべて一致)。→ matches_defect\n- **重大2**: タグ検査の `re.match` と `$` の組み合わせでは、末尾が改行のタグ `\"abc\\n\"` が通ります。`$` は末尾の改行の手前にも一致するためです。仕様違反の実在するバグで、欠陥とは別の箇所です。→ real_other\n- **重大3**: テストの不足だけを指摘しています。→ test_gap\n- **軽微1**: 権限確認がトランザクションの外にあるため、`transfer_notes` との競合で旧所有者が削除できる可能性があります。実在するTOCTOUの問題として根拠もあります。→ real_other\n- **軽微2**: 先頭ゼロを許すことについて、報告自身が仕様違反ではないと述べています。リンクの一意性という厳密さの話で、欠陥の主張としては弱いです。→ style\n- **軽微3**: 冗長なだけで害はないと、報告自身が述べています。→ style\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"delete_note が例外を捕まえて警告ログだけにし、呼び出し側に伝えない点が埋め込んだ欠陥と完全に一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により改行付きタグが通る実在の仕様違反で、埋め込んだ欠陥とは別の箇所。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限確認がトランザクションの外にあり、transfer_notes と競合すると旧所有者が削除できてしまう実在の競合状態である。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭ゼロの扱いは仕様に反さず、厳密さの提案にとどまる。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"冗長なだけで害はないと報告自身が認めており、保守性の指摘である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が delete_note の握りつぶしを、箇所・原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "delete_note が例外を捕まえて警告ログだけにし、呼び出し側に伝えない点が埋め込んだ欠陥と完全に一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により改行付きタグが通る実在の仕様違反で、埋め込んだ欠陥とは別の箇所。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限確認がトランザクションの外にあり、transfer_notes と競合すると旧所有者が削除できてしまう実在の競合状態である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭ゼロの扱いは仕様に反さず、厳密さの提案にとどまる。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "冗長なだけで害はないと報告自身が認めており、保守性の指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が delete_note の握りつぶしを、箇所・原因・影響とも正確に指摘している。"
+ }
+}

@@ -1,0 +1,53 @@
+{
+ "case": "SEC-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0671717,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `make_link` が token をログに出している点を、根拠の行つきで指摘しています。埋め込んだ欠陥と箇所も原因も影響も一致するので matches_defect です。\n- **重大2**: 指摘しているのはログに機密が出ないことを確かめるテストの不足です。コードの欠陥の指摘ではないので test_gap です。\n- **重大3**: 異常系・境界値などのテスト不足だけを述べているので test_gap です。\n- **重大4**: RateLimiter と共有リンクの境界・同時実行のテスト不足だけなので test_gap です。\n- **重大5**: `actor_key` の伏せ字を確かめるテストがないという指摘です。test_gap です。\n- **軽微1**: 判定と書き込みの間に所有者が移管された場合と、`delete_note` の rowcount を見ていない点を指摘しています。コード上に実在する競合の穴です。ただし行番号は実際のコードとずれています。real_other です。\n- **軽微2**: version の型を検査していないという指摘は、仕様に明記がなく、実害も弱い堅牢性の提案です。style です。\n- **軽微3**: 設計書のトレース対応が粗いという保守性の指摘で、コードの欠陥ではありません。style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"make_link が署名 token をログに出しており、share.py の埋め込み欠陥と箇所・原因が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"ログに機密が出ないことを確かめるテストの不足を指摘しているだけである。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値などのテスト不足の指摘である。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter と共有リンクの境界・同時実行のテスト不足の指摘である。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字を確かめるテストの不足の指摘である。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限判定が取引の外にあり、移管後も旧所有者として書き込める点と、delete の rowcount 未確認という実在する競合の穴を指摘している。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"version の型検査がないという堅牢性の提案で、仕様違反の主張ではない。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"設計書のトレース対応が粗いという保守性の指摘である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が署名のログ出力という埋め込み欠陥を、箇所・原因とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "make_link が署名 token をログに出しており、share.py の埋め込み欠陥と箇所・原因が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "ログに機密が出ないことを確かめるテストの不足を指摘しているだけである。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "異常系・境界値などのテスト不足の指摘である。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter と共有リンクの境界・同時実行のテスト不足の指摘である。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字を確かめるテストの不足の指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限判定が取引の外にあり、移管後も旧所有者として書き込める点と、delete の rowcount 未確認という実在する競合の穴を指摘している。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "version の型検査がないという堅牢性の提案で、仕様違反の主張ではない。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "設計書のトレース対応が粗いという保守性の指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が署名のログ出力という埋め込み欠陥を、箇所・原因とも正しく指摘している。"
+ }
+}

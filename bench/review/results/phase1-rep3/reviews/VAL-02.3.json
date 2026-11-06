@@ -1,0 +1,49 @@
+{
+ "case": "VAL-02",
+ "rep": 3,
+ "sec": 35.9,
+ "exit": 0,
+ "cost_usd": 0.12132590000000001,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 15686,
+  "cache_read_input_tokens": 157219,
+  "output_tokens": 4284,
+  "output_tokens_details": {
+   "thinking_tokens": 708
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15686,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2919,
+    "cache_read_input_tokens": 40761,
+    "cache_creation_input_tokens": 1086,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1086
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f2b7a217\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: 作成・更新でタグ数の上限（5個）を検査していない。`_validate` は個々のタグの形式しか見ていない。さらに、更新時に `tags` が `None` ではなく `[]` 以外のときも同様に素通しになる（検索側 `search_notes` だけは個数を検査している）。 / 成立条件: `create_note` または `update_note` に6個以上のタグを渡す。 / 影響: 仕様違反のメモが保存される。 / 根拠: `notes/service.py` の `_validate`（178〜185行）に個数検査がない。実行で `create_note(..., [\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"])` が note_id=1 を返し、保存を確認した。同じ入力が `search_notes` では ValidationError になる。 / 提案: `_validate` で `len(tags) > TAGS_MAX` のとき ValidationError にする（重複も数える）。\n\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの正規表現が `^...$` を `re.match` で使っているため、末尾に改行を含むタグを通す。`\"ab\\n\"` が有効なタグになる。 / 成立条件: タグ末尾に `\\n` を付ける。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するデータが保存される。検索の絞り込みでも通る。 / 根拠: `notes/service.py` の `TAG_RE`（136行）と `_validate`（184行）。実行で `create_note(..., [\"ab\\n\"])` が成功した。 / 提案: `TAG_RE.fullmatch` に変える（または `\\Z` を使う）。`search_notes` の検査（270行）も同様に直す。\n\n- [重大3] 区分: テスト / 対象: AC1〜AC10、K1〜K8（特に AC2、AC4、AC5、AC7、AC8、AC9、AC10、K3、K4、K6） / 対応区分: 証拠不足 / 内容: テストは15件の正常系中心の薄いものにとどまり、仕様が求める異常系・境界値・競合・巻き戻しを確かめていない。上の重大1・2が gate を通ったことがその証拠である。設計が用意した `hooks.before_write` と `RateLimiter.hook` の差し込み口を、テストが一度も使っていない。 / 成立条件: すべて、該当するテストが存在しないことによる。 / 影響: 認可の条件や楽観的ロックを外しても、テストは失敗しない。 / 根拠: `tests/test_notes.py` 全体（90行）。 / 提案: 少なくとも次のテストを追加する。\n  - 他組織・他人の非公開メモの get、更新、削除、一覧、検索が NotFound になること。\n  - 管理者が非公開メモを扱うと NotFound になること。\n  - 古い version で更新すると Conflict になること。\n  - `hooks.before_write(\"update\")` の中で別の更新を入れても Conflict になること。\n  - create、delete、transfer の途中失敗で何も残らないこと、そのあとも接続を使えること。\n  - 別スレッド・別接続での閲覧数の加算。\n  - RateLimiter の枠の境界（ちょうど window 秒）と、`hook` を使った並行呼び出し。\n  - 共有リンクの期限ちょうど、改ざん、形の崩れ、改行を含むリンク。\n  - 監査ログの api_key の伏せ字（8文字未満・8文字以上）。\n  - 例外メッセージとログに本文・署名・api_key が出ないこと。\n  - LIKE の `%` と `_`、SQL 文字列を含む検索語。\n  - 検証の入力範囲（題名100文字と101文字、page=0、per_page=51、不正な sort）。\n  - 移管の組織外と非管理者。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` で、`_visible`・`_can_modify` の判定をトランザクションの外で行っている。判定から書き込みまでの間に、所有者や公開設定が変わるとすり抜ける可能性がある。version による楽観的ロックは更新の競合を防ぐが、削除ではこの判定の隙間は残る。 / 提案: 判定をトランザクション内（BEGIN IMMEDIATE のあと）で再読込して行う。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名と正常作成しか確かめていない。タグ数・タグの形式・長さの境界・失敗時の巻き戻しは未検証で、実際に欠陥（重大1・2）が残っている。\n- AC2: 不十分。本人が get できることしか確かめていない。他組織・非公開・存在しない場合の NotFound や、閲覧数の同時加算は未検証。\n- AC3: 不十分。正常な一覧と検索を1件ずつ確かめただけ。範囲外の拒否、`%` `_`、タグ OR、SQL インジェクション、他人の非公開メモの除外が未検証。\n- AC4: 不十分。所有者による更新と削除しか確かめていない。Forbidden、Conflict、読み出しから書き込みの間の競合、削除失敗の伝播が未検証。\n- AC5: 不十分。成功件数と非管理者の拒否だけ。組織外の拒否と途中失敗時の巻き戻しが未検証。\n- AC6: 不十分。action と actor しか見ておらず、api_key の伏せ字を確かめていない。\n- AC7: 不十分。枠の超過と再開は確かめている（妥当）。ただし、ちょうど window 秒の境界と、スレッド同時呼び出し（`hook` の利用）が未検証。\n- AC8: 不十分。往復と note_id 改ざんの2件のみ。期限ちょうど、期限切れ、署名の改ざん、形の崩れが未検証。\n- AC9: 未検証（ログ・例外に機密が出ないことを確かめるテストがない）。コードを読んだ範囲では、本文・署名・api_key は出していない。\n- AC10: 未検証（例外のあとに接続が使えることを確かめるテストがない）。`transaction()` の ROLLBACK 実装は設計どおり。\n- エンジンが検出したテストの兆候: なし。skip・弱化の履歴は確認していない。ただしテストが少なすぎて、弱いアサーションの問題以前に網羅性が不足している。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest の単体・結合テストで足りる）。ただし、並行・巻き戻しの決定論的なテストは必須。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションを確かめるテストがない。コードはプレースホルダーと ESCAPE を使っており、目視では問題なし。\n- K3: 更新と閲覧数の同時実行を確かめるテストがない。\n- K4: 途中失敗による不整合を確かめるテストがない。\n- K5、K6、K7、K8: 機密情報の露出、移管の範囲、api_key の漏れ、共有リンクの不正を確かめるテストがない。\n\n### 確認したこと\n- `trace` を実行し、全要求が「合格・反証未実施」だと確認した。\n- `notes/*.py` と `tests/test_notes.py` を全行読んだ。\n- Python を一時的に実行した。\n  - `create_note` に6個のタグを渡すと成功した。\n  - タグ `\"ab\\n\"` で `create_note` が成功した。\n  - `search_notes` に6個のタグを渡すと ValidationError になった。\n- `notes/` と `tests/` は未コミットで、`git diff` による検証条件の弱体化は確認できなかった。`history` は実行していない。\n- `gate` は実行していない。ファイルの変更もしていない。",
+ "files_changed": [],
+ "valid": true
+}

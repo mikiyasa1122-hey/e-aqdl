@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 2,
+ "sec": 35.4,
+ "exit": 0,
+ "cost_usd": 0.14613980000000001,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22671,
+  "cache_read_input_tokens": 117698,
+  "output_tokens": 4367,
+  "output_tokens_details": {
+   "thinking_tokens": 738
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22671,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2937,
+    "cache_read_input_tokens": 40485,
+    "cache_creation_input_tokens": 1292,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1292
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 内容: 形の崩れたリンクが Forbidden にならず `None` を返す。仕様は「形の崩れたリンクはどれも Forbidden」。呼び出し側が `None` を「検証失敗」と気づかず通すおそれもある。 / 根拠: notes/share.py:138-139 の `except ValueError: return None`。実行結果は `verify_link('s','garbage')` → None、`verify_link('s','1.2.zz')` → None。 / 提案: 形が合わないときは `Forbidden(\"不正なリンク\")` を送出する。`None` を返す経路をなくす。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` と `re.match` の組み合わせで、末尾に改行を付けたタグ（`\"abc\\n\"`）を通す。保存もされる。仕様は「英小文字・数字・ハイフンの1〜20文字」。 / 根拠: notes/service.py:158 と :208・:294。実行結果は `create_note(..., ['abc\\n'])` が成功し、`get_note` のタグが `['abc\\n']`。share.py では fullmatch を使っており、扱いが不統一。 / 提案: `TAG_RE.fullmatch` に変えるか `\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC8, K8 / 内容: 共有リンクのテストが正常系と改ざん1件だけ。期限の境界（期限ちょうどは無効、1秒前は有効）、期限切れ、形の崩れ、署名の長さ違い・大文字などがない。そのため重大1も検出できていない。 / 根拠: tests/test_notes.py:79-86。 / 提案: 境界値と、形の崩れの各種パターンで Forbidden になることを確かめるテストを追加する。\n- [重大4] 区分: テスト / 対象: AC7, K3, R7 / 内容: 同時呼び出しのテストがない。RateLimiter.hook を使った決定論的な並行テストも、枠の境界（ちょうど window 秒で新しい枠）のテストもない。`test_limit` が1件あるだけ。 / 根拠: tests/test_notes.py:67 付近。設計書のテスト方針（hooks と RateLimiter.hook で再現）が実現されていない。 / 提案: 別スレッド・別接続で、ロックを外したら失敗する形のテストを追加する。clock を差し替えて境界を確かめる。\n- [重大5] 区分: テスト / 対象: AC2, AC4, AC5, K1, K3, K4, AC10, R10 / 内容: 次の検証が見当たらない。\n  - 閲覧数の同時加算\n  - 更新の version 競合（古い version、hooks.before_write(\"update\") 経由の読み出しから書き込みの間の競合）\n  - 他の組織・他人の非公開メモが NotFound になること\n  - 管理者による非公開メモの NotFound\n  - create / delete / transfer 途中失敗時のロールバック\n  - 例外後に接続を再利用できること\n \n  仕様の主要な受け入れ条件が実質未検証。 / 根拠: tests/test_notes.py 全体で 12 件。`hooks`・Conflict・NotFound・Forbidden（transfer の組織違い）の参照を確認できない。 / 提案: 各 AC・リスクに対応する異常系テストを追加する。\n- [重大6] 区分: テスト / 対象: AC3, K2, AC6, AC9, K5, K7 / 内容: 次の検証が不足している。\n  - 検索の `%` / `_` のエスケープ\n  - タグ OR 絞り込み\n  - SQL インジェクション文字列\n  - 一覧の page / per_page / sort の範囲外\n  - 8文字未満・ちょうど8文字の api_key の伏せ方\n  - ログ・例外メッセージへの本文・署名・api_key の漏えいがないこと\n \n  / 根拠: テスト名一覧（test_search・test_list_first_page・test_export_audit のみ）。 / 提案: 境界値と悪意ある入力のテストを追加する。caplog 相当で出力を検査する。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 内容: update_note と delete_note は、認可と存在の確認をトランザクションの外で行う。delete は UPDATE のような version 条件がなく、確認後に所有者が移管されても削除が通る。更新は version で守られる。 / 根拠: notes/service.py:302-306, 326-335。 / 提案: トランザクション内で行を再取得して認可を再確認する。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: transfer_notes は移管で updated_at を更新しない。非公開メモの移管で、移管先の一覧順に影響が出る。 / 根拠: notes/service.py:349。 / 提案: 仕様にないので、意図を設計書に明記するか更新する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の拒否だけ。タグの個数・文字・本文長・途中失敗のロールバックがなく不十分。実装にも重大2の欠陥がある。\n- AC2: V2 は作成→閲覧の確認程度で、閲覧数の同時加算や NotFound の各ケースがなく不十分。\n- AC3: V3 はページ1と検索の基本だけ。範囲外、% と _、タグ OR、インジェクションがなく不十分。\n- AC4: V4 は所有者による更新・削除の正常系だけ。Conflict・Forbidden・NotFound・削除の失敗伝播がなく不十分。\n- AC5: V5 は移管の正常系と管理者でない場合だけ。組織違いと途中失敗の巻き戻しがなく不十分。\n- AC6: V6 は伏せ字の境界（8文字未満・8文字）を確かめておらず不十分。\n- AC7: V7 は単発の制限だけ。枠の境界と同時の呼び出しがなく不十分。\n- AC8: V8 は不十分（重大3）。しかも実装が仕様違反（重大1）。\n- AC9: V9 はログ・例外へ機密情報が出ないことを確かめるテストが見当たらず不十分。\n- AC10: V10 は例外後の接続再利用を確かめるテストが見当たらず不十分。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションなしはなかった。ただし件数と深さが足りない。\n\n### E2E の要否\n- 不要。HTTP のないライブラリで、単体テストで足りる。ただし並行・ロールバックの統合的な単体テストは必須。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションを確かめるテストがない。\n- K3: 同時の更新・閲覧・呼び出しを確かめるテストがない。\n- K4: 途中の失敗による不整合を確かめるテストがない。\n- K5, K7: 機密情報の露出を確かめるテストがない。\n- K6: 組織をまたぐ移管の拒否を確かめるテストがない。\n- K8: 重大1の欠陥がある。境界のテストもない。\n\n### 確認したこと\n- spec.md・design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `aqdlc trace` で、要求と検証がすべて「合格・反証未実施」であることを確認した。\n- `python3 -B -m unittest discover -s tests` は 12 件が OK（コードは変更していない）。\n- 再現コマンドで、`verify_link` が不正形式で None を返すこと、`\"abc\\n\"` のタグが保存されることを確認した。\n- `aqdlc history` は途中で BrokenPipe になった（head にパイプしたため）。取得できた範囲に、検証条件を弱めた形跡はなかった。",
+ "files_changed": [],
+ "valid": true
+}

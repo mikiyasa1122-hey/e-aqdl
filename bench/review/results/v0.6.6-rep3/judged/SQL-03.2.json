@@ -1,0 +1,43 @@
+{
+ "case": "SQL-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0681037,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `list_notes` の `SORT_COLUMNS.get(sort, sort)` で、許可外の sort をそのまま ORDER BY に入れている点を指摘しています。埋め込んだ欠陥と箇所・原因・影響が一致します。\n- **重大2**: テストの不足だけを述べています。\n- **重大3**: `update_note` と `delete_note` の認可確認がトランザクションの外にあるという指摘です。確認から書き込みまでの間に所有者が変わる競合は実在します。特に `delete_note` には version 条件がありません。ただし `update_note` は version 条件で一部守られています。\n- **重大4**: 前半の `search_notes` の二重化は、検証が実際には行われているため欠陥ではありません。後半の `transfer_notes` に `org_id` 条件がないという指摘も弱いです。`ids` の取得時点で `org_id` を絞っているので、実害は出にくい構造です。この指摘自身も軽微に下げてよいと書いています。欠陥の主張として根拠が薄いため false_positive としました。\n- **軽微1**: 仕様は「10進の数字だけ」としか定めていないので、逸脱ではありません。指摘自身もそう認めています。好みの提案にあたります。\n- **軽微2**: `_counts` が増え続けるというメモリ面の保守性の指摘です。仕様違反ではないので style としました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の SORT_COLUMNS.get(sort, sort) で未検証の sort が ORDER BY に入る点を、再現付きで指摘しており、埋め込み欠陥と一致する。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを述べており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update/delete の認可確認がトランザクション外にあり、transfer との競合で権限のない更新・削除が起こりうる。delete には version 条件もなく、実在する競合である。\"},\n{\"label\": \"重大4\", \"class\": \"false_positive\", \"reason\": \"search_notes の二重化は欠陥ではなく、transfer_notes も ids 取得時に org_id で絞っているため実害は示されていない。指摘自身も影響が限定的と認めている。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの表記は仕様の範囲内で、指摘自身も逸脱ではないと述べている。好みの提案である。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"メモリ増加の保守性の提案で、仕様違反ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が sort の未検証による ORDER BY への SQL 差し込みを、同じ箇所・原因・影響で指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の SORT_COLUMNS.get(sort, sort) で未検証の sort が ORDER BY に入る点を、再現付きで指摘しており、埋め込み欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを述べており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update/delete の認可確認がトランザクション外にあり、transfer との競合で権限のない更新・削除が起こりうる。delete には version 条件もなく、実在する競合である。"
+   },
+   {
+    "label": "重大4",
+    "class": "false_positive",
+    "reason": "search_notes の二重化は欠陥ではなく、transfer_notes も ids 取得時に org_id で絞っているため実害は示されていない。指摘自身も影響が限定的と認めている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの表記は仕様の範囲内で、指摘自身も逸脱ではないと述べている。好みの提案である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "メモリ増加の保守性の提案で、仕様違反ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が sort の未検証による ORDER BY への SQL 差し込みを、同じ箇所・原因・影響で指摘している。"
+ }
+}

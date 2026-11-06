@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-08",
+ "rep": 3,
+ "sec": 36.1,
+ "exit": 0,
+ "cost_usd": 0.11636070000000001,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15231,
+  "cache_read_input_tokens": 115807,
+  "output_tokens": 4384,
+  "output_tokens_details": {
+   "thinking_tokens": 826
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15231,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2809,
+    "cache_read_input_tokens": 36847,
+    "cache_creation_input_tokens": 2497,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2497
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8cfb3494\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC10, V1〜V10, VK1〜VK8 / 内容: テストは12件だけで、正常系が中心。仕様の主要な規則を確かめるテストがない。\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の並行カウント（K3）\n  - 楽観的ロックの Conflict（K3）\n  - 失敗時のロールバック（K4）。`hooks.before_write` の差し込み口は設計にあるが、1つも使われていない\n  - 移管の失敗時に元のまま残ること、移管の組織外拒否（K6）\n  - api_key の伏せ字（K7。`test_export_audit` は action と actor しか見ていない）\n  - SQL インジェクションと `%`・`_`（K2）\n  - 入力の境界値（題名100/101文字、本文10000文字、タグ5/6個、page=0、per_page=51、sort 不正）\n  - RateLimiter のちょうど window 秒の境界と並行呼び出し\n  - 共有リンクの期限ちょうど・形の崩れ\n  - ログに機密情報が出ないこと（R9）\n  - 例外の後も接続を使い続けられること（R10）\n  - 根拠: tests/test_notes.py 全体（90行）。`trace` は全項目を「合格」としているが、実際に確かめているのは一部だけ。\n  - 提案: AC ごとに異常系・境界値・決定論的な並行テストを追加する。並行テストは hook と Barrier を使い、sleep に頼らない。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 内容: タグの正規表現に `^...$` と `match` を使っているため、末尾に改行を含むタグが通る。例は `\"abc\\n\"`。20文字のタグに `\\n` を足した21文字のものも通る。仕様は「英小文字・数字・ハイフンの1〜20文字」。\n  - 根拠: notes/service.py:14, 64, 151。再現したところ、`create_note(c,u,\"t\",\"b\",[\"abc\\n\"])` が成功して id 1 を返した。\n  - 提案: `fullmatch` に変えるか `\\Z` を使う。作成・更新・検索の3か所にテストを追加する。\n- [重大3] 区分: テスト / 対象: R7, AC7, K3 / 内容: 枠の境界（ちょうど window 秒で新しい枠になる）と、複数スレッドの同時呼び出しで上限を超えないことを確かめるテストがない。既存のテストは t=61 の1点だけ。\n  - 根拠: tests/test_notes.py:73-81\n  - 提案: t=window-ε で拒否され、t=window ちょうどで許可されることを確かめる。複数スレッドから hit を呼び、成功数が limit ちょうどになることも確かめる。\n- [重大4] 区分: テスト / 対象: R8, K8, AC8 / 内容: 期限ちょうど（now==expires は無効）、署名の改ざん、形の崩れたリンクのテストがない。改ざんのテストは note_id を書き換えた1ケースだけ。\n  - 根拠: tests/test_notes.py:84-90。実装の LINK_RE と `>=` の判定は妥当に見えるが、回帰を検出できない。\n  - 提案: 期限ちょうどと1秒前、署名1文字の改ざん、大文字の16進、改行つき、非 str、区切りの欠落を追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` が可視性と権限を、トランザクションの外で読んだ行で判定している。version による楽観的ロックで更新の消失は防げる。ただ、その間に `transfer_notes` で owner が変わった場合は、古い権限判定のまま更新が通る。\n  - 提案: 権限の判定をトランザクション内で行う。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: 更新中にメモが削除されると、NotFound ではなく Conflict になる。意図の確認と、そのテストがほしい。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名だけを確認しているので不十分。境界値、タグの規則（実装にも欠陥あり。重大2）、tags に文字列を渡す異常系、トランザクションの原子性が確かめられていない。\n- AC2: V2 は作成者本人の閲覧だけを確認しているので不十分。他の組織・非公開・存在しない場合の NotFound、閲覧数の増加、並行カウントがない。実装は妥当に見える。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで不十分。範囲外の ValidationError、sort、`%`・`_`、インジェクション、タグ OR、他人の非公開の除外がない。\n- AC4: V4 は所有者の更新と削除の正常系だけで不十分。Forbidden、管理者の扱い、Conflict、更新時の検証、削除の失敗伝播がない。\n- AC5: V5 は件数だけを確認していて不十分。移管後の owner、組織外の Forbidden、途中失敗時の巻き戻しがない。\n- AC6: V6 は伏せ字を確認していないので空洞。8文字未満、ちょうど8文字、通常の鍵の各ケースを確かめる必要がある。\n- AC7: V7 は不十分（重大3）。\n- AC8: V8 は不十分（重大4）。\n- AC9: 対応するテストがない。ログのキャプチャ（assertLogs）と例外メッセージの検査が必要。\n- AC10: 対応するテストがない。例外の後に同じ接続で次の操作ができることを確かめる必要がある。\n- エンジンが検出したテストの兆候: なし。skip・弱体化・改ざんも見当たらない（tests/ は未コミットの新規ファイルで、比較対象の履歴がない）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、検証は unittest + SQLite（メモリまたは一時ファイル）で足りる。ただし並行テストは、スレッドごとに別接続を使うファイル DB で行う必要がある。\n\n### 不足しているリスク\n- K1: 組織をまたぐ漏えい、非公開メモ、存在を明かさない NotFound の検証がない。\n- K2: インジェクション、LIKE のエスケープ、タグの検証がない。実装はプレースホルダーと ESCAPE を使っており妥当に見える。\n- K3: 閲覧数、更新の競合、RateLimiter の並行テストがない。\n- K4: ロールバックのテストがない。hook は未使用。\n- K5・K7: 伏せ字とログの検査がない。\n- K6: 組織外への移管と、一部だけ移ることの検証がない。\n- K8: 期限の境界と改ざんの検証が不足。\n\n### 確認したこと\n- spec.md と design.md を読んだ。\n- notes/*.py の全ソースを読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が OK だった。\n- `create_note(..., [\"abc\\n\"])` を実行し、成功することを確認した（重大2）。\n- `trace` の結果を確認した。全項目が「合格・反証未実施」で、対応する実テストは上記のとおり限定的だった。\n- `history` は未実行。tests/ が未追跡の新規ファイルなので、改ざんを比較する対象がない。\n- コードとファイルは変更していない。`gate` も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

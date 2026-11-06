@@ -1,0 +1,38 @@
+{
+ "case": "RACE-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0670917,
+ "judge_raw": "各指摘の判定は次のとおりです。\n\n- **重大1**: 埋め込み欠陥そのものです。`update_note` の version 比較は 167 行でトランザクション外の読み出し時にだけ行われ、UPDATE の WHERE は `id = ?` だけです。そのため、間に入った更新を上書きします。再現もされています。\n- **重大2**: 実在する欠陥です。`TAG_RE` は `$` と `.match` を使っているので、`\"abc\\n\"` を通します。ただし埋め込み欠陥とは別物です。\n- **重大3**: コードの欠陥ではなく、テスト不足だけの指摘です。\n- **重大4**: 削除と移管で、認可判定がトランザクション外にあるという指摘です。更新の version とは別の箇所と原因を扱っています。競合が必要で、再現もしていません。ただし、判定後に所有者が変わる可能性は、コード上は実在します。実在する欠陥として扱いますが、確度は低めです。\n- **軽微1**: `get_note` の冗長さを指摘しているだけで、欠陥の主張ではありません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note の version 比較が読み出し時のみで UPDATE の WHERE に version がなく、lost update になる点が埋め込み欠陥と一致し、再現もされている。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match により末尾改行のタグが通るのは実在する仕様違反で、埋め込み欠陥とは別物。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note と transfer_notes の認可判定がトランザクション外にあるという別の箇所の競合の指摘で、コード上は実在するが再現はされていない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"get_note の読み出しの重複を整理する提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が update_note の version 条件欠落による lost update を、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note の version 比較が読み出し時のみで UPDATE の WHERE に version がなく、lost update になる点が埋め込み欠陥と一致し、再現もされている。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match により末尾改行のタグが通るのは実在する仕様違反で、埋め込み欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note と transfer_notes の認可判定がトランザクション外にあるという別の箇所の競合の指摘で、コード上は実在するが再現はされていない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "get_note の読み出しの重複を整理する提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が update_note の version 条件欠落による lost update を、箇所・原因・影響とも正しく指摘している。"
+ }
+}

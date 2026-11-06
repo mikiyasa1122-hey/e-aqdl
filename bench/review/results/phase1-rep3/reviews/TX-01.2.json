@@ -1,0 +1,49 @@
+{
+ "case": "TX-01",
+ "rep": 2,
+ "sec": 31.7,
+ "exit": 0,
+ "cost_usd": 0.099472,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12286,
+  "cache_read_input_tokens": 119220,
+  "output_tokens": 3839,
+  "output_tokens_details": {
+   "thinking_tokens": 707
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12286,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2795,
+    "cache_read_input_tokens": 36149,
+    "cache_creation_input_tokens": 2311,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2311
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 548d810a\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4, R10 / 対応区分: 修正必須 / 内容: `delete_note` がタグの削除とメモの削除を別々のトランザクションで行っている。 / 成立条件: タグ削除をコミットした後にメモの DELETE か監査の INSERT が失敗したとき（ロック待ちのタイムアウト、外部キー違反、ディスクエラーなど）。`hooks.before_write(\"delete:note\")` が両者の間に差し込まれていて、まさにこの状態を作れる。 / 影響: メモは残るのにタグだけ消える。仕様は「タグとメモを1つのトランザクションで消す」としており、これに違反する。 / 確認した保証: 上流にも DB の制約にも、この途中状態を防ぐものはない。 / 根拠: notes/service.py の `delete_note` に `with transaction(conn)` が2つある（DELETE note_tags と DELETE notes＋監査）。 / 提案: 1つの `with transaction(conn):` の中で note_tags の削除、notes の削除、監査の記録をまとめて行う。\n\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系だけである。次の項目を確かめるテストがない。\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - 閲覧数の並行カウント\n  - Conflict（古い version、読み出しと書き込みの間の割り込み）\n  - 作成・削除・移管の途中失敗でのロールバック（`hooks` が使われていない）\n  - 例外の後も接続を使えること\n  - SQL の `%` / `_` のエスケープとインジェクション\n  - 入力の境界値（100文字、101文字、タグ5個と6個、`per_page` の 0 と 51）\n  - 移管で別の組織への移管が Forbidden になること\n  - api_key の伏せ字（8文字未満、ちょうど8文字）\n  - 共有リンクの期限ちょうど、形の崩れ、改行入りのリンク\n  - ログに機密情報が出ないこと\n  / 成立条件: 認可の条件や LIKE のエスケープを外しても、現在の12件はすべて通る。 / 影響: 重要なリスクが検証されておらず、重大1のような欠陥もテストで検出できていない。 / 根拠: tests/test_notes.py（90行）。`python3 -m unittest` は 12件 OK だが、上記の項目が含まれていない。 / 提案: 設計の差し込み口（`service.hooks.before_write`）を使い、AC1〜AC10 ごとに異常系・境界値・失敗注入のテストを追加する。\n\n- [重大3] 区分: テスト / 対象: AC7, R7, K3 / 対応区分: 証拠不足 / 内容: RateLimiter のテストは、制限に達することと 61秒後の再開だけを確かめている。 / 成立条件: 枠の境界（ちょうど window 秒で新しい枠になること）や複数スレッドからの同時呼び出しは、検証されていない。 / 影響: 「上限を超えて許さない」と「ちょうど window 秒」という必須の条件が未検証である。実装はロックと `>=` で正しそうに見えるが、証拠がない。 / 根拠: tests/test_notes.py の `RateLimitTest.test_limit`。`RateLimiter.hook` は未使用。 / 提案: 境界値（window-ε と window ちょうど）のテストと、複数スレッドが同時に `hit` するテストを追加する。sleep ではなく `hook` と Barrier を使って決定論的に行う。\n\n- [重大4] 区分: テスト / 対象: AC4, AC2, K3 / 対応区分: 証拠不足 / 内容: 楽観的ロックの実装は妥当に見える（UPDATE の WHERE に version を入れ、rowcount で判定）。しかし、読み出しから書き込みの間に他の更新が入るケースや、閲覧数の同時加算を、別接続・別スレッドで確かめるテストがない。 / 影響: 更新の消失や閲覧数の数え漏れが検出できない。 / 根拠: 該当するテストなし。 / 提案: 重大2の追加テストと合わせて、ファイルDBと2接続で `hooks.before_write(\"update\")` と `(\"view\")` の中から割り込む形で再現する。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` が `_visible` と `_can_modify` の確認をトランザクションの外で行っている。その間に `transfer_notes` で所有者が変わると、古い所有者で更新が通りうる。version が `transfer_notes` で上がるため、通常は Conflict になる。 / 提案: 権限の確認を `BEGIN IMMEDIATE` の中に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` のみ。境界値、タグ規則、tags が文字列の場合、失敗時に何も残らないことが未検証で不十分。実装は仕様に沿っている（トランザクションあり）。\n- AC2: 閲覧数のテストも、見え方（他組織・非公開・存在しない）のテストもなく不十分。\n- AC3: 正常系の2件のみ。範囲外の拒否、`%` / `_`、タグの OR、非公開の除外が未検証で不十分。実装は仕様どおりで、プレースホルダーと ESCAPE を使っている。\n- AC4: 所有者による更新・削除の正常系のみ。Forbidden、Conflict、非公開の管理者、削除の失敗が未検証で不十分。**実装に欠陥あり（重大1）**。\n- AC5: 正常系と非管理者の拒否のみ。別組織への移管と途中失敗の巻き戻しが未検証で不十分。実装は妥当に見える。\n- AC6: 伏せ字の確認がなく不十分。`test_export_audit` は action と actor だけを確認している。\n- AC7: 重大3のとおり不十分。\n- AC8: 往復と改ざん1件のみ。期限ちょうど、期限切れ、形の崩れが未検証で不十分。実装は妥当に見える（fullmatch、`compare_digest`、`>=`）。\n- AC9: ログの検証がなく不十分。\n- AC10: 例外の後に接続を使い続けるテストがなく不十分。\n- エンジンが検出したテストの兆候: なし。skip や弱体化は見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリなので、unittest で十分である。ただし並行実行の検証はファイルDBと別スレッドで必要。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8: 上記のとおり、検証が足りない。\n- ログ・例外メッセージへの機密情報の出力（R9）を確かめる検証がない。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py（全5ファイル）と tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて OK。\n- コードは変更していない。`gate` は実行していない。`aqdlc.py` の `trace` と `history` は実行していない。そのため、検証条件の変更履歴は確認していない。",
+ "files_changed": [],
+ "valid": true
+}

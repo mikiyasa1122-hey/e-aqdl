@@ -1,0 +1,48 @@
+{
+ "case": "TX-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0679657,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`transaction()` の `except BaseException: raise` が ROLLBACK せずに再送出するだけなので、トランザクションが開いたまま残ります。原因も影響（以後の書き込み失敗、途中の変更が残る）も一致します。\n- **重大2**: テストの不足だけを指摘しています。\n- **重大3**: `TAG_RE.match` と `$` の組み合わせで、末尾の改行付きタグが通ります。これは実在する別の欠陥です。ただし `fullmatch` に直すまでもなく仕様違反なので、real_other とします。\n- **重大4**: テストの不足だけを指摘しています。\n- **重大5**: 競合検出のテストがないという指摘です。コード自体は version 条件付き UPDATE で正しく守られているので、test_gap とします。\n- **軽微1**: `get_note` の NotFound は `transaction()` の内側で起きます。ロールバックされないと閲覧数の増加分が残るという指摘は、重大1と同じ根本原因の影響です。独立した欠陥ではないので、ここでは ambiguous とします。\n- **軽微2**: version の型を検査しなくても、非整数なら Conflict になるだけです。仕様違反ではないので style とします。\n\n**defect_detected**: 重大1が埋め込んだ欠陥の箇所・原因・影響と一致するので \"yes\" です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transaction() が例外時に ROLLBACK せず再送出だけで、開いたトランザクションが残るという埋め込み欠陥そのもの。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"途中失敗・ロールバックを確かめるテストの不在を指摘しているだけ。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾改行付きタグが通る実在の仕様違反。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"受け入れ条件に対するテスト不足の指摘のみ。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"version 条件付き UPDATE でコードは正しく、競合テストの不在だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"ambiguous\", \"reason\": \"閲覧数の増加が残るという影響は重大1の派生で、独立した欠陥かどうか判断しにくい。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"version の型検査がなくても Conflict になるだけで、欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が ROLLBACK 欠落の箇所・原因・影響を正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transaction() が例外時に ROLLBACK せず再送出だけで、開いたトランザクションが残るという埋め込み欠陥そのもの。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "途中失敗・ロールバックを確かめるテストの不在を指摘しているだけ。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾改行付きタグが通る実在の仕様違反。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "受け入れ条件に対するテスト不足の指摘のみ。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "version 条件付き UPDATE でコードは正しく、競合テストの不在だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "ambiguous",
+    "reason": "閲覧数の増加が残るという影響は重大1の派生で、独立した欠陥かどうか判断しにくい。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "version の型検査がなくても Conflict になるだけで、欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が ROLLBACK 欠落の箇所・原因・影響を正しく特定している。"
+ }
+}

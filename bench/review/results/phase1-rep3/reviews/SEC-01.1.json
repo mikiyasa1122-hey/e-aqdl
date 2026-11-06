@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 1,
+ "sec": 38.0,
+ "exit": 0,
+ "cost_usd": 0.14391400000000001,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21566,
+  "cache_read_input_tokens": 117240,
+  "output_tokens": 4591,
+  "output_tokens_details": {
+   "thinking_tokens": 729
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21566,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3212,
+    "cache_read_input_tokens": 38204,
+    "cache_creation_input_tokens": 3495,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3495
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 対応区分: 修正必須 / 内容: `create_note` が、メモの本文をログに出している。 / 成立条件: メモを作成するたびに起きる。ログレベルが INFO 以上なら出る。 / 影響: 本文が記録されるため、R9「ログに本文を出さない」に違反する。機密情報が露出する。 / 根拠: `notes/service.py` の `create_note` 末尾 `log.info(\"note created id=%s owner=%s body=%r\", note_id, user[\"id\"], body)`。設計書のセキュリティ欄は「ログには ID だけを出す」としており、これにも反する。 / 提案: `body=%r` と `body` の引数を削除し、ID だけを出す。\n- [重大2] 区分: テスト / 対象: AC1, AC3, AC4, AC5 と K1・K2・K3・K4・K6 / 対応区分: 証拠不足 / 内容: 異常系と境界値を確かめるテストがない。`tests/test_notes.py` のうちサービスを検証するテストは、正常系と、空の題名・管理者以外の移管の2件だけである。次の項目は検証がない。 / 影響: K1・K2・K3・K4・K6 のどれが壊れても検出できない。 / 根拠: テストは12件で、すべて合格した。ただし次の確認がない。\n  - 他の組織・他人の非公開メモが NotFound になること（K1）\n  - 題名100文字と101文字、タグ5個と6個、タグの形式、tags に文字列を渡す場合\n  - ページ・per_page・sort の範囲外\n  - `%` と `_` を含む検索、SQL インジェクション文字列、タグの OR 絞り込み（K2）\n  - version の不一致による Conflict、`hooks.before_write` を使った競合\n  - 作成・削除・移管の途中で失敗したときのロールバック（K4・K6）\n  - 他の組織への移管が Forbidden になること（K6）\n  - 更新・削除の Forbidden / NotFound\n  / 提案: 上の項目を、`service.hooks.before_write` の差し込み口を使って決定論的に追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC7, K3 / 対応区分: 証拠不足 / 内容: 並行実行を確かめるテストがない。 / 影響: 閲覧数の数え漏れ（R2）と RateLimiter の上限超過（R7）を検出できない。仕様が明示する同時実行の要求が検証されていない。 / 根拠: 閲覧数が正確に増えることを確かめるテスト、複数スレッドや `RateLimiter.hook` を使うテストが存在しない。`test_limit` は単一スレッドで、枠のちょうど window 秒の境界（`now - start == window`）も確かめていない。 / 提案: 別々の接続・別々のスレッドで N 回閲覧して views が N になることを確かめる。`RateLimiter.hook` や Barrier を使った並行テストと、境界値（window ちょうど・window の直前）のテストを追加する。\n- [重大4] 区分: テスト / 対象: AC6, AC8, AC9, AC10, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 伏せ字・共有リンク・機密情報・例外後の接続の検証が足りない。 / 影響: 重大1のログ漏えいも、このテストでは検出できていない。 / 根拠:\n  - `test_export_audit` は action と actor だけを見ており、`actor_key` の伏せ字（末尾4文字以外が `*`、8文字未満は全部 `*`）を確かめていない。\n  - 共有リンクは正常系と改ざん1件だけで、期限ちょうど、期限切れ、形の崩れ（改行・桁数・大文字）を確かめていない。\n  - ログ（`assertLogs`）や例外メッセージに本文・署名・api_key が出ないことを確かめるテストがない。\n  - 例外の後に同じ接続で次の操作ができること（R10）を確かめるテストがない。\n  / 提案: 上の項目をテストに追加する。\n\n- [軽微1] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: `transfer_notes` は `from_user`・`to_user` の dict を呼び出し側から受け取る。仕様の対象外に「role・org_id を信用する」とあるので欠陥ではない。ただし、`users` テーブルの実際の値と照合すれば、さらに堅くなる。 / 提案: 任意。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名しか確かめず不十分。境界値（題名100文字、本文10000文字、タグ5個）と、失敗時に何も残らないこと（`hooks.before_write(\"create:tags\")` を使った検証）がない。\n- AC2: V2 は閲覧数も他組織・非公開の NotFound も確かめず不十分。同時閲覧の数え漏れ検証がない。実装は `UPDATE views = views + 1` を BEGIN IMMEDIATE の中で行っており、コードの上では妥当に見える。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで不十分。範囲外の入力、LIKE のエスケープ、タグの OR 絞り込み、他人の非公開メモが含まれないことの検証がない。実装は ESCAPE とプレースホルダーを使っており、コードの上では妥当に見える。\n- AC4: V4 は所有者による更新・削除の正常系だけで不十分。Conflict（古い version）、Forbidden、NotFound、更新時の検証、削除の失敗伝播を確かめていない。\n- AC5: V5 は件数の戻り値と管理者以外の拒否だけで不十分。他の組織への移管の拒否と、途中で失敗したときに元のままであることを確かめていない。\n- AC6: V6 は伏せ字を確かめておらず不十分（上の重大4）。\n- AC7: V7 は単一スレッドでの上限と枠の更新だけで不十分。同時の呼び出しと、window ちょうどの境界がない。\n- AC8: V8 は正常系と改ざん1件だけで不十分。期限ちょうど・期限切れ・形の崩れがない。\n- AC9: V9 が確かめていないため、実際にログへの本文漏えい（重大1）が残っている。\n- AC10: V10 に対応するテストが存在しない。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしのテストは見つからなかった）。\n- 検証条件の弱体化: `history` では bind が追加されているだけで、削除や緩和は見つからなかった。ただし、各 V が実際に確かめている内容は上のとおり薄い。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テストで足りる。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションと LIKE の特殊文字を確かめるテストがない。\n- K3: 同時の閲覧・更新・RateLimiter の呼び出しを確かめるテストがない。\n- K4: 作成・削除・移管の途中で失敗したときの不整合を確かめるテストがない。\n- K5: ログ・例外・出力への機密情報の露出を確かめるテストがない。実装にはログへの本文出力がある。\n- K6: 他の組織への移管と、一部だけ移る場合を確かめるテストがない。\n- K7: 監査ログの api_key の伏せ字を確かめるテストがない。\n- K8: 期限切れ・形の崩れた共有リンクを確かめるテストがない。\n\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/*.py` の全ソースを読んだ。認可（`_visible`・`_can_modify`）、楽観的ロック（UPDATE の `WHERE version = ?` と rowcount）、`transaction()` の ROLLBACK、LIKE の ESCAPE、`verify_link` の `fullmatch` と `compare_digest`、`RateLimiter` の Lock と境界（`>=`）はコードの上で仕様に沿っていた。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件すべて合格した。ただし上のとおり検証範囲は狭い。\n- `git status` では、コードとテストがすべて未追跡（untracked）で、`git diff` で比較できる過去の版はなかった。`history --since 0` で bind の追加のみで弱体化がないことを確認した。\n- `trace` は、全 AC・K が「合格・反証未実施」になっているが、中身は上記の薄いテストに基づく。\n- ファイルは変更していない。`gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

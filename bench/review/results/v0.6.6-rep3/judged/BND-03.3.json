@@ -1,0 +1,43 @@
+{
+ "case": "BND-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0659897,
+ "judge_raw": "## 判定\n\n埋め込まれた欠陥は、RateLimiter.hit の `now - start > self.window` です。ちょうど window 秒後が枠の中と数えられ、余分に1回制限されます。\n\n- **重大1**: 同じ箇所を指摘していて、原因(`>` と `>=`)も影響(ちょうど window 秒で RateLimited になる)も一致します。そのため matches_defect です。報告の行番号(98)は実際の行(22)とずれていますが、箇所と内容は合っています。\n- **重大2**: `TAG_RE` の `^...$` と `match` では、末尾に改行の付いたタグが通ります。これは Python の正規表現で実際に起きる欠陥なので、real_other です。\n- **重大3**: テストの不足だけを述べているので、test_gap です。\n- **重大4**: 監査ログの伏せ字を検査するテストがないという指摘です。test_gap です。\n- **重大5**: RateLimiter のテストが境界を外れているという指摘で、test_gap です。\n- **軽微1**: update_note は権限の確認用に読んだ行をトランザクションの外で判定します。version の条件があるため実害は小さく、報告自身もそう書いています。ただし TOCTOU の指摘としては実在するので、real_other とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"ratelimit.py の `now - start > self.window` が、ちょうど window 秒後を枠の中と数える埋め込み欠陥そのもの。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match により、末尾が改行のタグが通る。仕様に反する実在のバグ。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値・同時実行のテストが足りないという指摘だけで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"監査ログの actor_key を検査するテストがないという指摘。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のテストが境界を外れていて同時呼び出しもないという、テストの弱さの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限判定がトランザクションの外にある TOCTOU は実在する。version の条件で実害は小さい。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥を、箇所・原因・影響まで正しく捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "ratelimit.py の `now - start > self.window` が、ちょうど window 秒後を枠の中と数える埋め込み欠陥そのもの。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match により、末尾が改行のタグが通る。仕様に反する実在のバグ。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "異常系・境界値・同時実行のテストが足りないという指摘だけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "監査ログの actor_key を検査するテストがないという指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "RateLimiter のテストが境界を外れていて同時呼び出しもないという、テストの弱さの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限判定がトランザクションの外にある TOCTOU は実在する。version の条件で実害は小さい。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥を、箇所・原因・影響まで正しく捉えている。"
+ }
+}

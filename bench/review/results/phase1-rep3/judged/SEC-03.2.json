@@ -1,0 +1,33 @@
+{
+ "case": "SEC-03",
+ "rep": 2,
+ "judge_cost_usd": 0.06869170000000001,
+ "judge_raw": "各指摘を埋め込み欠陥と照らして分類しました。\n\n- **重大1**: `notes/share.py` の `make_link` が署名(token)をログに出しています。原因も影響(署名が漏れてリンクを悪用できる)も埋め込み欠陥と一致するため、matches_defect です。\n- **重大2**: `TAG_RE` が `.match` と `$` の組み合わせで、末尾に改行のあるタグを通します。実在する仕様違反なので real_other です。\n- **重大3**: テストの不足だけを指摘しているため、test_gap です。\n- **軽微1**: `update_note` が `version` の型を検査しない点です。型が不正だと ValidationError ではなく Conflict になります。仕様に明記されていない入力検証の提案で、根拠も弱いため style としました。\n\nなお、取り下げられた旧「重大4」は確定版に含まれないため、分類していません。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"share.py の make_link が署名(token)をログに出しており、埋め込み欠陥と箇所・原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を .match と $ で使うため、末尾が改行のタグが通る。仕様に反する実在の欠陥である。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足を指摘しているだけで、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version の型検査の提案であり、仕様違反とは言えない改善提案である。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が署名のログ出力を、箇所・原因・影響まで正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "share.py の make_link が署名(token)をログに出しており、埋め込み欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を .match と $ で使うため、末尾が改行のタグが通る。仕様に反する実在の欠陥である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足を指摘しているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version の型検査の提案であり、仕様違反とは言えない改善提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が署名のログ出力を、箇所・原因・影響まで正しく指摘している。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SEC-02",
+ "rep": 2,
+ "sec": 36.5,
+ "exit": 0,
+ "cost_usd": 0.1415227,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22301,
+  "cache_read_input_tokens": 115927,
+  "output_tokens": 4071,
+  "output_tokens_details": {
+   "thinking_tokens": 502
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22301,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2805,
+    "cache_read_input_tokens": 39098,
+    "cache_creation_input_tokens": 2309,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2309
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c4a8b4e4\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5, R9 / 内容: 監査ログ出力で api_key を伏せていない。`export_audit` が生の `api_key` を `actor_key` に入れて返す。 / 根拠: notes/service.py の export_audit 末尾（`\"actor_key\": r[\"api_key\"]`）。再現: api_key=`abcdefgh12345678` の管理者でメモを作って `export_audit` を呼ぶと `'actor_key': 'abcdefgh12345678'` がそのまま出た。 / 提案: 末尾4文字以外を `*` に置き換える。8文字未満はすべて `*` にする。伏せる前の値を返す経路を残さない。\n- [重大2] 区分: テスト / 対象: AC6, V6, VK7, AC9 / 内容: 検証がリスクを確かめていない。`test_export_audit` は action と actor しか見ず、api_key の伏せ字を確認しない。そのため重大1を見逃したまま gate が通っている。 / 根拠: tests/test_notes.py の test_export_audit。 / 提案: 長い鍵・ちょうど8文字・7文字以下・4文字以下の鍵で、出力に元の鍵が含まれないことと伏せ字の形を確かめる。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7, AC8, AC9, AC10, VK1〜VK4, VK6, VK8（仕様の大半の検証） / 内容: テストは12件の正常系中心で、受け入れ条件の異常系・境界値・並行・障害が検証されていない。下記が未検証。\n  - R1: 題名100文字と101文字、空白だけの題名、本文10000文字の境界、タグ6個・重複・不正文字、tags に文字列を渡す、途中失敗時に何も残らないこと（`hooks.before_write(\"create:tags\")` は使われていない）。\n  - R2: 他の組織・他人の非公開メモが NotFound になること、閲覧数の同時加算。\n  - R3: `%` と `_` の扱い、SQL インジェクションの入力、タグ OR 絞り込み、page・per_page・sort の範囲外。\n  - R4: Forbidden、Conflict（古い version、読み出しと書き込みの間の割り込み）、更新時のタグ検証、削除失敗時のロールバック。\n  - R5: 組織またぎの Forbidden、途中失敗で元のままになること。\n  - R7: 枠の境界（ちょうど window 秒）、スレッド並行。`RateLimiter.hook` が使われていない。\n  - R8: 期限ちょうどの境界、形の崩れ（改行・桁あふれ）。\n  - R9・R10: ログに機密が出ないこと、例外後に接続が使えること。 / 根拠: tests/test_notes.py 全体（90行）。`Forbidden` は `transfer_requires_admin` の1件だけ、`Conflict` はまったく使われていない。 / 提案: 設計書の差し込み口（hooks.before_write、RateLimiter.hook）を使い、各 AC・K に対して異常系と並行を決定論的に再現するテストを足す。\n- [重大4] 区分: テスト / 対象: AC9, R9 / 内容: ログや例外メッセージに本文・署名・api_key が出ないことを確かめるテストがない。この検証の空洞化は、重大1の漏えいを検出できない一因でもある。 / 根拠: tests/ に assertLogs や例外メッセージの検査が見当たらない。 / 提案: ログと例外メッセージを捕まえて、本文・署名・鍵が含まれないことを検査する。\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: 先頭ゼロ付きのリンク（例 `007.…`）は、int 化した値で署名を検証するため、正規の形と別の文字列でも通る。「10進の数字だけ」には反しないが、リンクの形が一意でない。 / 根拠: notes/share.py の verify_link。 / 提案: 正規形（`str(int(x)) == x`）だけを受け付ける。\n- [軽微2] 区分: 実装 / 対象: R4 / 内容: 更新と削除の認可チェック（`_visible`、`_can_modify`）がトランザクションの外にある。更新は version 条件でガードされるが、削除は認可後に所有者が移管されると古い判定のまま消せる。仕様上の影響は小さい。 / 根拠: notes/service.py の delete_note。 / 提案: 認可の読み出しをトランザクション内に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名1件だけで不十分。境界値・タグ規則・原子性（失敗時に何も残らないこと）が未検証。コード自体は仕様どおり。\n- AC2: V2 は閲覧の正常系だけで不十分。NotFound の3パターン（他組織・他人の非公開・存在しない）、閲覧数の加算、同時閲覧が未検証。\n- AC3: V3 は一覧の正常系1件と検索1件だけで不十分。`%` と `_`、インジェクション、OR タグ、範囲外の拒否が未検証。\n- AC4: V4 は所有者の更新と削除の正常系だけで不十分。Forbidden、Conflict、管理者の扱い、非公開メモ、削除失敗時のロールバックが未検証。\n- AC5: V5 は移管の正常系と非管理者の拒否だけで不十分。組織またぎと原子性が未検証。\n- AC6: **未達**（重大1）。V6 も伏せ字を確認しておらず不十分（重大2）。\n- AC7: V7 は枠超過と翌枠への切り替わりだけで不十分。ちょうど window 秒の境界とスレッド並行が未検証。\n- AC8: V8 は往復と改ざん1件だけで不十分。期限ちょうど、期限切れ、形の崩れが未検証。\n- AC9: V9 に該当するテストなし。\n- AC10: V10 に該当するテストなし。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションなしは見つからなかった。ただし、検証の不足は上記のとおり。\n- K1〜K8: VK のうち実質的に検証されているものはなく、トレース上の「合格」は空洞。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと実 SQLite の接続で足りる。ただし、並行（別スレッド・別接続）と障害の再現テストは必要。\n\n### 不足しているリスク\n- K7・K5: 監査ログに api_key が漏れる実装上の欠陥があり、テストもない。\n- K3: 閲覧数・更新・RateLimiter の同時実行を検証していない。\n- K4・K6: ロールバックと原子性を検証していない。\n- K1・K2・K8: 検証がない。コードの読み取りでは問題は見当たらない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件合格。\n- `python3 -` で export_audit を再現し、生の api_key が出力されることを確認。\n- notes/*.py の全ファイルを読んだ。SQL は全部プレースホルダー。LIKE は ESCAPE。認可は `_visible` と `_can_modify`。version は UPDATE の条件に入っている。RateLimiter はロック付きで境界が `>=`。share は fullmatch と compare_digest を使う。この点は設計どおりで問題なし。\n- `$AQ trace` と `history --since 0`: 検証条件の弱体化は見当たらない。検証の変更は追加のみ。\n- `$AQ gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}
