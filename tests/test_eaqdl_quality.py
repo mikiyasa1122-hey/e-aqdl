@@ -528,28 +528,61 @@ class DependencyTest(unittest.TestCase):
         self.assertEqual(self.imports("quality"), {"fileclass", "util"})
 
     def test_no_import_cycle_in_package(self):
-        """パッケージ全体に import の循環がない（関数内の遅延 import も数える）。"""
-        d = os.path.join(ROOT, "plugins", "aq-dlc", "scripts", "aqdlc_core")
-        mods = [f[:-3] for f in os.listdir(d) if f.endswith(".py") and f != "__init__.py"]
-        graph = {m: {x for x in self.imports(m) if x in mods} for m in mods}
+        """パッケージ全体（サブパッケージを含む）に import の循環がない（関数内の遅延 import も数える）。"""
+        import ast
+        base = os.path.join(ROOT, "plugins", "aq-dlc", "scripts", "aqdlc_core")
+        mods = {}
+        for dirpath, _dirs, files in os.walk(base):
+            for f in files:
+                if f.endswith(".py"):
+                    rel = os.path.relpath(os.path.join(dirpath, f), base)[:-3].replace(os.sep, ".")
+                    name = rel[:-len(".__init__")] if rel.endswith("__init__") else rel
+                    mods[name if name != "__init__" else ""] = os.path.join(dirpath, f)
+
+        def resolve(mod, node):
+            pkg = mod.split(".") if os.path.basename(mods[mod]) == "__init__.py" else mod.split(".")[:-1]
+            pkg = [p for p in pkg if p]
+            pkg = pkg[:len(pkg) - (node.level - 1)] if node.level > 1 else pkg
+            target = ".".join(pkg + ([node.module] if node.module else []))
+            out = {target} if target in mods else set()
+            for a in node.names:  # from . import x（x がモジュールのとき）
+                sub = ".".join([t for t in (target, a.name) if t])
+                if sub in mods:
+                    out.add(sub)
+            # サブモジュールを読み込むと、親のパッケージ（__init__）も実行される。ただし自分の親（読み込み中）は除く
+            own = {".".join(mod.split(".")[:k]) for k in range(1, len(mod.split(".")))}
+            for t in list(out):
+                parts = t.split(".")
+                out.update(p for p in (".".join(parts[:k]) for k in range(1, len(parts))) if p in mods and p not in own)
+            return out
+        graph = {}
+        for m, path in mods.items():
+            tree = ast.parse(open(path, encoding="utf-8").read())
+            graph[m] = set()
+            for n in ast.walk(tree):
+                if isinstance(n, ast.ImportFrom) and n.level >= 1:
+                    graph[m] |= resolve(m, n) - {m, ""}
+        self.assertIn("commands.gate", graph["cli"])  # サブパッケージも数えている
         state = {}
 
         def visit(m, path):
             state[m] = 1
-            for n in graph[m]:
+            for n in sorted(graph[m]):
                 if state.get(n) == 1:
                     self.fail("import の循環: " + " → ".join(path[path.index(n):] + [n]))
                 if not state.get(n):
                     visit(n, path + [n])
             state[m] = 2
-        for m in sorted(mods):
+        for m in sorted(graph):
             if not state.get(m):
                 visit(m, [m])
 
     def test_modules_import_alone(self):
         import subprocess
         scripts = os.path.join(ROOT, "plugins", "aq-dlc", "scripts")
-        for m in ("quality", "gate", "verdict", "gate_service", "state", "agents", "memory", "roles", "approval"):
+        for m in ("quality", "gate", "verdict", "gate_service", "state", "agents", "memory", "roles", "approval",
+                  "cli", "commands", "commands.gate", "commands.spec", "commands.metrics", "hook_handlers",
+                  "hook_handlers.pre_tool", "hook_handlers.post_tool", "hook_handlers.session", "hook_handlers.subagent"):
             r = subprocess.run([sys.executable, "-c", f"import aqdlc_core.{m}"], cwd=scripts, capture_output=True,
                                text=True)
             self.assertEqual(r.returncode, 0, r.stderr)
