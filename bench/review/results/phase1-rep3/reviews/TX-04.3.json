@@ -1,0 +1,49 @@
+{
+ "case": "TX-04",
+ "rep": 3,
+ "sec": 46.5,
+ "exit": 0,
+ "cost_usd": 0.1348376,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 14956,
+  "cache_read_input_tokens": 161636,
+  "output_tokens": 5883,
+  "output_tokens_details": {
+   "thinking_tokens": 1057
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14956,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3515,
+    "cache_read_input_tokens": 40793,
+    "cache_creation_input_tokens": 323,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 323
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a7130b66\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R10, R1, R4, R5, AC1, AC4, AC5, AC10, K4 / 対応区分: 修正必須 / 内容: `transaction()` が例外のときに ROLLBACK しない。`notes/service.py:34-35` は `except BaseException: raise` だけで、設計書の「ROLLBACK して例外をそのまま伝える」と食い違う。 / 成立条件: `transaction()` の本体のどこかで例外が出る場合。たとえば Conflict、ValidationError 以外の DB エラー、`hooks.before_write` が投げた例外。 / 影響: 接続が `in_transaction=True` のまま残る。1) 途中まで書いた行（メモ本体、タグの一部、移管の一部）が残る。2) 次の `BEGIN IMMEDIATE` が `cannot start a transaction within a transaction` で失敗し、接続が使えなくなる。3) その後の別の操作が COMMIT されると、中途半端な状態が確定する。 / 根拠: 再現した。`before_write` で RuntimeError を出して `create_note` を呼ぶと `in_transaction` が True になった。続く `create_note` は OperationalError になり、`notes` に 1 行が残った。 / 提案: `except BaseException:` の中で `if conn.in_transaction: conn.execute(\"ROLLBACK\")` を行ってから `raise` する。\n\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾の改行付きタグを通す。`$` が末尾の `\\n` の直前にも一致するため。 / 成立条件: タグが `\"a\\n\"` のとき。作成・更新・検索のすべてで通る。 / 影響: 仕様外の文字（改行）を含むタグが保存される。20 文字を超えない範囲でも不正なタグを許す。 / 根拠: `create_note(..., ['a\\n'])` が成功し、`note_tags.tag` に `'a\\n'` が入ったことを確認した（`notes/service.py:14, 63, 149`）。 / 提案: `TAG_RE.fullmatch` を使うか、パターンの末尾を `\\Z` にする。\n\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7, AC8, AC9, AC10, K1〜K4, K6, K8 / 対応区分: 証拠不足 / 内容: テストは 12 件の正常系中心で、受け入れ条件とリスクの大半を確かめていない。重大1・2の欠陥も通ってしまっている。 / 成立条件: 常時。 / 影響: 認可、競合、ロールバックの回帰を検出できない。 / 根拠: `tests/test_notes.py` に次のテストがない。\n  - 作成・更新・移管の途中失敗時のロールバックと、失敗後の接続の再利用（AC1、AC5、AC10）\n  - 他の組織・他人の非公開メモが NotFound になること（AC2、K1）\n  - 閲覧数の同時加算（AC2）\n  - 一覧の範囲外入力の拒否（AC3）\n  - `%`・`_`・SQL インジェクション風の検索語（AC3、K2）\n  - タグの OR 絞り込み（AC3）\n  - 更新の Conflict（古い version と、読み出し〜書き込みの間の割り込み）、他人による更新・削除の Forbidden、管理者の扱い、非公開メモ（AC4）\n  - 移管の組織またぎの拒否（AC5、K6）\n  - api_key の伏せ字（AC6、AC9、K7）\n  - RateLimiter の枠の境界（ちょうど window 秒）と同時呼び出し（AC7）\n  - 共有リンクの期限ちょうどの境界、形の崩れたリンク、期限切れ（AC8、K8）\n  - 本文・署名・api_key がログに出ないこと（AC9）\n  / 提案: 上記を unittest で追加する。並行実行と途中の失敗は `service.hooks.before_write` と `RateLimiter.hook` で再現する。ここで挙げたものはどれも必須の検証。\n\n- [重大4] 区分: 実装 / 対象: R4, R5, K1, K3 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、トランザクションの外で読んだ行で `_visible` / `_can_modify` を判定している（`notes/service.py:157-161, 182-185`）。判定後に別の接続が `transfer_notes` でオーナーを変更すると、元のオーナーが他人のメモを更新・削除できる。 / 成立条件: 権限判定から BEGIN IMMEDIATE までの間に、別の接続が移管を完了したとき。 / 影響: `update_note` は version が合えば成功する。`delete_note` は version を見ないので、移管直後でも削除が通る。さらに、`delete_note` は既に消えた行でも監査ログを書いて成功を返す。 / 根拠: `delete_note` の DELETE 文は `WHERE id = ?` だけで、オーナー条件も rowcount の確認もない。`get_note` が同じ問題をトランザクション内で再検査しているのと比べて一貫性がない。 / 提案: BEGIN IMMEDIATE の後で行を読み直して権限を判定する。delete は rowcount が 1 であることも確認する。\n\n- [軽微1] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: `transfer_notes` は `from_user` / `to_user` を呼び出し側の dict としてそのまま信用する。仕様の対象外に沿った動作だが、`to_user` が存在しない ID でも FK 違反まで気づけない。 / 提案: DB 上の利用者の存在・org_id を確認する。\n\n- [軽微2] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: 移管後に `updated_at` を更新していない。 / 提案: 更新するかどうかを仕様として決める。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` のみ。長さ・タグ・本文の境界、tags が文字列のとき、ロールバックを確かめていない。不十分。実装にも重大1・2の欠陥がある。\n- AC2: 同じ利用者が見る正常系しかない。他の組織・非公開・存在しない場合の NotFound、閲覧数の増加、同時加算を確かめていない。不十分。\n- AC3: 一覧の先頭ページと検索の正常系だけ。範囲外の入力、sort、`%` と `_`、タグの OR、SQL インジェクションを確かめていない。不十分。\n- AC4: 所有者による更新と削除の正常系のみ。Conflict、Forbidden、非公開メモ、タグ検査、削除の失敗を確かめていない。不十分。\n- AC5: 件数の正常系と非管理者の拒否のみ。組織またぎ、途中失敗時の巻き戻しを確かめていない。不十分。\n- AC6: 伏せ字の出力を確かめていない（`actor` と `action` だけ）。不十分。\n- AC7: 上限超過と枠の再開は確かめている。ただし `t=61` は境界ではなく、ちょうど 60 秒の境界も、複数スレッドの同時呼び出しも確かめていない。不十分。\n- AC8: 往復と改ざんは確かめている。期限ちょうど、期限切れ、形の崩れたリンクを確かめていない。不十分。\n- AC9: ログと例外の確認がない。不十分。\n- AC10: 例外後の接続再利用の確認がなく、重大1の欠陥を見逃している。不十分。\n- エンジンが検出したテストの兆候: なし。skip や弱い・常に通るアサーションは見つからなかった。ただし、単純に網羅が足りない。\n\n### E2E の要否\n- 不要（HTTP 層のないライブラリで、SQLite のインメモリ DB を使った結合的な unittest で足りる）。ただし、並行実行は別々の接続・スレッドで決定論的に検証すること。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモが見えないことの確認がない。\n- K2: SQL インジェクション・LIKE エスケープの確認がない。\n- K3: 同時の閲覧・更新・RateLimiter の確認がない。\n- K4: 途中失敗の巻き戻しの確認がない。\n- K5・K7: api_key の伏せ字の確認がない。\n- K6: 組織またぎの移管拒否の確認がない。\n- K8: 期限ちょうど・形の崩れたリンクの確認がない。\n\n### 確認したこと\n- 仕様、設計、`notes/*.py`、`tests/test_notes.py` をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件が OK（書き込み先は作らない。出力は端末のみ）。\n- 一時スクリプト（スクラッチパッド）で、hook による例外後の `in_transaction=True`、次の作成の OperationalError、メモ 1 行の残存を再現した（重大1）。\n- `create_note(..., ['a\\n'])` が成功し、改行付きタグが保存されることを再現した（重大2）。\n- `$AQ gate`・`trace`・`history` は実行していない。`git status` ではコードが全て未追跡のため、`git diff` で検証条件の弱体化を比較できなかった。履歴の有無は未確認。\n- 重大4（TOCTOU）はコードの経路から立証したもので、並行での再現は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SEC-02",
+ "rep": 1,
+ "sec": 31.1,
+ "exit": 0,
+ "cost_usd": 0.1423722,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 21848,
+  "cache_read_input_tokens": 157402,
+  "output_tokens": 3922,
+  "output_tokens_details": {
+   "thinking_tokens": 627
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21848,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2661,
+    "cache_read_input_tokens": 40189,
+    "cache_creation_input_tokens": 1792,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1792
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c4a8b4e4\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, R9, AC9, K5 / 対応区分: 修正必須 / 内容: `export_audit` が api_key を伏せずにそのまま返している。仕様は「末尾4文字以外を * で伏せる。8文字未満はすべて伏せる」。 / 成立条件: 管理者が `export_audit` を呼ぶだけで起きる。監査ログに記録のある利用者が対象になる。 / 影響: 組織内の利用者の api_key が平文で出力に載る。機密情報の漏えいで、K7 と K5 が未対策になる。 / 確認した保証: 呼び出し元や上流にマスク処理はない。`grep` でもマスク処理は見つからなかった。 / 根拠: `notes/service.py` の `export_audit` 末尾が `\"actor_key\": r[\"api_key\"]` を返す。マスクする関数がコード全体にない。 / 提案: `_mask_key(k)` を追加する。`len(k) < 8` なら `\"*\" * len(k)`、それ以外なら `\"*\" * (len(k) - 4) + k[-4:]` を返す。`actor_key` にこれを適用する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10 と、K1, K2, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心の12件だけで、仕様が必須とする異常系・境界値・並行・失敗時の巻き戻しの検証がない。V1〜V10 と VK* は `trace` 上すべて「合格」だが、実体は同じ12件である。 / 成立条件: 仕様の AC が、境界・同時実行・失敗時の巻き戻しを明示している。 / 影響: [重大1] のマスク漏れが、gate 合格のまま通っていた。他の欠陥も同様に見逃す。 / 根拠: `tests/test_notes.py` に次の検証がない。\n  - AC6: `test_export_audit` は action と actor しか見ず、`actor_key` を検証していない。\n  - AC1: 件数やタグの境界、tags に文字列を渡す入力、`hooks.before_write(\"create:tags\")` を使った失敗時に何も残らないことを確かめていない。\n  - AC2, AC4: 他組織・他人の非公開メモが NotFound になること、閲覧数の同時加算、`hooks.before_write(\"update\")` を使った競合時の Conflict、Forbidden を確かめていない。\n  - AC3: LIKE の `%` と `_` のエスケープ、SQL インジェクション、範囲外入力、タグの OR 絞り込みを確かめていない。\n  - AC5: 別組織への移管の Forbidden、途中失敗時に元のままであることを確かめていない。\n  - AC7: ちょうど window 秒での新しい枠、複数スレッドからの同時呼び出しを確かめていない。\n  - AC8: 期限ちょうどの境界、形の崩れたリンクを確かめていない。\n  - AC9, AC10: ログに機密情報が出ないこと、例外後に接続が使えることを確かめていない。\n  設計が `service.hooks.before_write` と `RateLimiter.hook` を差し込み口として用意しているのに、使うテストが1件もない。 / 提案: 上記の各項目に決定論的なテストを追加する（sleep は使わない）。少なくとも次を入れる。\n  - `actor_key` のマスク（8文字未満と8文字以上）。\n  - 他組織・他人の非公開メモの NotFound。\n  - 更新の Conflict。\n  - 移管と作成の途中失敗でロールバックされること。\n  - RateLimiter の window ちょうどの境界と並行呼び出し。\n  - 期限ちょうどの境界。\n  - LIKE のワイルドカード。\n\n### 軽微\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` の tags 検査が `_validate` と重複している。 / 提案: 共通のヘルパーにまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常な作成と空の題名の拒否だけを確認しており、不十分。上限・タグ・巻き戻しが未検証。\n- AC2: 作成者本人が閲覧する場合しか見ておらず、不十分。他組織・他人の非公開メモ・閲覧数が未検証。\n- AC3: 1ページ目の取得と単純な検索だけで、不十分。\n- AC4: 作成者本人の更新と削除だけで、不十分。Conflict と Forbidden が未検証。\n- AC5: 正常な移管と非管理者の拒否だけで、不十分。組織をまたぐ移管と巻き戻しが未検証。\n- AC6: マスクを検証しておらず、実装も未達で、不十分。\n- AC7: 枠の再開（61秒後）は見ているが、ちょうど60秒の境界と並行呼び出しが未検証で、不十分。\n- AC8: 往復と改ざんの1ケースだけで、不十分。期限の境界と形の崩れが未検証。\n- AC9: 該当するテストなしで、不十分。\n- AC10: 該当するテストなしで、不十分。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなかった。テストの弱体化・改ざんも `history` では見つからなかった。\n\n### E2E の要否\n- 不要（HTTP の API や UI がないライブラリで、unittest で検証できる）。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: SQL インジェクションを確かめる検証がない。コードはプレースホルダーと ESCAPE を使っており、静的には問題なさそう。\n- K3: 同時の閲覧・更新・呼び出しの検証がない。コードは `BEGIN IMMEDIATE`、`UPDATE ... WHERE version`、ロックで保護されている。\n- K4, K6: 途中失敗時の巻き戻しの検証がない。\n- K5, K7: マスクが未実装で、検証もない。\n- K8: 期限ちょうどの境界と形の崩れたリンクの検証がない。\n\n### 確認したこと\n- `python3 -m unittest discover -s . -t .`: 12件すべて通過。ただし [重大2] のとおり、リスクをほとんど確かめていない。\n- `notes/*.py` の全ソースを読んだ。認可、SQL のプレースホルダー、トランザクション、RateLimiter、共有リンクの検証は仕様どおりに見える。唯一の仕様違反は [重大1]。\n- `trace` と `history --since 0` を確認した。検証条件の弱体化はなく、V* はすべて unit に紐づいている。",
+ "files_changed": [],
+ "valid": true
+}

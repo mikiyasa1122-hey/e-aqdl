@@ -1,0 +1,43 @@
+{
+ "case": "CLEAN-08",
+ "rep": 3,
+ "judge_cost_usd": 0.06748570000000001,
+ "judge_raw": "各指摘の分類です。このケースは欠陥なしなので、matches_defect は使いません。\n\n- **重大1**: コードの欠陥ではなく、テストの網羅不足の指摘です。→ test_gap\n- **重大2**: `^...$` と `match` の組み合わせでは、`$` が末尾の改行の前にも一致します。そのため `\"abc\\n\"` のようなタグが通り、仕様の「英小文字・数字・ハイフンの1〜20文字」に反します。実際に再現もされています。share.py は `fullmatch` を使っていますが、service.py:14, 64, 151 は `match` のままです。欠陥なしのケースでも、実在するバグです。→ real_other\n- **重大3**: RateLimiter のテスト不足の指摘です。→ test_gap\n- **重大4**: 共有リンクのテスト不足の指摘です。→ test_gap\n- **軽微1**: 権限判定がトランザクションの外にあるため、transfer と競合すると古い権限判定のまま更新が通る、という指摘です。仕様の「読み出しから書き込みの間に他の更新が入った場合も Conflict」の観点では、transfer は version を増やすので、UPDATE の `version = ?` が一致せず Conflict になります。実害は小さく、指摘もほぼ防げていると認めています。ただし、指摘の前提は成り立つので、弱い real_other とします。ただ、version が変わるため古い権限で通ることは実際にはないので、false_positive が妥当です。\n- **軽微2**: 更新中に削除されると rowcount が 0 になり、Conflict を返します。仕様は削除競合時の扱いを明示していません。Conflict は仕様上許容でき、意図の確認を求めているだけなので style とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足の指摘で、コードの欠陥ではない。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match により末尾改行つきのタグが通り、仕様違反になる。再現も示されている。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界・並行のテスト不足の指摘にとどまる。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"共有リンクの境界・改ざんのテスト不足の指摘にとどまる。\"},\n{\"label\": \"軽微1\", \"class\": \"false_positive\", \"reason\": \"transfer は version を増やすので、UPDATE の version 条件が一致せず Conflict になり、古い権限判定のまま更新が通ることはない。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"削除との競合で Conflict を返すことは仕様上許容でき、意図の確認を求めているだけ。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、重大2 のタグ検証（match と `$`）は実在する別のバグで、他はテスト不足・誤検知・好みの指摘。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "テストの網羅不足の指摘で、コードの欠陥ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match により末尾改行つきのタグが通り、仕様違反になる。再現も示されている。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界・並行のテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "共有リンクの境界・改ざんのテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "軽微1",
+    "class": "false_positive",
+    "reason": "transfer は version を増やすので、UPDATE の version 条件が一致せず Conflict になり、古い権限判定のまま更新が通ることはない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "削除との競合で Conflict を返すことは仕様上許容でき、意図の確認を求めているだけ。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、重大2 のタグ検証（match と `$`）は実在する別のバグで、他はテスト不足・誤検知・好みの指摘。"
+ }
+}

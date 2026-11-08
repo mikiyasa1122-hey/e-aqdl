@@ -1,0 +1,43 @@
+{
+ "case": "BND-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0641097,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`list_notes` の `PER_PAGE_MAX + 1` による上限のずれを指摘しています。箇所は同じで、原因も影響(51件が通る)も一致しています。\n- **重大2**: 実在する別の欠陥です。`TAG_RE` に `match` と `$` を使っているため、末尾に改行のあるタグが通ります。Python の `$` は末尾の改行の手前にも一致するので、この指摘は正しいです。\n- **重大3**: テスト不足だけの指摘です。\n- **重大4**: RateLimiter のテスト不足だけの指摘です。\n- **軽微1**: 実在する欠陥の可能性が高いです。認可の確認がトランザクションの外にあり、transfer と競合するおそれがあります。ただし、更新は version で守られ、transfer も version を上げるため、影響は限定的です。削除では古い判定が残るので、`real_other` とします。\n- **軽微2**: `version` の型を検査していないという指摘です。仕様に要求がなく、不正な型は Conflict になるだけです。欠陥の主張としては弱いので、`style` とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の PER_PAGE_MAX + 1 により per_page=51 が通るという、埋め込んだ欠陥そのものを再現つきで指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで末尾が改行のタグが通るのは実在するバグで、埋め込んだ欠陥とは別である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter のテストの不足だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"update/delete の認可確認がトランザクション外にあり、transfer との競合で古い判定のまま削除できるのは実在する欠陥である。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"version の型検査は仕様にない入力防御の提案で、不正な型は Conflict になるだけなので欠陥とは言えない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ境界の欠陥(per_page の上限51)を、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の PER_PAGE_MAX + 1 により per_page=51 が通るという、埋め込んだ欠陥そのものを再現つきで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで末尾が改行のタグが通るのは実在するバグで、埋め込んだ欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter のテストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "update/delete の認可確認がトランザクション外にあり、transfer との競合で古い判定のまま削除できるのは実在する欠陥である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "version の型検査は仕様にない入力防御の提案で、不正な型は Conflict になるだけなので欠陥とは言えない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ境界の欠陥(per_page の上限51)を、箇所・原因・影響とも正しく指摘している。"
+ }
+}

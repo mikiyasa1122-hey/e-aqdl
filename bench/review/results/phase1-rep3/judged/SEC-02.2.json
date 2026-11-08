@@ -1,0 +1,33 @@
+{
+ "case": "SEC-02",
+ "rep": 2,
+ "judge_cost_usd": 0.06271170000000001,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `export_audit` が `\"actor_key\": r[\"api_key\"]` をそのまま返している点を指摘しています。箇所も原因も影響も埋め込んだ欠陥と一致するので、matches_defect です。\n- **重大2**: 伏せ字とログ出力を確かめるテストがないという指摘です。コードの欠陥ではなくテストの不足なので、test_gap です。\n- **重大3**: 異常系・競合・境界値のテストが足りないという指摘です。これもテストの不足だけなので、test_gap です。\n- **軽微1**: `update_note` の権限判定がトランザクションの外にあるという指摘です。実害が小さいことを自ら認めた改善提案で、version 条件が競合を防ぎます。ただ、所有者が変わった後に古い判定で更新が通る可能性は実在します。欠陥の主張としては弱く、保守性や堅牢性の提案にとどまるので、style にしました。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key をそのまま actor_key に返している点を、箇所・原因・影響とも埋め込み欠陥と一致する形で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字やログ出力を確かめるテストがないという、テスト不足だけの指摘。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"異常系・競合・境界値・並行のテストが足りないという、テスト不足だけの指摘。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"update_note の権限判定がトランザクション外にあるという指摘は、実害が小さいと自認する改善提案で、欠陥の主張としては弱い。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が export_audit の api_key 未マスクという埋め込み欠陥を正確に特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key をそのまま actor_key に返している点を、箇所・原因・影響とも埋め込み欠陥と一致する形で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字やログ出力を確かめるテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "異常系・競合・境界値・並行のテストが足りないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "update_note の権限判定がトランザクション外にあるという指摘は、実害が小さいと自認する改善提案で、欠陥の主張としては弱い。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が export_audit の api_key 未マスクという埋め込み欠陥を正確に特定している。"
+ }
+}

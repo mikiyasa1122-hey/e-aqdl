@@ -1,0 +1,63 @@
+{
+ "case": "CLEAN-06",
+ "rep": 2,
+ "judge_cost_usd": 0.0700797,
+ "judge_raw": "欠陥なしのケースなので、各指摘をコードと照らして分類しました。\n\n- 重大1〜7は、いずれもテストの不足を指摘するもので、コードの欠陥の主張ではありません。\n- 軽微1は実在します。`delete_note` は権限チェックをトランザクションの外で行い、`rowcount` を見ません。また、`update_note` で同時に削除されると NotFound ではなく Conflict になります。\n- 軽微2は実在するとは言えません。仕様の形式は「10進の数字だけ」で、先頭ゼロを禁じていません。正規表現も仕様に沿っています。軽微2は、ほぼ仕様どおりの動作を欠陥と見ているため false_positive としました。\n- 軽微3は、根拠にした行番号（136-140）が実際のコードと合いません。`UPDATE ... WHERE version = ?` で楽観的ロックが働くので、古い値での上書きは Conflict になります。したがって false_positive です。\n\n埋め込んだ変更は `verify_link` で現在時刻を先に求めるだけで、振る舞いは変わりません。これに触れた指摘はありません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"R2 の見え方・閲覧数のテスト不足を指摘しているだけ。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"更新・削除の Conflict・Forbidden などのテスト不足の指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"移管のテスト不足の指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界・同時呼び出しのテスト不足の指摘。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"共有リンクの期限・形式のテスト不足の指摘。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字とログのテスト不足の指摘。\"},\n{\"label\": \"重大7\", \"class\": \"test_gap\", \"reason\": \"入力検証・ロールバックのテスト不足の指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の権限チェックがトランザクション外で rowcount も見ないため、同時削除で監査が二重に残るのは実在する。\"},\n{\"label\": \"軽微2\", \"class\": \"false_positive\", \"reason\": \"仕様は10進の数字だけで先頭ゼロを禁じておらず、通るのは仕様どおり。\"},\n{\"label\": \"軽微3\", \"class\": \"false_positive\", \"reason\": \"UPDATE の WHERE version = ? で楽観的ロックが働き、古い読み出しは Conflict になる。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大7件はテスト不足の指摘、軽微1は実在する別の欠陥、軽微2・3は誤検出。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "R2 の見え方・閲覧数のテスト不足を指摘しているだけ。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "更新・削除の Conflict・Forbidden などのテスト不足の指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "移管のテスト不足の指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界・同時呼び出しのテスト不足の指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "共有リンクの期限・形式のテスト不足の指摘。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字とログのテスト不足の指摘。"
+   },
+   {
+    "label": "重大7",
+    "class": "test_gap",
+    "reason": "入力検証・ロールバックのテスト不足の指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の権限チェックがトランザクション外で rowcount も見ないため、同時削除で監査が二重に残るのは実在する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "false_positive",
+    "reason": "仕様は10進の数字だけで先頭ゼロを禁じておらず、通るのは仕様どおり。"
+   },
+   {
+    "label": "軽微3",
+    "class": "false_positive",
+    "reason": "UPDATE の WHERE version = ? で楽観的ロックが働き、古い読み出しは Conflict になる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大7件はテスト不足の指摘、軽微1は実在する別の欠陥、軽微2・3は誤検出。"
+ }
+}

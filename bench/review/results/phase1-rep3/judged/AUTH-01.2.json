@@ -1,0 +1,33 @@
+{
+ "case": "AUTH-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0647577,
+ "judge_raw": "## 判定\n\n**重大1**は埋め込まれた欠陥そのものです。`_visible` が org_id を確かめていない点を指摘しています。これは正解データの箇所・原因と一致します。影響も、他組織の公開メモを読み・更新・削除できる点で一致しています。再現も行っています。一つ補足すると、報告は「他組織の管理者の delete が Forbidden になる」としています。これは `_can_modify` が org_id を見ている以上、実際には `_visible` を通過した後で Forbidden になるので、記述は正しいです。\n\n**重大2**はテストの不足だけを指摘しているので、test_gap です。\n\n**重大3**は `_can_modify` について述べています。ただし `_can_modify` の管理者側の判定は org_id を確かめており、実際にはすでに org 判定があります。所有者側は `owner_id` だけですが、他組織の所有者 id が一致することは通常ありません。報告自身も「重大1と同じ原因」と認めていて、独立した欠陥を示していません。`transfer_notes` が `updated_at` を更新しない点は、仕様の要求ではないと自ら述べています。したがって false_positive と判定します。\n\n**軽微1**は、トランザクション内で認可を再判定する提案です。仕様上の欠陥の主張というより改善提案なので、style と判定します。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_visible が org_id を確かめていない点を指摘し、他組織の公開メモを読める影響まで正解データと一致している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"false_positive\", \"reason\": \"_can_modify の管理者判定はすでに org_id を確かめており、新たな欠陥を示さず重大1の重複である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"認可の再判定をトランザクション内で行う改善提案であり、仕様違反の主張ではない。\"}\n],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が _visible の org 判定の欠落を原因・影響とも正しく特定し、再現もしている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_visible が org_id を確かめていない点を指摘し、他組織の公開メモを読める影響まで正解データと一致している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "false_positive",
+    "reason": "_can_modify の管理者判定はすでに org_id を確かめており、新たな欠陥を示さず重大1の重複である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "認可の再判定をトランザクション内で行う改善提案であり、仕様違反の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が _visible の org 判定の欠落を原因・影響とも正しく特定し、再現もしている。"
+ }
+}

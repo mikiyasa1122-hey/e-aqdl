@@ -1,0 +1,53 @@
+{
+ "case": "EXC-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0660057,
+ "judge_raw": "各指摘を分類しました。\n\n- 重大1は埋め込んだ欠陥そのものです。`verify_link` が形の崩れたリンクで `except ValueError: return None` を返しており、Forbidden になりません。報告は呼び出し側が通してしまうおそれにも触れています。\n- 重大2は実在する別の欠陥です。タグ検査が `re.match` と `$` の組み合わせなので、末尾に改行を付けたタグが通ります。コードの `TAG_RE.match` と `^...$` からも確認できます。\n- 重大3から重大6は、テストの不足だけを指摘しています。\n- 軽微1は実在する別の欠陥です。delete は認可の確認をトランザクションの外で行っています。\n- 軽微2は、仕様にない updated_at の更新を求めています。欠陥の主張というより保守性の提案なので、style にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link が形の崩れたリンクで None を返す、埋め込んだ欠陥そのものを箇所・原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで末尾改行のタグが通るのは実在する仕様違反である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"共有リンクのテスト不足の指摘にとどまる。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の並行・境界テストの不足の指摘である。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"閲覧数・競合・NotFound・ロールバックなどのテスト不足の指摘である。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"検索・一覧・伏せ字・機密漏えいのテスト不足の指摘である。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete の認可確認がトランザクション外で、確認後の移管を見逃すという実在する競合の指摘である。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"仕様にない updated_at の更新を求める意図確認の提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥（verify_link が None を返す）を正しく捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link が形の崩れたリンクで None を返す、埋め込んだ欠陥そのものを箇所・原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで末尾改行のタグが通るのは実在する仕様違反である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "共有リンクのテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter の並行・境界テストの不足の指摘である。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "閲覧数・競合・NotFound・ロールバックなどのテスト不足の指摘である。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "検索・一覧・伏せ字・機密漏えいのテスト不足の指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete の認可確認がトランザクション外で、確認後の移管を見逃すという実在する競合の指摘である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "仕様にない updated_at の更新を求める意図確認の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥（verify_link が None を返す）を正しく捉えている。"
+ }
+}

@@ -1,0 +1,43 @@
+{
+ "case": "AUTH-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0660113,
+ "judge_raw": "## 判定\n\n**重大1**: `_visible` が org_id を確かめていないという、埋め込み欠陥そのものを指摘しています。箇所(notes/service.py `_visible`)も原因も一致します。影響として、他組織の公開メモを get_note で読めること、update/delete が NotFound にならないことも挙げています。コード上も、`_visible` は private と owner_id しか見ていません。\n\n**重大2**: TAG_RE は `re.match` と `$` を使っています。`$` は末尾の改行の手前にも一致するので、`\"ab\\n\"` が通ります。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する実在の欠陥で、埋め込み欠陥とは別です。ただし `_validate` と `search_notes` はどちらも `TAG_RE.match` を使っているので、指摘の根拠は正しいです。\n\n**重大3〜5**: どれもテストの不足を述べているだけで、コードの欠陥の主張ではありません。\n\n**軽微1**: update_note の権限確認はトランザクションの外で行われますが、version の条件で守られています。指摘自身も実害は小さいと認めており、欠陥の主張というより保守性の話です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_visible が org_id を確かめない点を、読み・更新・削除への影響まで含めて指摘しており、埋め込み欠陥と一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により末尾改行のタグが通る実在のバグで、埋め込み欠陥とは別物。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"組織をまたぐ分離や異常系のテストが足りないという、テスト不足だけの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"同時実行・境界値のテストが足りないという指摘。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"ロールバック・共有リンク・機密情報のテストが足りないという指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version の条件で守られており、実害は小さいと自ら述べている。欠陥の主張ではなく保守性の指摘。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が _visible の org_id 欠落を原因と影響の両方で正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_visible が org_id を確かめない点を、読み・更新・削除への影響まで含めて指摘しており、埋め込み欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により末尾改行のタグが通る実在のバグで、埋め込み欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "組織をまたぐ分離や異常系のテストが足りないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "同時実行・境界値のテストが足りないという指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "ロールバック・共有リンク・機密情報のテストが足りないという指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version の条件で守られており、実害は小さいと自ら述べている。欠陥の主張ではなく保守性の指摘。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が _visible の org_id 欠落を原因と影響の両方で正しく指摘している。"
+ }
+}

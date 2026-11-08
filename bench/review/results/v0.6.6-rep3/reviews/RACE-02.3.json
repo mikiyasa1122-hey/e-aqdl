@@ -1,0 +1,49 @@
+{
+ "case": "RACE-02",
+ "rep": 3,
+ "sec": 39.8,
+ "exit": 0,
+ "cost_usd": 0.13682680000000003,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 18018,
+  "cache_read_input_tokens": 162648,
+  "output_tokens": 4847,
+  "output_tokens_details": {
+   "thinking_tokens": 704
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18018,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2893,
+    "cache_read_input_tokens": 41533,
+    "cache_creation_input_tokens": 597,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 597
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d865c6b5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3 / 内容: 閲覧数が同時の閲覧で数え漏れする。`get_note` はトランザクションの外で `views` を読み、`UPDATE ... SET views = ?`（読んだ値+1）で書いている。 / 根拠: notes/service.py の get_note（`views = row[\"views\"]` の後に `SET views = ?, (views + 1)`）。別々の接続・スレッド2本で `hooks.before_write(\"view\")` の位置で同期させて再現したところ、2回閲覧したのに views は 1 だった（scratchpad/r.py）。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` をトランザクション内で行い、その後に可視性を確かめる。見られない場合は NotFound にして巻き戻す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, V1〜V10, VK1〜VK8 / 内容: テストが12件しかなく、ほとんどが正常系で、仕様の規則・リスクを確かめていない。重大1のバグもテストをすり抜けている。次の項目の検証がまったくない。\n  - 他の組織・他人の非公開メモが NotFound になること（K1）。\n  - Forbidden の分岐（更新・削除・移管の組織違い）。\n  - 楽観的ロックの Conflict と、読み出しから書き込みの間に更新が入る競合。\n  - 作成・移管・削除の途中失敗でのロールバック（`hooks.before_write` の差し込み口を使っていない）。\n  - 入力の境界値（題名100/101文字、タグ5/6個、重複タグ、タグに文字列そのものを渡す、per_page 50/51、page 0、不正な sort）。\n  - LIKE の `%` `_`、SQL インジェクション文字列、タグの OR 絞り込み。\n  - api_key のマスク（8文字未満、8文字、末尾4文字）。AC6 のテストは `actor_key` を一切確認していない。\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッド。\n  - 共有リンクの期限ちょうど、形の崩れ、署名違い。\n  - R9 のログや例外に機密情報が出ないこと。\n  - 例外の後に接続が使えること（AC10）。 / 根拠: tests/test_notes.py 全体（90行）。`test_transfer` は件数しか見ておらず、オーナーが実際に移ったかを確認していない。 / 提案: 上の各項目について、決定論的なテストを追加する。並行実行の再現には `service.hooks` と `RateLimiter.hook` を使う。\n- [重大3] 区分: テスト / 対象: AC7, AC4, AC2, K3 / 内容: 同時実行（閲覧数・更新の競合・RateLimiter の上限）を確かめるテストが1件もない。仕様が明示している受け入れ条件（AC7 の同時の呼び出し、AC2 の数え漏れなし）が検証されていない。 / 根拠: tests/test_notes.py に threading の使用も hook の使用もない。 / 提案: Barrier などを hook に差し込み、sleep に頼らず決定論的に競合を作る。ロックや `version` 条件を外したら失敗することを確かめる。\n\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 内容: 共有リンクの note_id と期限に先頭ゼロを許す（`007.<期限>.<署名>` は int 化されて署名が一致するため有効になる）。「10進の数字だけ」の仕様に反するとは言い切れないが、同じリンクの別表記が通る。18桁を超えるリンクも拒否される。 / 根拠: notes/share.py の LINK_RE と int 変換。 / 提案: 元の文字列の正規形（`str(int)` と一致）を要求するか、仕様に明記する。\n- [軽微2] 区分: 実装 / 対象: R4, K1 / 内容: `delete_note` は権限の確認をトランザクションの外で行っている。確認後、削除の前に移管・非公開化が入ると、古い判定で削除できる。`update_note` も同様に、`version` で守られる範囲を除くと判定が古い可能性がある。 / 根拠: notes/service.py の delete_note。 / 提案: BEGIN IMMEDIATE の後で行を読み直して認可を確認する。\n- [軽微3] 区分: 実装 / 対象: R5 / 内容: 移管で `updated_at` が更新されない（`version` は上がる）。仕様に違反はないが、一覧の updated 順と整合しない可能性がある。 / 根拠: notes/service.py の transfer_notes。 / 提案: 仕様で扱いを決める。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名の拒否だけで不十分。境界値、タグの規則、失敗時に何も残らないこと（ロールバック）が未検証。実装は規則どおりに見える。\n- AC2: V2 に閲覧数のテストがなく、K1（他組織・非公開の NotFound）も未検証。実装には数え漏れのバグがある（重大1）。\n- AC3: V3 は1ページ目と単純な検索だけで不十分。範囲外の入力、`%` と `_`、インジェクション、タグ絞り込み、他人の非公開メモの除外が未検証。実装は規則どおりに見える。\n- AC4: V4 は所有者の更新・削除の正常系だけで不十分。Forbidden、NotFound、Conflict、競合、削除の失敗時の動作が未検証。\n- AC5: V5 は件数と「管理者以外は Forbidden」だけで不十分。組織違いの拒否と、途中失敗での巻き戻しが未検証。\n- AC6: V6 は `actor_key` を確認しておらず、空洞。マスクの規則は未検証。実装は規則どおりに見える。\n- AC7: V7 は枠が切り替わることを1回確かめるだけで不十分。ちょうど window 秒の境界と、複数スレッドの上限が未検証。\n- AC8: V8 は正常系と note_id の改ざん1件だけで不十分。期限ちょうど、署名違い、形の崩れが未検証。\n- AC9: V9 に該当するテストがなく、未検証。\n- AC10: V10 に該当するテストがなく、未検証。\n- エンジンが検出したテストの兆候: なし。テストの弱体化（`history` の変更履歴）も見つからなかった。ただし、そもそも検証が薄い。\n\n### E2E の要否\n- 不要（HTTP なしのライブラリ。リスクは単体テストと、別々の接続による並行テストで確かめられる）。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモ → テストなし。\n- K2: SQL インジェクション → テストなし。\n- K3: 閲覧数の数え漏れ（実装のバグあり）、更新の競合、RateLimiter の同時呼び出し → テストなし。\n- K4: 作成・更新・移管・削除の途中失敗 → テストなし。\n- K5, K7: 機密情報の露出、api_key の漏れ → テストなし。\n- K6: 組織をまたぐ移管 → テストなし。\n- K8: 期限切れ・改ざん・形の崩れたリンク → 一部だけ。\n\n### 確認したこと\n- spec.md と design.md を読み、`$AQ trace` と `$AQ history --since 0` を確認した。検証条件の弱体化は見つからなかった。\n- notes/*.py と tests/test_notes.py を全部読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った。\n- 閲覧数の競合の再現スクリプトを実行した。別々の接続で2スレッドが同時に get_note を実行すると、views が 2 ではなく 1 になった（重大1）。スクリプトは scratchpad に置き、リポジトリは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

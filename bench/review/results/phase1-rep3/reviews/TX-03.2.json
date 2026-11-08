@@ -1,0 +1,49 @@
+{
+ "case": "TX-03",
+ "rep": 2,
+ "sec": 34.4,
+ "exit": 0,
+ "cost_usd": 0.1170955,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15273,
+  "cache_read_input_tokens": 120875,
+  "output_tokens": 4390,
+  "output_tokens_details": {
+   "thinking_tokens": 706
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15273,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2736,
+    "cache_read_input_tokens": 37425,
+    "cache_creation_input_tokens": 4008,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4008
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "Confirmed: tag \"abc\\n\" is accepted, and a mid-create failure leaves a note behind (count was 2 after the first create plus the failed one).\n\n## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 62accf30\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, K4, R10 / 対応区分: 修正必須 / 内容: `create_note` がメモ本体の INSERT と、タグ・監査ログの INSERT を別々のトランザクションで行っている。仕様は「1つのトランザクションで行う（途中で失敗したら何も残さない）」。 / 成立条件: タグまたは監査ログの INSERT が失敗する、または `hooks.before_write(\"create:tags\")` で例外が出る。 / 影響: タグも監査ログもないメモが残る。全か無かの要件に反し、データが不整合になる。 / 根拠: notes/service.py:85-93 に `with transaction` が2つある。再現では、`create:tags` で例外を出した後も notes が1件増えたままだった（`select count(*) from notes` が 2）。 / 提案: 2つの `with transaction` を1つにまとめ、`hooks.before_write` はその中に置く。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `TAG_RE` が `^...$` と `match` の組み合わせのため、末尾に改行のあるタグ（例 `\"abc\\n\"`）が通る。仕様は英小文字・数字・ハイフンの1〜20文字だけ。 / 成立条件: 作成・更新・検索のタグに、末尾が `\\n` の文字列を渡す。 / 影響: 不正なタグが保存される。または、仕様上は拒否すべき検索が通る。 / 根拠: notes/service.py:14 と :64, :151。`create_note(..., [\"abc\\n\"])` が成功した（再現済み）。 / 提案: `TAG_RE.fullmatch` を使う、または `\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4, K6 / 対応区分: 証拠不足 / 内容: 異常系の検証がない。途中で失敗したときのロールバック（作成・削除・移管）と、例外後の接続の再利用を確かめるテストがない。 / 影響: 重大1のような欠陥を、現在のテストでは検出できない。 / 根拠: tests/test_notes.py の全12件は正常系中心。`hooks.before_write` を使うテストが0件。 / 提案: `before_write` で例外を出し、失敗後に notes・note_tags・audit が元のままで、同じ接続で次の操作ができることを確かめる。\n- [重大4] 区分: テスト / 対象: AC2, AC4, AC7, K3 / 対応区分: 証拠不足 / 内容: 並行性の検証がない。閲覧数の数え漏れ、version による Conflict（先の更新を消さないこと）、RateLimiter のスレッド同時呼び出しのテストがない。 / 影響: 楽観的ロックと同時実行の保証が未検証のまま。 / 根拠: テストに Conflict の import も使用もない。スレッドを使うテストもない。`RateLimiter.hook` は未使用。 / 提案: `before_write` の差し込み口で、読み出しと書き込みの間に別の接続から更新を入れて Conflict を確かめる。複数スレッド＋別々の接続で views の合計を確かめる。`RateLimiter.hook` で同時呼び出しを再現する。\n- [重大5] 区分: テスト / 対象: AC2, AC3, AC6, AC8, AC9, K1, K2, K5, K7, K8 / 対応区分: 証拠不足 / 内容: セキュリティ上の境界の検証がない。 / 影響: 認可・インジェクション・機密情報の欠陥を検出できない。 / 根拠: 次の検証がいずれもテストにない。他の組織・他人の非公開メモが NotFound になること。一覧・検索にそれらが含まれないこと。`%` と `_` と SQL 風の入力。api_key のマスク（`export_audit` の `actor_key` を検証するテストは0件）。期限ちょうどの境界。形が崩れたリンク。ログ・例外に本文や署名が出ないこと。移管の組織またぎの Forbidden。RateLimiter の枠の境界（ちょうど window 秒）。 / 提案: 上記の正常系・異常系・境界値のテストを追加する。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` で、閲覧可否・権限の確認をトランザクションの外で行っている。更新は version の条件で守られている。削除は競合時に NotFound にならず、0件の DELETE で成功扱いになる。 / 提案: 削除は、トランザクション内で `rowcount` を確かめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名を拒否するテストのみ。ロールバック・本文やタグの境界・重複タグの扱いを確かめておらず不十分（実装にも欠陥あり：重大1・2）。\n- AC2: 作成者本人が閲覧できることしか確かめていない。他組織・非公開の NotFound や閲覧数の増加・同時の数え漏れは未検証で不十分。\n- AC3: 一覧の1ページ目と単純な検索だけ。入力の拒否、LIKE の特殊文字、タグの OR、非公開の除外が未検証で不十分。\n- AC4: 作成者による正常な更新と削除のみ。Conflict・Forbidden・管理者の扱い・削除の失敗が未検証で不十分。\n- AC5: 件数の確認と管理者以外の拒否のみ。組織またぎ・途中の失敗が未検証で不十分。\n- AC6: 監査ログの action と actor を見るだけで、api_key のマスクを確かめていない。不十分。\n- AC7: 単純な上限と61秒後の復帰のみ。枠の境界（ちょうど window 秒）とスレッド同時呼び出しが未検証で不十分。\n- AC8: 往復と改ざんの1件のみ。期限ちょうど・期限切れ・形の崩れが未検証で不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only などは見つからなかった）。\n\n### E2E の要否\n- 不要（HTTP 層のないライブラリで、SQLite を使う単体・結合テストで足りる）。ただし、並行性の検証は別接続・複数スレッドで行う必要がある。\n\n### 不足しているリスク\n- K1, K2, K3, K4, K5, K6, K7, K8: いずれも、リスクを確かめるテストがない（重大3〜5）。\n- K4: 作成の途中失敗は実際に不整合になる（重大1）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて通ったが、正常系中心で空洞的。\n- 再現スクリプトを一時実行（リポジトリは変更していない）。タグ `\"abc\\n\"` を受理することと、作成の途中失敗でメモが残ることを確認した。\n- `git status`: notes/ と tests/ は未追跡。履歴は `history --since 0` で確認し、テストの改ざんを疑う変更は見つからなかった。\n- service.py・db.py・ratelimit.py・share.py を全て読み、設計との対応を確認した。",
+ "files_changed": [],
+ "valid": true
+}

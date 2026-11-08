@@ -1,0 +1,49 @@
+{
+ "case": "EXC-01",
+ "rep": 2,
+ "sec": 34.7,
+ "exit": 0,
+ "cost_usd": 0.10500299999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13247,
+  "cache_read_input_tokens": 119190,
+  "output_tokens": 4008,
+  "output_tokens_details": {
+   "thinking_tokens": 618
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13247,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3080,
+    "cache_read_input_tokens": 36137,
+    "cache_creation_input_tokens": 3280,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3280
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2e25bbfa\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1 / 対応区分: 修正必須 / 内容: `get_note` が、存在するが見られないメモ（他の組織・他人の非公開）に `Forbidden` を返す。存在しないメモは `NotFound` を返す。 / 成立条件: 他の組織の利用者、または他人の非公開メモを見ようとする利用者が、既存の note_id を指定したとき。 / 影響: 仕様は「どれも NotFound にして存在を明かさない」と定めている。現状は例外の型の違いで、メモの存在を推測できる（情報漏えい）。 / 根拠: `notes/service.py:111-112`（`if not _visible: raise Forbidden`）。`update_note` と `delete_note` は同じ場面で `NotFound` を返しており、規則が揃っていない。上流で防ぐ層はなく、既存テストにも該当の検証がない。 / 提案: `_visible` が偽なら `NotFound(f\"note {note_id}\")` に統一する。存在しない場合と見られない場合でメッセージも同じにする。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC9, AC10, K1〜K4, K6, K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件とリスクを確かめるテストがほとんどない。12件の正常系中心のテストだけで、下記が未検証である。 / 根拠: `tests/test_notes.py` を確認し、`python3 -m unittest discover -s tests -t .` で 12件 OK を確認した。ただし中身は次のとおり。\n  - 異常系・境界値がない。題名100文字、本文10000文字、タグ5個・書式、page/per_page の範囲外、sort 不正のテストがない。\n  - 認可・漏えい（K1）がない。他の組織・他人の非公開メモが NotFound になること、一覧・検索に含まれないことを確かめていない。重大1のバグも検出できていない。\n  - SQL インジェクション・LIKE の検証（K2）がない。`%` や `_` の検索、タグ OR 検索のテストがない。\n  - 楽観的ロックの競合（Conflict）がない。\n  - 失敗時の巻き戻し（K4）がない。`hooks.before_write` の差し込み口を使ったテストが皆無である。\n  - 移管の失敗時の巻き戻しと、組織をまたぐ移管の拒否（K6）がない。\n  - 閲覧数の並行増加（K3）がない。\n  - 例外の後の接続の再利用（AC10）がない。\n  - 共有リンクは期限の境界、形の崩れ、改ざんの組み合わせ（K8）がない。\n  - R9 のログ・例外に機密情報が出ないことの検証がない。\n  - 現状のテストは、認可や検証の条件を外しても通る。 / 提案: 各 AC・リスクに対して、少なくとも次を決定論的に追加する。\n  - 他組織・非公開の NotFound。\n  - 境界値の拒否。\n  - `%` と `_` を含む検索、およびタグ OR 検索。\n  - 古い version での Conflict。\n  - `hooks.before_write` で例外を投げ、作成・更新・削除・移管が何も残さず、接続を再利用できること。\n  - 組織をまたぐ移管の Forbidden。\n  - 別スレッド・別接続での閲覧数の加算。\n  - 期限ちょうどのリンクが Forbidden になること。\n  - 形の崩れたリンクが Forbidden になること。\n- [重大3] 区分: テスト / 対象: AC6, K7, AC7, K3 / 対応区分: 証拠不足 / 内容: 監査ログの api_key の伏せ字は、実装はあるが検証がない。RateLimiter の同時呼び出しと枠の境界も検証がない。 / 根拠: `test_export_audit` は action と actor しか見ておらず、`actor_key` を検査していない。8文字未満の鍵、8文字以上の鍵の末尾4文字の扱いも未検証である。`RateLimitTest` は clock を 61 に進めただけで、`window` ちょうど（60）で新しい枠になること、および複数スレッドから同時に呼んでも上限を超えないことを確かめていない。`RateLimiter.hook` の差し込み口も使われていない。 / 提案: `actor_key` の期待値を完全一致で検査する（8文字未満はすべて `*`、8文字以上は末尾4文字だけ見える）。clock を window ちょうどにして新しい枠になることを確認する。`threading` と Barrier で N スレッドから `hit` を呼び、成功数が limit 以下であることを確認する。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、権限（`_can_modify`）を `BEGIN IMMEDIATE` の前に読んだ行で判定している。移管が間に入ると、古い所有者の情報で認可が通る余地がある。 / 提案: トランザクション内で行を読み直して認可を判定する。version の条件があるため更新の喪失は起きない。\n- [軽微2] 区分: 実装 / 対象: R1 / 対応区分: 改善提案 / 内容: `create_note` が `private` の型を検査しない。 / 提案: bool のみ許可する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は空の題名の拒否と正常作成だけ確認しており不十分。長さ・タグの境界、タグの重複除去、巻き戻しは未検証。\n- AC2: 不十分。見え方の規則（NotFound）と閲覧数の加算は未検証。実装にも重大1のバグがある。\n- AC3: 不十分。ページ分割の正常系と通常の検索だけで、範囲外の拒否、`%`・`_`、タグ OR、他人の非公開の除外がない。\n- AC4: 不十分。所有者の更新・削除の正常系だけで、Conflict、Forbidden、管理者の操作、更新時のタグ検証、削除の失敗の伝播がない。\n- AC5: 不十分。正常系と非管理者の拒否だけで、組織をまたぐ拒否と失敗時の元のままがない。\n- AC6: 不十分（重大3）。\n- AC7: 不十分（重大3）。\n- AC8: 不十分。往復と改ざんのみで、期限の境界、形の崩れ、期限切れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- 重要なリスク K1〜K8 はいずれも専用の検証がない。K5 と R9 も同様である。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしのファイルは見つからなかった）。`history` を確認し、検証条件の弱体化は見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest による単体・結合テストで足りる。ただし並行・巻き戻しのテストは必須である。\n\n### 不足しているリスク\n- K1: 見えないメモの漏えいを防ぐ回帰テストがない。\n- K2: インジェクションと LIKE の特殊文字を試すテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行テストがない。\n- K4: 途中失敗時のロールバックのテストがない。\n- K5: ログ・例外・監査ログからの機密情報の露出を確かめるテストがない。\n- K6: 組織をまたぐ移管・一部だけ移るケースのテストがない。\n- K8: 期限ちょうど、形の崩れ、改ざんの境界テストがない。\n\n### 確認したこと\n- spec.md、design.md、`notes/*.py`、`tests/test_notes.py` を全文確認した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件すべて OK だった。\n- `aqdlc.py history --since 0` を確認し、検証条件の変更は bind のみで、弱体化はなかった。\n- `git status` で、実装は未コミットの新規ファイルであることを確認した。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

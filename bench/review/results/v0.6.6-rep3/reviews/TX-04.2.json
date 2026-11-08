@@ -1,0 +1,49 @@
+{
+ "case": "TX-04",
+ "rep": 2,
+ "sec": 32.6,
+ "exit": 0,
+ "cost_usd": 0.13862580000000002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22470,
+  "cache_read_input_tokens": 116098,
+  "output_tokens": 3712,
+  "output_tokens_details": {
+   "thinking_tokens": 515
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22470,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2298,
+    "cache_read_input_tokens": 39155,
+    "cache_creation_input_tokens": 2421,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2421
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "Confirmed: R10 の重大な欠陥あり。\n\n```\n## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a7130b66\n### 指摘\n- [重大1] 区分: 実装 / 対象: R10, AC10, R1, K4 / 内容: transaction() が例外時に ROLLBACK していない。例外後も接続がトランザクション中のままになり、次の書き込みが失敗する。失敗した書き込みの内容が後の COMMIT で確定する恐れもある（R1・R4・R5 の「何も残さない」違反）。設計書の「例外のときに ROLLBACK」とも不一致 / 根拠: notes/service.py:34-36 は `except BaseException: raise` だけ。再現: create_note 中に hooks.before_write(\"create:tags\") で RuntimeError を出すと conn.in_transaction=True のままで、次の create_note が `OperationalError: cannot start a transaction within a transaction`。get_note の非公開化後 NotFound（service.py:97）、Conflict（service.py:155）でも同じ / 提案: 例外時に `if conn.in_transaction: conn.execute(\"ROLLBACK\")` してから再送出する。\n- [重大2] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4 / 内容: 失敗時の巻き戻し・接続の再利用を確かめるテストが1件もない。hooks の差し込み口が使われておらず、重大1を検出できていない / 根拠: tests/test_notes.py 全体に hooks / ROLLBACK / 失敗後の再操作の検証なし / 提案: create・update・delete・transfer の途中失敗後に、行が残らないことと次の操作が成功することを確かめるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC7, K3, K1 / 内容: 並行実行（閲覧数の数え漏れ、同時更新の Conflict、RateLimiter の複数スレッド）のテストがない。閲覧の競合と、他組織・他人の非公開メモが NotFound になることのテストもない / 根拠: tests/test_notes.py にスレッド使用なし。NotFound のテストは削除後の1件のみ / 提案: 別接続・別スレッドで決定論的に再現するテストと、K1 の認可の拒否テストを追加する。\n- [重大4] 区分: テスト / 対象: AC1, AC3, AC4, AC5, AC6, AC8, AC9, K2, K6, K7, K8 / 内容: 異常系・境界値の検証が空洞。次のものがすべて未検証: 題名・本文・タグの上限、tags に文字列を渡す、page/per_page/sort の範囲外、% と _ の検索、SQL インジェクション、Conflict、Forbidden（他人・他組織）、移管の組織外拒否、api_key の伏せ字（監査ログのテストは action と actor のみ）、リンクの期限ちょうど・形の崩れ、ログに機密が出ないこと、RateLimiter の枠の境界（ちょうど window 秒）/ 根拠: tests/test_notes.py（12件、すべて正常系か1つの拒否のみ）/ 提案: 各受け入れ条件の境界と拒否を網羅する。条件を外すと失敗することを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 内容: update_note と delete_note の認可判定が、トランザクション外で読んだ行に基づく。判定後に transfer で所有者が変わっても、古い判定のまま更新できる。update は version で守られるが、delete は守られない / 根拠: notes/service.py:136-143, 163-171 / 提案: トランザクション内で再取得して認可を再判定する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名のみで不十分（上限・タグ・巻き戻しなし）\n- AC2: V2 は閲覧数も他組織・非公開の NotFound も同時閲覧も確かめず不十分\n- AC3: V3 は1ページ目と単純検索のみで、範囲外・LIKE のエスケープ・タグ OR・インジェクションなしのため不十分\n- AC4: V4 は作成者の更新・削除のみで、Conflict・Forbidden・管理者・失敗時の動作なしのため不十分\n- AC5: V5 は成功と非管理者の拒否のみで、組織外・失敗時に元のままの確認なしのため不十分\n- AC6: V6 は api_key の伏せ字を確認しておらず不十分\n- AC7: V7 は上限と枠の更新のみで、ちょうど window 秒の境界・同時呼び出しなしのため不十分\n- AC8: V8 は往復と改ざんのみで、期限ちょうど・期限切れ・形の崩れなしのため不十分\n- AC9: V9 はログや例外に機密が出ないことを確認するテストなし\n- AC10: V10 は実装が違反しており（重大1）、テストもないため不十分\n- エンジン検出のテスト兆候: なし（skip・.only 等なし）。ただしテストの質は上記のとおり不足\n### E2E の要否\n- 不要（HTTP 層のないライブラリ。必要なのは並行実行と障害注入の単体・結合テスト）\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの拒否テストなし\n- K2: インジェクション入力のテストなし（実装はプレースホルダーと ESCAPE で概ね妥当）\n- K3: 並行テストなし\n- K4: 巻き戻しテストなし（実装も不備）\n- K5/K7: 伏せ字・ログのテストなし\n- K6: 組織外移管の拒否テストなし\n- K8: 期限境界・形崩れのテストなし\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` → 12件すべて成功（ただし上記のとおり空洞）\n- 障害注入の再現スクリプトで、例外後に in_transaction=True、次の操作が OperationalError になることを確認\n- `$AQ trace` と `$AQ history --since 0` を確認。検証条件の弱体化の記録はなし\n- spec.md・design.md と notes/*.py の全ソースを通読。RateLimiter の境界（>=）、share の正規表現と期限（>=）、LIKE のエスケープ、権限判定の実装は仕様に沿っていた\n```",
+ "files_changed": [],
+ "valid": true
+}

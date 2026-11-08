@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 3,
+ "sec": 40.6,
+ "exit": 0,
+ "cost_usd": 0.1251142,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 14487,
+  "cache_read_input_tokens": 161162,
+  "output_tokens": 5103,
+  "output_tokens_details": {
+   "thinking_tokens": 700
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14487,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3208,
+    "cache_read_input_tokens": 40209,
+    "cache_creation_input_tokens": 447,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 447
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: 楽観的ロックが読み出しと書き込みの間の更新を検出できない。`update_note` は version を `notes/service.py:167` でトランザクションの外で比較する。その後の UPDATE（171-172行）の WHERE は `id = ?` だけで version を含まない。このため `rowcount != 1` の検査（173行）は更新の競合を検出できない。 / 成立条件: 呼び出し側が最新の version を渡し、167行の比較の後・BEGIN IMMEDIATE の前に別の接続が同じメモを更新する。 / 影響: 後から書いた側が先の更新を黙って上書きする（lost update）。仕様の「読み出しから書き込みの間に他の更新が入った場合も Conflict」に違反する。設計書の「UPDATE の条件に version を入れて rowcount で判定する」にも反する。 / 確認した保証: BEGIN IMMEDIATE は書き込みを直列化するだけで、トランザクション前の version 比較は守らない。既存テストにも防ぐものはない。 / 根拠: 一時 DB に接続を2本作り、`hooks.before_write(\"update\")` で接続2が version=1 のまま更新した。その後で接続1が version=1 の更新を行うと、Conflict にならず戻り値 2 で成功した。最終状態は body='second'、version=3 だった。 / 提案: UPDATE を `WHERE id = ? AND version = ?` にして `rowcount` で Conflict を判定する。可能なら存在・認可の確認もトランザクション内で行う。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査が末尾の改行を通す。`TAG_RE = ^[a-z0-9-]{1,20}$`（`notes/service.py:14`）を `.match` で使っており、Python の `$` は末尾の改行の直前にも一致する。 / 成立条件: tags に `\"abc\\n\"` を渡す（create / update / search のすべて）。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反する不正なタグが保存される。 / 根拠: `create_note(..., [\"abc\\n\"])` が成功し、note_tags に `'abc\\n'` が保存されることを実行して確認した。 / 提案: `fullmatch` を使うか、パターンを `\\Z` で終わらせる（64・151行も同様）。\n- [重大3] 区分: テスト / 対象: AC1〜AC10 の大半, R1〜R10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系のみ。仕様が必須とする検証がない。 / 成立条件: 該当なし。 / 影響: 重大1・2の欠陥をテストが検出できていない（実際にすべて通っている）。 / 根拠: `tests/test_notes.py` に次の検証が1件もない。R1 の境界値（101文字、空白だけ、タグ6個、不正文字）、トランザクションのロールバックと `hooks.before_write` による途中失敗（AC1・AC5・AC10）、他の組織・他人の非公開メモの NotFound（K1）、一覧の範囲外、`%` と `_`、タグ OR の検索（AC3）、Conflict と Forbidden（AC4）、閲覧数の同時加算（AC2）、移管の組織またぎ拒否と途中失敗（AC5・K6）、api_key の伏せ字（AC6・K7）、RateLimiter の境界（ちょうど window 秒）と複数スレッド（AC7）、共有リンクの期限ちょうど・形の崩れ（AC8）、ログへの機密情報の非出力（AC9）。 / 提案: 上記を unittest で追加する。並行・途中失敗は既存の差し込み口（`hooks`、`RateLimiter.hook`）で決定論的に再現する。特に Conflict、タグの境界、組織またぎの拒否は、実装の条件を外すと失敗する形にする。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: 削除でも、可視性と認可の判定（`notes/service.py:185-188`）がトランザクションの外にある。判定に使った行がその後変わっても再確認しない。`transfer_notes` は移管前に所有者が変わっていないか確認しない。 / 成立条件: 判定の後、BEGIN IMMEDIATE の前に別接続がメモの所有者・公開範囲を変更する（移管が該当）。 / 影響: 所有権を失った元の作成者が、移管後のメモを削除できる可能性がある。ただし到達には競合が必要で、実際の再現はしていない（未確認）。 / 確認した保証: org_id は不変で、組織またぎの漏えいは起きない。 / 提案: 取得と判定を `transaction()` の中に移す。重大1の修正と同じ変更で済む。\n\n- [軽微1] 区分: 実装 / 対象: R2 / 対応区分: 改善提案 / 内容: `get_note` は先に行を読み、その後 `transaction()` の中で再度読み直している。冗長で、仕様の動作は満たしている。 / 提案: 読み直しだけにして重複を減らす。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_empty_title_rejected` が空題名だけを確認している。文字数上限、空白だけ、タグ（個数・文字・重複・文字列そのもの）、本文上限、途中失敗時に何も残らないことを確認するテストがなく、不十分。実装にも改行タグの欠陥がある。\n- AC2: 正常系の取得だけ。他組織・他人の非公開の NotFound と、同時閲覧の数え漏れは未検証で、不十分。\n- AC3: 一覧は1ページ目だけ、検索は単純な語だけ。範囲外の入力、sort、`%`・`_`、タグ OR、非公開メモの除外が未検証で、不十分。\n- AC4: 作成者による更新・削除の正常系だけ。Conflict（古い version・競合）、Forbidden、管理者の扱い、削除の失敗伝播が未検証で、不十分。実装にも lost update の欠陥がある。\n- AC5: 正常系と管理者でない場合の拒否だけ。組織またぎの拒否、途中失敗での元の状態への巻き戻しが未検証で、不十分。\n- AC6: `actor` の名前しか確認しておらず、api_key の伏せ字は未検証で、不十分。\n- AC7: 枠の内外を確認しているが、ちょうど window 秒の境界と複数スレッドの同時呼び出しが未検証で、不十分。\n- AC8: 往復と、note_id を書き換えた改ざんだけ。期限ちょうど、期限切れ、形の崩れ、署名の改ざんが未検証で、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。例外の後に接続が使えることを確認していない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。弱体化の改ざんは確認していない。リポジトリは未コミットで比較元がなく、`history` は実行していない。\n\n### E2E の要否\n- 不要（HTTP や UI がないライブラリ）。ただし、実ファイルの SQLite と複数接続・複数スレッドで競合を再現する統合テストは必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモが見えないことのテストがない。\n- K2: 検索の `%`・`_` と LIKE の ESCAPE、SQL インジェクション文字列を確かめるテストがない。実装は LIKE の ESCAPE とプレースホルダーを使っている（一覧の ORDER BY はホワイトリスト）。\n- K3: 同時更新（重大1）、同時閲覧、RateLimiter の同時呼び出しが未検証。\n- K4・K6: 途中失敗の巻き戻しと移管の組織またぎが未検証。\n- K5・K7・K8: api_key の伏せ字、ログに機密情報が出ないこと、リンクの期限・形の検証が未検証。\n\n### 確認したこと\n- 仕様・設計・`notes/` の全ファイル・テストを読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件が OK。\n- タグ `\"abc\\n\"` が `create_note` で保存されることを再現した。\n- 一時ファイルの DB と接続2本で `hooks.before_write(\"update\")` を使い、lost update（最終 body='second'、version=3、Conflict なし）を再現した。\n- コードの変更・gate の実行・依存関係のインストールはしていない。",
+ "files_changed": [],
+ "valid": true
+}

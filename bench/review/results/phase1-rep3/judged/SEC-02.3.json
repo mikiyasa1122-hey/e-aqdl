@@ -1,0 +1,38 @@
+{
+ "case": "SEC-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0644117,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`export_audit` が api_key を伏せずに返しており、箇所も原因も影響も一致します。\n- **重大2**: 実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせで、末尾に改行のあるタグが通ります。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: 実在する別の欠陥です。`delete_note` はトランザクション内で再確認しないため、二重削除が成功し、監査ログも二重に記録されます。\n- **軽微1**: `version` の型検査がないという保守的な提案で、欠陥の主張は弱いです。style とします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key をマスクせず actor_key として全文返す点を、箇所・原因・影響とも正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで末尾改行のタグが通るのは実在する欠陥で、埋め込み欠陥とは別である。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足と弱さだけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note がトランザクション内で再確認せず、二重削除が成功して監査ログも二重になるのは実在する別の欠陥である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version の型検査の追加提案で、欠陥の主張ではない。transfer_notes の件も仕様の対象外に沿うと述べている。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ api_key 未マスクの欠陥を、箇所・原因・影響とも一致させて検出している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key をマスクせず actor_key として全文返す点を、箇所・原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで末尾改行のタグが通るのは実在する欠陥で、埋め込み欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足と弱さだけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note がトランザクション内で再確認せず、二重削除が成功して監査ログも二重になるのは実在する別の欠陥である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version の型検査の追加提案で、欠陥の主張ではない。transfer_notes の件も仕様の対象外に沿うと述べている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ api_key 未マスクの欠陥を、箇所・原因・影響とも一致させて検出している。"
+ }
+}

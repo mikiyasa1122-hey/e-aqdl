@@ -1,0 +1,48 @@
+{
+ "case": "CLEAN-07",
+ "rep": 1,
+ "judge_cost_usd": 0.0713577,
+ "judge_raw": "欠陥なしのケースなので、各指摘をコードと照らして分類しました。\n\n- 重大1〜4 は、いずれもテストの不足だけを指摘していて、コードの欠陥は主張していません。\n- 軽微1 の `delete_note` は、認可の判定をトランザクションの外で行っています。割り込みが起きる余地は実在しますが、仕様の「R4 の同時削除」に明示された要件ではなく、削除後の状態も同じです。ただし、判定後に `transfer_notes` が割り込むと、元の所有者が移管済みのメモを消せます。これは仕様の認可規則に反する実在の競合です。そのため real_other としました。\n- 軽微2 の `page=10**30` では、OFFSET の計算で sqlite3 が OverflowError を出します。仕様は範囲外を ValidationError と定めているので、実在の欠陥です。ただし、page に上限がないことが仕様の「1以上」を満たしているとも読めます。この点は real_other とします。\n- 軽微3 の `transfer_notes` は、移す先の利用者の存在を確認していません。メモが 0 件なら成功し、存在しない利用者への移管を許します。ただし仕様は「移す先が同じ組織」しか求めておらず、渡された dict は呼び出し側が確かめる前提です。これは style が妥当です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"認可テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"ロールバック・Conflict・接続復帰のテストの不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"同時実行と時間枠の境界のテストの不足だけの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"検索・伏せ字・リンク・ログのテストの不足だけの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の認可判定がトランザクションの外にあり、移管との競合で元の所有者が消せる余地は実在する。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"巨大な page で OverflowError になり、仕様の ValidationError にならないのは実在する。\"},\n{\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"移す先の存在確認は仕様にない。利用者の dict は呼び出し側が確かめる前提で、保守性の提案にとどまる。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1〜4 はテスト不足、軽微1・2 は実在する別の問題、軽微3 は好みの提案という分類。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "認可テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "ロールバック・Conflict・接続復帰のテストの不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "同時実行と時間枠の境界のテストの不足だけの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "検索・伏せ字・リンク・ログのテストの不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の認可判定がトランザクションの外にあり、移管との競合で元の所有者が消せる余地は実在する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "巨大な page で OverflowError になり、仕様の ValidationError にならないのは実在する。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "移す先の存在確認は仕様にない。利用者の dict は呼び出し側が確かめる前提で、保守性の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1〜4 はテスト不足、軽微1・2 は実在する別の問題、軽微3 は好みの提案という分類。"
+ }
+}

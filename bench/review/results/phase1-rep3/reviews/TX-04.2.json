@@ -1,0 +1,49 @@
+{
+ "case": "TX-04",
+ "rep": 2,
+ "sec": 43.6,
+ "exit": 0,
+ "cost_usd": 0.1288336,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15551,
+  "cache_read_input_tokens": 120836,
+  "output_tokens": 5453,
+  "output_tokens_details": {
+   "thinking_tokens": 1289
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15551,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3254,
+    "cache_read_input_tokens": 37389,
+    "cache_creation_input_tokens": 4322,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4322
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a7130b66\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R10, AC10, R1, R4, R5, K4 / 対応区分: 修正必須 / 内容: `transaction()` は例外のときに ROLLBACK しない。`except BaseException: raise` と書かれているだけで、ROLLBACK は COMMIT 失敗時にしか実行されない。設計書の「例外のときに ROLLBACK」と、R10 の「ロールバックし、接続を次の操作に使える状態に戻す」を満たしていない。 / 成立条件: `with transaction(conn):` の中で例外が起きる場合すべて。例は `delete_note` や `transfer_notes` の途中の失敗、`update_note` の Conflict、`create_note` のタグ挿入失敗、`get_note` の再検査での NotFound。 / 影響: (a) 例外前の書き込みが残ったまま接続が BEGIN 状態になり、次の書き込みで COMMIT されうる。R1・R4・R5 の「何も残さない・元のまま」が崩れる。(b) 次の `BEGIN IMMEDIATE` が `OperationalError: cannot start a transaction within a transaction` になり、接続が使えなくなる。 / 確認した保証: 呼び出し元に ROLLBACK はなく、`isolation_level=None` のため暗黙のロールバックもない。 / 根拠: notes/service.py:29-42。読み取り専用で再現した。`with s.transaction(c): raise RuntimeError` の後、`c.in_transaction` は True。続けて `create_note` を呼ぶと `OperationalError('cannot start a transaction within a transaction')` が出た。 / 提案: `except BaseException:` で `if conn.in_transaction: conn.execute(\"ROLLBACK\")` を実行してから `raise` する。\n\n- [重大2] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4 / 対応区分: 証拠不足 / 内容: 途中の失敗・ロールバックを確かめるテストが1件もない。設計書がテスト用の差し込み口（`hooks.before_write`）を用意しているのに、tests/test_notes.py では一度も使われていない。重大1の欠陥を gate が見逃した（12件すべて合格）。 / 成立条件: 必須の受け入れ条件 AC1・AC4・AC5・AC10 の失敗時の挙動。 / 影響: 原子性・接続の復帰が未検証のまま完了扱いになる。 / 根拠: tests/test_notes.py に hooks の使用なし。ロールバック後に何も残らないことを確かめるアサーションもない。 / 提案: `before_write` で例外を出し、create_note・delete_note・transfer_notes の後にメモ・タグ・監査が元のままで、同じ接続で次の操作が成功することを確かめるテストを追加する。\n\n- [重大3] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾の改行付きタグ（例 `\"ab\\n\"`）が通る。仕様は英小文字・数字・ハイフンの1〜20文字だけを許す。 / 成立条件: create・update・search のタグ引数に `\"abc\\n\"` を渡す。 / 影響: 不正なタグが保存され、検索条件にも使われる。share.py では同じ問題を fullmatch で避けており、一貫していない。 / 根拠: notes/service.py:14, 63, 149。`create_note(c,u,\"t\",\"b\",[\"ab\\n\"])` が例外にならず 1 を返すことを実行して確認した。 / 提案: `TAG_RE.fullmatch(t)` に変える（`\\Z` でもよい）。\n\n- [重大4] 区分: テスト / 対象: AC2, AC3, AC4, AC7, AC8, AC9, K1, K2, K3, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件の大半で、異常系・境界値・リスクを確かめる検証がない。 / 成立条件: 次の検証が欠けている。<br>・他の組織・他人の非公開メモが NotFound になること（K1）<br>・閲覧数の同時加算<br>・LIKE の `%` `_` と SQL インジェクション（K2）<br>・page・per_page・sort の範囲外<br>・Conflict と Forbidden（version 不一致・他人・管理者）<br>・移管の組織またぎ（K6）<br>・api_key の伏せ字（8文字未満・末尾4文字。現在の test_export_audit は actor と action しか見ていない）<br>・RateLimiter の枠の境界ちょうど（`t == window`）と複数スレッド<br>・共有リンクの期限ちょうど・形の崩れ（K8）<br>・本文・署名・api_key がログに出ないこと（AC9） / 影響: 空洞化している。現状のテストは正常系が中心で、条件を外しても失敗しない。 / 根拠: tests/test_notes.py の全90行を確認した。 / 提案: 上の項目ごとに、条件を外すと失敗するテストを追加する。並行は `RateLimiter.hook` や `hooks.before_write` と別接続を使い、sleep に頼らない形にする。\n\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `list_notes` に非常に大きな page（int64 超）を渡すと、ValidationError ではなく OverflowError になりうる（未実行で、推測）。 / 提案: page に現実的な上限を設けるか、OverflowError を ValidationError に変換する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は空の題名と正常作成しか見ておらず不十分。タグ・本文の境界、失敗時に何も残らないこと、改行付きタグの拒否が未検証。\n- AC2: 閲覧の正常系しか見ておらず不十分。非公開・他組織・存在しない場合の NotFound、閲覧数の同時加算が未検証。\n- AC3: V3 は1ページ目と単純な検索だけで不十分。範囲外、LIKE の特殊文字、タグ OR、他人の非公開の除外が未検証。\n- AC4: V4 は作成者の更新・削除だけで不十分。Conflict、Forbidden、管理者の扱い、削除失敗の伝播が未検証。\n- AC5: V5 は件数と管理者以外の拒否だけで不十分。他組織への移管の拒否、途中失敗時に元のままであることが未検証。\n- AC6: V6 は api_key を一切検査しておらず空洞化している。\n- AC7: V7 は枠の外（61秒）しか見ておらず不十分。ちょうど window 秒の境界と同時の呼び出しが未検証。\n- AC8: V8 は往復と改ざんだけで不十分。期限ちょうど、期限切れ、形の崩れが未検証。\n- AC9: V9 に該当するテストはない。\n- AC10: V10 に該当するテストはなく、実装も満たしていない（重大1）。\n- エンジンが検出したテストの兆候: なし。tests/ の弱体化も確認できなかった。履歴は bind のみ（`history --since 0` の末尾で確認）。\n\n### E2E の要否\n- 不要。HTTP のないライブラリで、SQLite の実物を使う単体・結合テストで足りる。ただし並行と途中失敗の再現テストは必須。\n\n### 不足しているリスク\n- K3: 別接続・別スレッドでの閲覧数・更新・RateLimiter の同時実行が未検証。\n- K4: 途中失敗による不整合が実装で守られておらず（重大1）、検証もない。\n- K5・K7・K9相当: ログと出力に機密情報が出ないこと、伏せ字が未検証。\n- update_note は認可チェックを transaction の外で行う。UPDATE の version 条件で更新の消失は防げるが、権限チェックと書き込みの間に移管が入る隙があり、未確認。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を全部読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件 OK だった。ただし異常系が通っていないだけで、欠陥を見つけられるテストではない。\n- メモリ上の DB で再現した。`transaction()` 内で例外を起こすと `in_transaction` が True のまま残り、次の `create_note` が OperationalError になった。`create_note` はタグ `\"ab\\n\"` を受け入れた。\n- `$AQ history --since 0` の末尾で、検証条件の弱体化がないことを確認した（bind のみ）。",
+ "files_changed": [],
+ "valid": true
+}

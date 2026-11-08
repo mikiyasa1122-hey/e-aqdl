@@ -1,0 +1,33 @@
+{
+ "case": "BND-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0656237,
+ "judge_raw": "## 分類結果\n\n- **重大1**: 埋め込み欠陥そのものです。`list_notes` の `page < 0` で page=0 が通ります。原因(下限比較が 0 を許す)と影響(負の OFFSET)が正解データと一致します。\n- **重大2**: テストの不足だけを指摘しており、コードの欠陥の主張ではありません。test_gap です。\n- **重大3**: `update_note` と `delete_note` が、権限や可視性の検査をトランザクションの外で行っています。transfer 後に最新 version で更新すると、権限を失った利用者の更新が通る余地があるという指摘です。コードの読み取りに基づく実在の懸念で、埋め込み欠陥とは別物です。ただし、transfer_notes は version を上げるため、成立するのは呼び出し側が transfer 後に最新 version を取得した場合に限られます。実質的な影響は小さいものの、根拠を挙げた指摘なので real_other にしました。\n- **軽微1**: 仕様外で、レビュー担当自身も現状のままでよいとしています。style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の page < 0 により page=0 が通り負の OFFSET になる点を、同じ箇所・同じ原因と影響で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note の権限・可視性の検査がトランザクション外で行われる点を指摘している。埋め込み欠陥とは別の実在する懸念である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"仕様外の updated_at の扱いについての提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が page=0 の受け入れを、原因・影響とも埋め込み欠陥と一致する形で指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の page < 0 により page=0 が通り負の OFFSET になる点を、同じ箇所・同じ原因と影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update_note と delete_note の権限・可視性の検査がトランザクション外で行われる点を指摘している。埋め込み欠陥とは別の実在する懸念である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "仕様外の updated_at の扱いについての提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が page=0 の受け入れを、原因・影響とも埋め込み欠陥と一致する形で指摘している。"
+ }
+}

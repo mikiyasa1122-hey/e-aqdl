@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 2,
+ "sec": 35.5,
+ "exit": 0,
+ "cost_usd": 0.1176895,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15353,
+  "cache_read_input_tokens": 120915,
+  "output_tokens": 4417,
+  "output_tokens_details": {
+   "thinking_tokens": 739
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15353,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2889,
+    "cache_read_input_tokens": 37438,
+    "cache_creation_input_tokens": 4082,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4082
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` がメモ1件ごとに別のトランザクションで UPDATE している（`notes/service.py:202-205`）。監査ログの記録も別のトランザクションになっている（`:206-207`）。 / 成立条件: 2件目以降の移管、または監査ログの INSERT が失敗したとき（例外、ロック待ちのタイムアウト、プロセス停止）。 / 影響: 一部のメモだけ移管された状態が残る。仕様は「全部移すか、何も移さないか」を要求している。さらに前半の移管済みメモには監査ログが残らない。 / 根拠: `for i in ids: with transaction(conn):` が件ごとにコミットする。`hooks.before_write(\"transfer:N\")` が各メモの前に呼ばれるため、2件目で例外を出すと1件目は移管済みのまま残る。 / 提案: SELECT、全 UPDATE、監査ログの INSERT を1つの `with transaction(conn):` にまとめる。\n\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査に使う `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている（`notes/service.py:14, 64, 150`）。Python の `$` は末尾の改行の直前にもマッチするため、`\"abc\\n\"` が通る。 / 成立条件: タグに末尾の `\\n` を付けて作成・更新・検索のタグ絞り込みに渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。20文字ちょうどのタグに `\\n` を付けた21文字も通る。 / 根拠: `re.match(r'^[a-z0-9-]{1,20}$','ab\\n')` が True になることを実行して確認した。share.py は同じ問題を避けるために fullmatch を使っており、設計内で不統一になっている。 / 提案: `TAG_RE.fullmatch(t)` を使う、または `\\Z` に変える。\n\n- [重大3] 区分: テスト / 対象: AC1〜AC10 のほぼ全部, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほとんどが正常系を1本だけ確かめている。 / 根拠: `tests/test_notes.py` には次のテストがない。他組織・他人の非公開メモの NotFound、管理者の Forbidden（R4）、Conflict、タグの検査、境界値（題名100/101文字、タグ5/6個、per_page 0/51）、SQL の `%` `_` の扱い、閲覧数の同時加算、トランザクションの途中失敗と巻き戻し、移管の巻き戻し、api_key の伏せ字、機密情報がログに出ないこと、例外後に接続を再利用できること、レートリミットの同時呼び出しと枠の境界ちょうど、共有リンクの期限ちょうど・形の崩れ。設計が用意した `hooks.before_write` と `RateLimiter.hook` の差し込み口も一度も使われていない。 / 影響: 重大1のような欠陥を検出できない。gate が合格でも、AC は検証されていない。 / 提案: 上記を決定論的なテストとして追加する。差し込み口でスレッドの順序を固定し、sleep には頼らない。\n\n- [重大4] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: 認可と可視性の判定が、トランザクションの外で読んだ `row` に基づいている（`notes/service.py:158-167`, `:182-186`）。 / 成立条件: 判定後・書き込み前に、メモが `transfer_notes` で別の所有者に移る、または private に変更される。 / 影響: 更新側は version の条件で Conflict になるので防がれる。削除側は version を見ないので、判定が古いまま削除が成立し、元の所有者だった利用者が、他人のメモを削除できる。 / 根拠: `delete_note` の DELETE は `WHERE id = ?` だけで、トランザクション内で `_visible` と `_can_modify` を再確認していない。`get_note` は再確認しているため、同じ防御が欠けている。 / 提案: `delete_note` では、BEGIN IMMEDIATE の後に行を読み直して `_visible` と `_can_modify` を判定する。`update_note` も、同じ手順にするとより安全になる。\n\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `01.123.sig` のように先頭にゼロを付けたリンクが、同じ署名のまま検証を通る（int に変換してから署名を計算するため）。 / 提案: 正規形（先頭ゼロなし）でないリンクは Forbidden にする。\n\n- [軽微2] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: 利用者の org_id・role は呼び出し側が渡す dict を信用している。これは対象外と明記されているため欠陥とはしない。 / 提案: 仕様どおりで対応不要。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否だけを確かめており不十分（境界値、タグの検査、巻き戻しがない。実装にもタグの欠陥がある）。\n- AC2: V2 は閲覧の成功だけ。不可視の NotFound も閲覧数の加算も同時実行も確かめておらず不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけ。範囲外の拒否、`%` `_`、タグ OR、他人の非公開メモの除外がなく不十分。\n- AC4: V4 は所有者による正常な更新と削除だけ。Conflict、Forbidden、管理者の挙動がなく不十分。\n- AC5: V5 は件数と管理者以外の拒否だけ。途中失敗時の巻き戻しがなく、実装も違反しているため不十分。\n- AC6: export_audit のテストは action と actor だけで、api_key の伏せ字を確かめておらず不十分。\n- AC7: 枠を超えた拒否と新しい枠への移行だけ。ちょうど window 秒と同時呼び出しがなく不十分。\n- AC8: 往復と改ざんだけ。期限ちょうど、期限切れ、形の崩れがなく不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。HTTP やUIのない Python ライブラリなので、結合した unittest で足りる。ただし、複数の接続とスレッドを使う決定論的な並行テストは必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K3: 同時の閲覧・更新・レートリミットの競合を確かめるテストがない。\n- K4: 途中失敗時の不整合は、実装の欠陥（重大1）がある上にテストもない。\n- K5, K7: 機密情報の露出を確かめるテストがない。\n- K8: 期限ちょうど・形の崩れを確かめるテストがない。\n\n### 確認したこと\n- 仕様、設計、`notes/` の全ソース、`tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が合格した。\n- `re.match(r'^[a-z0-9-]{1,20}$','ab\\n')` が True になることを実行して確認した。\n- `$AQ trace` で、全要求が「合格・反証未実施」であることを確認した。\n- 並行実行・巻き戻しは実行して再現していない。重大1と重大4は、コードの経路から立証している。",
+ "files_changed": [],
+ "valid": true
+}

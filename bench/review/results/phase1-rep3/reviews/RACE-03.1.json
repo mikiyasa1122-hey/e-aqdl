@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 1,
+ "sec": 33.6,
+ "exit": 0,
+ "cost_usd": 0.1260421,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19038,
+  "cache_read_input_tokens": 115041,
+  "output_tokens": 3837,
+  "output_tokens_details": {
+   "thinking_tokens": 649
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19038,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2383,
+    "cache_read_input_tokens": 37828,
+    "cache_creation_input_tokens": 1343,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1343
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 対応区分: 修正必須 / 内容: `RateLimiter.hit` が `with threading.Lock():` で呼び出しのたびに新しいロックを作っているため、排他制御になっていない。`self._lock` は使われていない。 / 成立条件: 同じ user_id で複数スレッドが同時に `hit` を呼ぶ。両方が `n` を読んでから書く。 / 影響: 上限を超えて許可される。 / 根拠: notes/ratelimit.py:95。limit=1 のレート制限器で、`hook` に Barrier を置いて2スレッドを同時に走らせたところ、2回とも許可された（allowed 2）。 / 提案: `with self._lock:` に直す。hook は判定の前後どちらでもロック内で呼ぶ。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` の `$` は末尾の改行にも一致する。このため `\"ab\\n\"` のような改行付きタグが検証を通る。 / 成立条件: タグに末尾が `\\n` の文字列を渡す。create_note、update_note、search_notes の3か所が `TAG_RE.match` を使っている。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に違反する値が保存される。 / 根拠: notes/service.py:158, 208, 294。`create_note(..., ['ab\\n'])` が成功し、note_tags に `'ab\\n'` が入った。 / 提案: `TAG_RE.fullmatch` を使う。または正規表現を `\\Z` で終わらせる。\n- [重大3] 区分: テスト / 対象: AC7, R7, K3 / 対応区分: 証拠不足 / 内容: 同時呼び出しの検証がない。`test_limit` は単一スレッドで、疑似時計を使っているだけである。枠の境界（ちょうど window 秒）も確かめていない。重大1の欠陥を検出できていない。 / 提案: 設計にある `RateLimiter.hook` と Barrier で2スレッドの同時呼び出しを決定論的に再現するテストを追加する。`t = start + window` ちょうどの境界を確かめるテストも追加する。\n- [重大4] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC8, AC9, AC10, K1, K2, K4, K6, K8 / 対応区分: 証拠不足 / 内容: テストは全12件で、ほぼ正常系だけである。次の検証が欠けている。<br>- 他組織や他人の非公開メモが NotFound になること（K1）<br>- 管理者が非公開メモを扱えないこと<br>- version の不一致による Conflict、および読み出しから書き込みの間に他の更新が入った場合の Conflict<br>- `hooks.before_write` による途中失敗でのロールバック（作成・削除・移管）<br>- 移管で組織外への移管が Forbidden になること<br>- 同時閲覧で閲覧数が数え漏れしないこと<br>- LIKE の `%` と `_` の扱い、およびインジェクション文字列<br>- list の page・per_page・sort の境界<br>- タグの境界と重複<br>- 共有リンクの期限ちょうど、改ざん、形の崩れ<br>- api_key の伏せ字（8文字未満・境界）<br>- ログへの機密情報の非出力<br>- 例外後の接続の再利用 / 提案: 上記を異常系・境界値のテストとして追加する。条件を外すと失敗する形にする。\n\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: update_note と delete_note は、権限確認のための行の読み出しをトランザクションの外で行っている。更新は version 条件で守られているため、実害は確認できなかった。 / 提案: 権限確認もトランザクション内に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで、不十分。タグ・本文・件数の境界とロールバックが未検証である。実装にも改行タグの欠陥がある（重大2）。\n- AC2: 同じ組織の利用者の閲覧だけを確かめている。他組織・非公開・存在しない場合の NotFound と、閲覧数の同時加算が未検証。実装は `UPDATE ... views = views + 1` で原子的になっており、コード上は問題ない。\n- AC3: test_list_first_page と test_search だけで、不十分。範囲外の拒否、`%`・`_`、タグ OR、他人の非公開メモの除外が未検証。コード上はプレースホルダーと ESCAPE を使っており妥当。\n- AC4: 作成者による正常系だけで、不十分。Conflict、Forbidden、NotFound、削除の失敗が未検証。\n- AC5: test_transfer と管理者限定のテストだけ。組織外への移管と、途中失敗で元のままになることが未検証。\n- AC6: test_export_audit は action と actor しか見ておらず、api_key の伏せ字を確かめていない。空洞。\n- AC7: 不十分（重大1・3）。\n- AC8: test_roundtrip と test_tampered だけ。期限の境界と形の崩れが未検証。コード上は fullmatch と compare_digest を使っており妥当。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。テストの改ざんや弱体化は確認していない（未コミットの新規ファイル）。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリのため）。単体・結合テストで足りる。ただし並行実行は Barrier を使った決定論的なテストで確かめる必要がある。\n\n### 不足しているリスク\n- K1、K3（ratelimit の並行）、K4、K6、K8、K5 の各リスクについて、確かめるテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った。\n- 再現スクリプトを実行した。改行付きタグが保存され、レート制限が同時呼び出しで2回許可された。いずれも書き込み先はメモリ上の DB で、プロジェクトのファイルは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

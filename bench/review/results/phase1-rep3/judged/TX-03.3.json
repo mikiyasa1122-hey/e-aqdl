@@ -1,0 +1,43 @@
+{
+ "case": "TX-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0685297,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `create_note` がメモの INSERT をコミットした後に、タグと監査ログを別トランザクションで書いている点を指摘しています。箇所(`notes/service.py` の `create_note`)、原因、影響(タグのないメモと監査の欠けた状態が残る)が埋め込んだ欠陥と一致します。→ matches_defect\n- **重大2**: `TAG_RE` の `$` が末尾の改行を通すという指摘です。コードを見ても実在する欠陥で、仕様に反します。ただし埋め込んだ欠陥とは別物です。→ real_other\n- **重大3**: テストの不足だけを述べています。→ test_gap\n- **重大4**: `update_note` と `delete_note` が権限判定をトランザクションの外で行う点を指摘しています。`delete_note` には version の条件がなく、判定後に所有者が移されると他人のメモを削除できます。これは実在する競合(TOCTOU)です。→ real_other\n- **軽微1**: `to_user` が存在しない場合は FOREIGN KEY の例外になり、全体がロールバックされます。仕様の対象外の範囲で、整合性も保たれます。改善提案にとどまります。→ style\n- **軽微2**: `transfer_notes` が `updated_at` を更新しない点です。仕様に更新を求める記述はなく、欠陥の主張というより改善提案です。→ style\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"create_note がメモ挿入をコミットしてからタグ・監査を別トランザクションで書く点を、同じ箇所・原因・影響で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match により末尾改行のタグが通る実在の欠陥だが、埋め込んだ欠陥とは別。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"権限判定がトランザクション外で、delete_note は判定後の所有者移管に対して防げない実在の競合。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"対象外の範囲で、ロールバックされ整合性は保たれるため改善提案にとどまる。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"仕様に更新の要求がなく、改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥(作成途中の失敗でタグのないメモが残る)を、箇所・原因・影響とも一致する形で指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "create_note がメモ挿入をコミットしてからタグ・監査を別トランザクションで書く点を、同じ箇所・原因・影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match により末尾改行のタグが通る実在の欠陥だが、埋め込んだ欠陥とは別。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "権限判定がトランザクション外で、delete_note は判定後の所有者移管に対して防げない実在の競合。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "対象外の範囲で、ロールバックされ整合性は保たれるため改善提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "仕様に更新の要求がなく、改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥(作成途中の失敗でタグのないメモが残る)を、箇所・原因・影響とも一致する形で指摘している。"
+ }
+}

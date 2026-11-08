@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-06",
+ "rep": 3,
+ "sec": 33.6,
+ "exit": 0,
+ "cost_usd": 0.11894669999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17203,
+  "cache_read_input_tokens": 120187,
+  "output_tokens": 3810,
+  "output_tokens_details": {
+   "thinking_tokens": 849
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17203,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2408,
+    "cache_read_input_tokens": 38700,
+    "cache_creation_input_tokens": 2606,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2606
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f7150041\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 内容: タグの検査が `TAG_RE.match` と `$` で書かれていて、末尾に改行のついたタグ（例 `\"abc\\n\"`）を通してしまう。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する。20文字＋改行も通るので長さの上限も破れる。 / 根拠: notes/service.py:15（`^[a-z0-9-]{1,20}$`）、service.py:55 と :147 の `match`。再現: `create_note(c,u,'t','b',['abc\\n'])` が成功し、`get_note` が `['abc\\n']` を返した。 / 提案: `fullmatch` に変えるか、`\\Z` を使う。作成・更新・検索のどれにも拒否テストを足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC8, AC9, AC10, K1〜K8 / 内容: 検証が仕様のリスクをほとんど確かめていない。テストは12件で、正常系が中心。後述のとおり、異常系・境界値・並行・途中の失敗の再現が欠けている。設計が用意した `hooks.before_write` と `RateLimiter.hook` を使うテストが1件もない。 / 根拠: tests/test_notes.py 全体。`hooks`・`Conflict`・`threading` を使う箇所がない。 / 提案: 下の「受け入れ条件ごと」に挙げた不足分をテストに足す。認可や version の条件を外すと失敗するテストにする。\n- [重大3] 区分: 実装 / 対象: R4, K3, K4 / 内容: `update_note` は、可視性と権限の確認を `BEGIN IMMEDIATE` の外で行っている。トランザクションの中では version だけを見て、権限は確認し直さない。そのため、確認と書き込みの間に起きた変更に弱い。例えば移管で owner が変わると version が増えるので Conflict になり、実害は小さい。ただ、削除と更新が競合した場合は NotFound ではなく Conflict になる。 / 根拠: service.py:151-170。 / 提案: トランザクション内で行を読み直して `_visible`／`_can_modify` を再判定する（`get_note` は再判定している）。または、この挙動を許容すると仕様に書く。実害が小さいのに重大に数えるかは迷う。ただ、仕様の「読み出しから書き込みの間」の規定をテストが確かめていないことと合わせて、重大とした。\n- [軽微1] 区分: 実装 / 対象: R6 / 内容: `export_audit` は `users` と JOIN しているので、利用者の行がない監査ログは出力から落ちる。 / 提案: LEFT JOIN にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名の拒否だけ。空白だけ、101文字、本文の上限、タグ6個、不正なタグ、tags に文字列を渡した場合、重複タグの扱い、途中で失敗したときに何も残らないこと（hooks の \"create:tags\"）は確かめていない。不十分。実装にもタグの穴がある。\n- AC2: V2 は閲覧しか確かめていない。他の組織・他人の非公開・存在しないメモが NotFound になること、閲覧数が1ずつ増えること、同時の閲覧で数え漏れがないことは確かめていない。不十分。\n- AC3: V3 は1ページ目の件数と単純な検索だけ。page・per_page・sort の範囲外、`%` と `_` の扱い、タグの OR 絞り込み、他人の非公開メモが含まれないこと、SQL インジェクションの入力は確かめていない。不十分。\n- AC4: V4 は作成者による正常な更新と削除だけ。Forbidden、Conflict（古い version、競合）、管理者の操作、非公開メモの NotFound、更新時の検証、削除の失敗が伝わることは確かめていない。不十分。\n- AC5: V5 は件数と管理者以外の拒否だけ。別の組織への移管の拒否、途中で失敗したら元のままになること、メモの owner が実際に変わったことは確かめていない（件数しか見ていない）。不十分。\n- AC6: V6 は action と actor だけで、api_key の伏せ字は一切確かめていない。8文字未満・ちょうど8文字・長い鍵も未確認。AC6 は未検証で、不十分。\n- AC7: V7 は制限と枠が変わる場面（61秒）だけ。ちょうど window 秒の境界と、複数スレッドからの同時呼び出しは確かめていない。不十分。\n- AC8: V8 は往復と改ざんの1ケースだけ。期限ちょうど、期限切れ、形の崩れたリンク（改行つきなど）は確かめていない。不十分。\n- AC9: V9 は、ログや例外に本文・署名・api_key が出ないことを確かめるテストがない。不十分。\n- AC10: V10 は、例外の後に接続を使い続けられることを確かめるテストがない。不十分。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなく、テストの弱体化も見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のない標準ライブラリだけの構成なので、単体テストで足りる。ただし並行と途中の失敗は、hooks を使った単体テストで必ず確かめること。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: インジェクションの入力で確かめるテストがない。\n- K3: 同時の閲覧・更新・呼び出しを確かめるテストがない。\n- K4: 途中で失敗したときの巻き戻しを確かめるテストがない。\n- K5, K7: api_key の伏せ字と機密情報が出ないことを確かめるテストがない。\n- K6: 移管で組織の外へ渡らないこと、一部だけ移らないことを確かめるテストがない。\n- K8: 期限切れ・形の崩れたリンクを確かめるテストがない。\n\n### 確認したこと\n- 仕様、設計、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -B -m unittest discover -s tests -t .`: 12件すべて合格。\n- 再現スクリプトで、`'abc\\n'` のタグが保存されることを確認した。\n- `$AQ trace` と `history` を確認した。検証条件が弱められた形跡はない。反証テストは無効なので、合格は欠陥の検出を証明していない。",
+ "files_changed": [],
+ "valid": true
+}

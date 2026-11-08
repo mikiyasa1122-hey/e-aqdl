@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 3,
+ "sec": 36.1,
+ "exit": 0,
+ "cost_usd": 0.1268058,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 16825,
+  "cache_read_input_tokens": 159958,
+  "output_tokens": 4349,
+  "output_tokens_details": {
+   "thinking_tokens": 692
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16825,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2765,
+    "cache_read_input_tokens": 40593,
+    "cache_creation_input_tokens": 332,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 332
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6, K1 / 内容: `transfer_notes` が移す先（to_user）の組織を検査しない。別の組織の利用者にメモを移せてしまう。仕様は「移す元・移す先・管理者がすべて同じ組織」と定めている。/ 根拠: notes/service.py の `transfer_notes` は `from_user[\"org_id\"] != admin[\"org_id\"]` しか見ていない。再現: 組織10のメモを組織99の利用者へ `transfer_notes` すると、戻り値は 1 で、owner_id=9、org_id=10 のまま。他組織の利用者が org 10 のメモを所有する状態になる。/ 提案: `to_user[\"org_id\"] != admin[\"org_id\"]` なら Forbidden にする。from_user・to_user の org_id は、呼び出し側が渡した dict ではなく DB から引き直した値で判定するのが望ましい。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, V1〜V10, VK1〜VK8 / 内容: テストは12件で、ほぼ正常系だけ。仕様の中核の規則を確かめるテストがない。そのため重大1の欠陥も検出されていない。次が欠けている。\n  - 他組織・他人の非公開メモが NotFound になること（AC2, K1）\n  - 閲覧数の並行加算（AC2, K3）\n  - ページ・並び順・範囲外の拒否\n  - LIKE の `%`/`_` と SQL インジェクション入力（AC3, K2）\n  - タグ検索（OR）とタグの検査\n  - Conflict、読み出しから書き込みの間の競合（`hooks.before_write`）、Forbidden（AC4）\n  - 作成・削除・移管の途中失敗でのロールバック（AC1, AC5, K4）\n  - 監査ログの api_key 伏せ（AC6, K7）\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し（AC7）\n  - 共有リンクの期限境界・形の崩れ・期限切れ（AC8, K8）\n  - 機密情報がログや例外に出ないこと（AC9）\n  - 例外の後も接続を使えること（AC10）\n  - 入力検証の境界（題名 100 文字、タグ 5 個、tags が文字列、空白のみ）\n  / 根拠: tests/test_notes.py 全体。`test_transfer` は件数しか確認せず、`test_tampered` は 1 パターンだけ。/ 提案: 上記を AC・リスクごとにテストする。並行実行の再現は sleep ではなく、設計にある `hooks.before_write` と `RateLimiter.hook` で決定論的に行う。\n- [重大3] 区分: テスト / 対象: AC2, AC7, K3 / 内容: 並行（同時）の検証が 1 件もない。閲覧数の数え漏れ、RateLimiter の上限超過、楽観的ロックの競合は、仕様が明示した要件なのに未検証。/ 根拠: tests/ に threading を使うテストがない。/ 提案: 別接続・別スレッドで同時閲覧し、閲覧数が N 増えることを確認する。`hook` の中で別スレッドを割り込ませ、上限を超えないことを確認する。`before_write(\"update\")` の中で別接続から更新し、Conflict になることを確認する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `delete_note` と `update_note` の認可（`_visible` と `_can_modify`）をトランザクションの外で判定している。判定後に所有者が変わると、旧所有者の判定のまま削除できる。update は version で Conflict になるが、delete にはその保護がない。/ 根拠: notes/service.py の `delete_note` で `_row` を `transaction` の前に読んでいる。/ 提案: トランザクション内で行を読み直して認可を判定する。\n- [軽微2] 区分: 実装 / 対象: R8 / 内容: `LINK_RE` は先頭ゼロを許す（`007.…`）。`int()` に変換して署名するため、同じ署名で別表記のリンクが通る。害は小さい。/ 提案: 正規表現で先頭ゼロを禁止するか、再構成した文字列と比較する。\n- [軽微3] 区分: 実装 / 対象: R4 / 内容: `update_note` の `version` の型を検査しない。不正な型を渡すと常に Conflict になる。許容範囲。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけ。長さ・タグ・本文の境界とロールバックを確かめておらず不十分。\n- AC2: V2 は閲覧の取得だけ。他組織・非公開の NotFound、閲覧数、並行を確かめておらず不十分。\n- AC3: V3 は第 1 ページと単純検索だけ。範囲外、`%`/`_`、インジェクション、タグ OR、他人の非公開の除外が未検証で不十分。\n- AC4: V4 は所有者の更新・削除の正常系だけ。Conflict、Forbidden、管理者、非公開、検証、競合が未検証で不十分。\n- AC5: V5 は件数と「管理者以外は拒否」だけ。組織またぎ（重大1）とロールバックが未検証で不十分。\n- AC6: V6 は監査ログの action と actor だけを確認し、api_key の伏せ字を一切確かめておらず不十分。\n- AC7: V7 は 1 つの正常系だけ。ちょうど window 秒の境界と同時呼び出しが未検証で不十分。\n- AC8: V8 は往復と改ざん 1 パターンだけ。期限の境界、期限切れ、形の崩れが未検証で不十分。\n- AC9: V9 に対応するテストがなく不十分。\n- AC10: V10 に対応するテストがなく不十分。\n- K1〜K8: VK1〜VK8 に対応する専用テストがほぼなく不十分。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションなしは見つからなかった。テストの改ざんや弱体化は、history に検証条件の弱化がなかったことを確認した。\n\n### E2E の要否\n- 不要（HTTP なしのライブラリで、SQLite を使った単体・統合テストで足りる）。ただし並行と途中失敗の統合テストは必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモが見えない・変えられないことのテストがない。\n- K2: インジェクション入力と LIKE のワイルドカードのテストがない。\n- K3: 並行する閲覧・更新・RateLimiter のテストがない。\n- K4: 作成・削除・移管の途中失敗のロールバックのテストがない。\n- K5, K7: ログと例外に機密情報が出ないこと、api_key の伏せ字のテストがない。\n- K6: 組織またぎの移管が実際に通る実装の欠陥（重大1）。テストもない。\n- K8: 期限の境界・形の崩れのテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .`: 12 件が OK。\n- 別組織への移管を再現するスクリプトを実行した。戻り値 1、owner_id=9 で、組織またぎの移管が成功した。\n- `aqdlc history --since 0` で検証条件の弱体化がないことを確認した。\n- 実装報告（impl.md）は読んでいない。",
+ "files_changed": [],
+ "valid": true
+}

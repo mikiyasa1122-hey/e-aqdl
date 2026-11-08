@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 3,
+ "sec": 29.5,
+ "exit": 0,
+ "cost_usd": 0.1195165,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17470,
+  "cache_read_input_tokens": 121805,
+  "output_tokens": 3744,
+  "output_tokens_details": {
+   "thinking_tokens": 391
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17470,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2721,
+    "cache_read_input_tokens": 39536,
+    "cache_creation_input_tokens": 2027,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2027
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 内容: RateLimiter が複数スレッドから同時に呼ばれると、上限を超えて許してしまう。`hit()` が `with threading.Lock():` と毎回新しいロックを作っているため、排他制御になっていない。`self._lock` は使われていない。read-modify-write が保護されず、同時に limit 回を超えて通る。 / 根拠: notes/ratelimit.py の `hit` 内、`with threading.Lock():` の行。`self.hook()` が n を読んだ後、書き込む前にあるので、テストで確実に再現できる。 / 提案: `with self._lock:` に直す。hook でスレッドを交差させ、limit+1 回目が RateLimited になることを確かめるテストを足す。\n- [重大2] 区分: テスト / 対象: AC7, K3 / 内容: 同時呼び出しのテストがない。ロックを外しても、またはこのバグがあっても、テストは全部通る。 / 根拠: tests/test_notes.py の RateLimitTest は単一スレッドのテスト1件だけ。枠の境界であるちょうど window 秒（`now-start == window`）も未検証。 / 提案: `RateLimiter.hook` を使い、決定論的に交差させるテストを書く（sleep は使わない）。境界テストは `t = window-ε` と `t = window` の2点を確かめる。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, K1, K2, K4, K6 / 内容: 異常系・境界値・認可・ロールバックの検証が事実上ない。テストは 12 件ですべて正常系寄りで、次の項目を確かめるテストが見当たらない。 / 提案: 少なくとも次の項目を追加する。\n  - R1: 題名 100/101 文字、空白だけの題名、本文 10000/10001 文字、タグ 5/6 個、不正なタグ、tags に文字列を渡す、`hooks.before_write(\"create:tags\")` で失敗させたときにメモが残らない。\n  - R2: 他の組織・他人の非公開・存在しないメモがどれも NotFound になる、閲覧数の同時加算。\n  - R3: page/per_page/sort の範囲外、`%` `_` の検索、タグ OR、SQL インジェクション文字列。\n  - R4: version 競合、Forbidden、管理者が非公開メモを扱うと NotFound、更新時の検証、`hooks.before_write(\"delete:note\")` で失敗させたときの巻き戻し。\n  - R5: 別の組織、移管の途中失敗。\n  - K1 の他組織・他人の非公開メモが、一覧・検索から漏れない。\n- [重大4] 区分: テスト / 対象: AC6, K7, AC9, K5, R6, R9 / 内容: api_key の伏せ方（末尾4文字以外を伏せる、8文字未満は全部伏せる）の検証がない。`test_export_audit` は action と actor しか見ていない。ログと例外に本文・署名・api_key が出ないことを確かめるテストもない。 / 提案: 境界の長さ 7/8 文字の鍵で伏字を確かめる。caplog 相当（`assertLogs`）と例外メッセージに、機密文字列が含まれないことを確かめる。\n- [重大5] 区分: テスト / 対象: AC8, K8 / 内容: 期限の境界と形の崩れの検証がない。確かめているのは正常系と、note_id の改ざん1件だけ。 / 提案: `now == expires`（無効）と `expires-1`（有効）、署名の改ざん、大文字の16進、末尾の改行、数字以外、`str` 以外を入れる。いずれも Forbidden になることを確かめる。\n- [重大6] 区分: テスト / 対象: AC10, R10 / 内容: 例外の後でロールバックされ、同じ接続で次の操作ができることの検証がない。 / 提案: hook で失敗させた後、`conn.in_transaction` が False で、同じ接続で create/get ができることを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` は `_visible` と `_can_modify` をトランザクションの外で判定する。判定の後に所有者が変わった（移管など）場合、変更権限のない利用者が version 一致で更新できる余地がある。version も一致していなければならないので影響は小さい。 / 提案: 権限の判定を `BEGIN IMMEDIATE` の中でやり直す。\n- [軽微2] 区分: 実装 / 対象: R3 / 内容: `search_notes` は q の検証前に `_tag_list` の型検査をしていない（q の検査が先なので問題は出ない）。タグの検査が `_validate` と重複している。 / 提案: 共通化する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系 1 件と空題名 1 件だけで不十分。境界値、タグの規則、失敗時に何も残らないこと（K4）を確かめていない。\n- AC2: V2 は閲覧の正常系 1 件のみで不十分。NotFound の 3 パターン、閲覧数の加算、同時閲覧を確かめていない（K1）。\n- AC3: V3 は一覧の件数と検索の正常系のみで不十分。範囲外、`%`/`_`、タグ OR、他人の非公開の除外、SQL インジェクション（K2）を確かめていない。\n- AC4: V4 は所有者の更新と削除の正常系のみで不十分。Conflict、Forbidden、NotFound、更新時の検証、削除の失敗時の伝播を確かめていない（K3）。\n- AC5: V5 は成功と非管理者の拒否のみで不十分。別組織の拒否、途中失敗時の巻き戻しを確かめていない（K6）。\n- AC6: V6 は伏字を確かめておらず不十分（K7）。\n- AC7: V7 は単一スレッドのみで不十分。実装にも重大なバグがある（重大1）。\n- AC8: V8 は期限の境界と形の崩れを確かめておらず不十分（K8）。\n- AC9: V9 はテストがなく不十分（K5）。\n- AC10: V10 はテストがなく不十分。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はないが、そもそも検証の量が足りない。\n- 検証条件の改ざん: 履歴は要求の追加だけで、弱体化は見つからなかった。\n\n### E2E の要否\n- 不要。標準ライブラリのみのライブラリで、HTTP や UI がない。ただし並行実行のテストは hook を使った決定論的なテストで必要。\n\n### 不足しているリスク\n- K3: RateLimiter の排他が効いていない。閲覧数の同時加算と、更新の競合が未検証。\n- K1、K2、K4、K5、K6、K7、K8: 上記のとおり、検証がない。\n\n### 確認したこと\n- 仕様、設計、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .`: 12 件が OK（すべて通るが、バグを検出できない）。\n- `aqdlc trace` と `history` を確認した。gate は unit のみで、反証テストは無効。\n- gate は実行していない。実装も変更していない。",
+ "files_changed": [],
+ "valid": true
+}

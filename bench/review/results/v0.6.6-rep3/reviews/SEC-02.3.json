@@ -1,0 +1,49 @@
+{
+ "case": "SEC-02",
+ "rep": 3,
+ "sec": 33.5,
+ "exit": 0,
+ "cost_usd": 0.10206119999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12665,
+  "cache_read_input_tokens": 112752,
+  "output_tokens": 4011,
+  "output_tokens_details": {
+   "thinking_tokens": 512
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12665,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2855,
+    "cache_read_input_tokens": 35701,
+    "cache_creation_input_tokens": 1064,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1064
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c4a8b4e4\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5 / 内容: `export_audit` が api_key を伏せずにそのまま返している。末尾4文字以外を `*` にする処理も、8文字未満の鍵をすべて伏せる処理もない。 / 根拠: notes/service.py:360-361 の `\"actor_key\": r[\"api_key\"]`。実際に `api_key='abcdefgh12345678'` の管理者で `export_audit` を実行すると、`actor_key` に鍵が全文のまま出た。 / 提案: マスク関数を作る。8文字未満はすべて `*`、8文字以上は末尾4文字だけを残して他を `*` にする。長さ 0〜8 の境界値のテストも足す。\n- [重大2] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` を `match` で行っている。Python の `$` は末尾の改行の手前にも一致するため、`\"ab\\n\"` のように改行で終わるタグを通してしまう。仕様は「英小文字・数字・ハイフンの1〜20文字」で、これは違反。同じ検査が作成・更新・検索に共通で使われている。 / 根拠: notes/service.py:158 と :208、:294。`create_note(c,u,'t','b',['ab\\n'])` が通る。share.py では fullmatch を使っており、扱いが一貫していない。 / 提案: `fullmatch` を使うか `\\Z` で終わらせ、改行付きタグを拒否するテストを足す。\n- [重大3] 区分: テスト / 対象: AC1〜AC10 のほぼ全部, K1〜K8 / 内容: テストは 12 件だけで、正常系の確認に偏っており、受け入れ条件とリスクの検証が空洞化している。重大1・2の欠陥もテストで検出できていない。不足しているのは次のとおり。\n  - AC1: 境界値（題名100/101文字、本文10000文字、タグ5/6個、不正タグ）と、途中で失敗したときのロールバック（`hooks.before_write` が用意されているのに未使用）\n  - AC2: 他組織・他人の非公開メモが NotFound になること、閲覧数が増えること、同時閲覧\n  - AC3: page/per_page/sort の範囲外、`%` と `_` の検索、タグ OR、SQL インジェクション文字列\n  - AC4: Forbidden、非公開メモを管理者が扱ったときの NotFound、Conflict（古い version と、読み出しから書き込みの間の割り込み）、削除の失敗\n  - AC5: 別の組織への移管が Forbidden になること、途中で失敗したとき元のままであること\n  - AC7: 枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し（`RateLimiter.hook` が未使用）\n  - AC8: 期限ちょうど、期限切れ、形の崩れ、署名の改ざんのリンク\n  - AC9: ログや例外に本文・署名・鍵が出ないこと\n  - AC10: 例外の後も接続を使い続けられること\n  - 現状のテストは `test_export_audit` も action と actor しか見ておらず、鍵の伏せ字は確認していない。 / 根拠: tests/test_notes.py 全 90 行、テスト関数 12 個。 / 提案: 上の項目をすべてテストにする。反証できる形で書く。たとえば version 条件を外したら失敗する、組織の条件を外したら失敗する、にする。並行実行のテストは sleep に頼らず、hook を使って決定論的に再現する。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: `update_note` と `delete_note` で、可視性と権限の判定をトランザクションの外で行っている。判定後にメモの所有者が変わると、古い判定のまま更新できる余地が残る。更新では version の条件があるため大きな害はないが、削除には version の条件がない。 / 根拠: notes/service.py:302-306、:327-331。 / 提案: 判定を `transaction` の中で行う。\n- [軽微2] 区分: 実装 / 対象: R5 / 内容: `transfer_notes` は version を増やすが `updated_at` を更新しない。また、`from_user` と `to_user` の dict をそのまま信用しており、DB 上の組織との照合がない。仕様の「呼び出し側を信用する」の範囲内ではあるが、移管先が DB に存在するかは見ていない。外部キー制約があるため存在しない利用者への移管は失敗する。 / 根拠: notes/service.py:342-349。 / 提案: 任意。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected のみで、境界値・不正タグ・ロールバックを確かめておらず不十分。実装にも改行タグの欠陥がある。\n- AC2: 閲覧数・他組織・非公開・同時閲覧を確認するテストがなく不十分。実装は `_visible` で NotFound にしており、閲覧数の加算も1つの UPDATE で行っていて妥当に見える。\n- AC3: test_list_first_page と test_search だけで、範囲外の入力・ワイルドカード・タグ OR・インジェクションが未検証のため不十分。\n- AC4: test_update_by_owner と test_delete_by_owner だけで、Forbidden・Conflict・競合が未検証のため不十分。\n- AC5: test_transfer と test_transfer_requires_admin だけで、別組織への移管の拒否と途中失敗時のロールバックが未検証のため不十分。\n- AC6: 実装が未達（重大1）。テストも伏せ字を確かめておらず不十分。\n- AC7: test_limit のみで、枠の境界と複数スレッドの同時呼び出しが未検証のため不十分。実装のロックと境界の判定自体は妥当に見える。\n- AC8: test_roundtrip と test_tampered のみで、期限ちょうど・期限切れ・形の崩れが未検証のため不十分。実装は妥当に見える。\n- AC9: ログや例外への機密情報の出力を確かめるテストがなく不十分。\n- AC10: 例外の後に接続を使い続けられることを確かめるテストがなく不十分。実装の `transaction` は妥当に見える。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのファイルは見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest による結合テストで足りる。不足しているのは E2E ではなく、単体・結合テストの網羅。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションのテストがない。\n- K3: 同時の更新・閲覧・呼び出しのテストがない。\n- K4: ロールバックのテストがない。\n- K5, K7: 鍵の露出（実装も未達）。\n- K6: 別組織への移管のテストがない。\n- K8: 改ざん・期限・形の崩れのリンクを確かめるテストがない。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests` → 12 件すべて成功。ただし内容が薄い。\n- notes/ の全ソース（db・errors・ratelimit・share・service）を通読した。\n- 再現スクリプトを実行し、次の2点を確認した。api_key が `export_audit` で全文のまま出る。改行付きタグ `'ab\\n'` が `create_note` を通る。\n- `git log` は初期コミットのみで、`git status` では全ファイルが未追跡。テストが弱められた履歴は見つからなかった。\n- `$AQ trace`、`$AQ history`、`$AQ gate` は実行していない。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

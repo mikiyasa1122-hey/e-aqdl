@@ -1,0 +1,49 @@
+{
+ "case": "SEC-03",
+ "rep": 2,
+ "sec": 36.4,
+ "exit": 0,
+ "cost_usd": 0.1336661,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19985,
+  "cache_read_input_tokens": 111201,
+  "output_tokens": 4259,
+  "output_tokens_details": {
+   "thinking_tokens": 805
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19985,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2721,
+    "cache_read_input_tokens": 37486,
+    "cache_creation_input_tokens": 1605,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1605
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 内容: 共有リンク作成時のログに署名（token）をそのまま出している。 / 根拠: notes/share.py:125 `log.info(\"... token=%s\", ..., token)`。実行すると `INFO:notes.share:share link created ... token=ba1850...` が標準出力に出た。 / 提案: token をログから外し、note_id と期限だけを出す。\n- [重大2] 区分: 実装 / 対象: R1, R4, R3, AC1 / 内容: タグの検査が `^...$` と `match` なので、末尾に改行のあるタグ（`\"ab\\n\"`）を通してしまう。 / 根拠: notes/service.py:158 と :208。`create_note(..., ['ab\\n'])` が成功し、`get_note` が `['ab\\n']` を返した。search_notes の :294 と update_note も同じ検査を使う。 / 提案: `TAG_RE.fullmatch` と `[a-z0-9-]{1,20}` を使う。\n- [重大3] 区分: テスト / 対象: R1〜R5, AC1〜AC5, K1〜K4, K6 / 内容: 検証が正常系の数本だけで、仕様の異常系・境界値をほとんど確かめていない。 / 根拠: tests/test_notes.py は 12 テスト。確かめていないもの:\n  - 題名の100/101文字、空白だけの題名、本文の上限、タグの6個、タグの形式、tags に文字列を渡す場合\n  - 他の組織や他人の非公開メモが NotFound になること\n  - 一覧の範囲外と sort の不正値\n  - 検索の `%` / `_` / SQL インジェクション / タグの OR\n  - Forbidden / Conflict、version の不一致\n  - 途中の失敗でのロールバック（`hooks.before_write` が一度も使われていない）\n  - 移管の組織またぎ、移管が途中で失敗したときの巻き戻し、例外の後の接続の再利用（AC10）\n  \n  これらがないため、重大2のようなバグを検出できなかった。 / 提案: 上の各項目に、決定論的なテストを追加する。\n- [重大4] 区分: テスト / 対象: R2, R4, R7, AC2, AC4, AC7, K3 / 内容: 同時実行の検証が全くない。閲覧数の数え漏れ、更新の競合（読み出しから書き込みの間に別の更新が入る）、RateLimiter の複数スレッドでの上限を確かめていない。 / 根拠: tests にスレッドも hook も出てこない。RateLimiter のテストは枠の境界（ちょうど60秒）も確かめていない（61秒だけ）。 / 提案: 別々の接続と別々のスレッドを使った閲覧数のテスト、`hooks.before_write(\"update\")` の中で別の更新を入れる Conflict のテスト、`RateLimiter.hook` と複数スレッドで上限を超えないことのテスト、ちょうど window 秒で新しい枠になるテストを追加する。\n- [重大5] 区分: テスト / 対象: R6, R8, R9, AC6, AC8, AC9, K7, K8 / 内容: 監査ログの api_key の伏せ字（8文字未満、末尾4文字）を確かめるテストがない。共有リンクも、期限ちょうど、期限切れ、形の崩れ（改行つき、桁違い、署名の長さ違い）を確かめていない。ログ・例外に機密が出ないテストもない。 / 根拠: test_export_audit は action と actor しか見ていない。ShareTest は正常と改ざん（note_id の書き換え）の2本だけ。 / 提案: api_key は 7文字・8文字・長い鍵で期待値を直接比べる。リンクは期限の境界と各種の崩れを Forbidden で確かめる。ログの捕捉（assertLogs）で token・本文・api_key が出ないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: update_note と delete_note は、認可の判定を読み出して行い、書き込みのトランザクションの外で行っている。判定の後に移管されても、古い所有者の判定のまま更新や削除が通る。update_note は version 条件で守られるが、delete_note には守りがない。 / 根拠: notes/service.py:303-316、:327-335。 / 提案: トランザクションの中で読み出し直して認可を判定する。\n- [軽微2] 区分: 実装 / 対象: R2 / 内容: `hooks.before_write(\"view\")` が get_note でトランザクションの外にある。設計上は問題ないが、競合の再現には削除・更新の割り込みが必要で、そのテストもない（重大3・4に含む）。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけで、不十分。境界値・タグの規則（改行つきを通すバグを見逃している）・失敗時の巻き戻しを確かめていない。\n- AC2: V2 は閲覧の正常系だけで不十分。他の組織・非公開の NotFound と、同時の閲覧数を確かめていない。\n- AC3: V3 は検索の基本形だけで不十分。範囲外の拒否、`%`/`_`、SQL インジェクション、タグ OR、非公開の除外を確かめていない。\n- AC4: V4 は作成者による更新・削除の正常系だけで不十分。Forbidden / NotFound / Conflict、入力検証、同時の更新を確かめていない。\n- AC5: V5 は移管の正常系と管理者でない場合だけで不十分。組織またぎと、途中で失敗したときの全部巻き戻しを確かめていない。\n- AC6: V6 は伏せ字を確かめておらず、空洞。\n- AC7: V7 は上限と61秒後だけで不十分。ちょうど window 秒の境界と複数スレッドを確かめていない。\n- AC8: V8 は正常と改ざんの2本だけで不十分。期限（ちょうど・切れ）と形の崩れを確かめていない。\n- AC9: 検証なし。実際にバグ（重大1）がある。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし（skip・.only なし）。改ざん・弱体化も、履歴が「初期状態」のみのため確認できなかった。\n\n### E2E の要否\n- 不要（ライブラリで、UI や HTTP がない）。代わりに、実際の SQLite（別々の接続・スレッド）を使った結合テストを必須とする。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8: 上の重大3〜5のとおり、検証がほぼない。\n- R10: 例外の後の接続の再利用を確かめていない。\n\n### 確認したこと\n- 仕様・設計・全ソース（notes/*.py）・tests/test_notes.py を読んだ。\n- `python3 -m unittest discover` を実行: 12 件が成功。ただし内容が薄いことを上で指摘した。\n- 再現スクリプトを実行（出力はメモリ上のDBと標準出力のみ、ファイルは変更なし）: 末尾が改行のタグが受理されること、共有リンクの署名がログに出ることを確認した。\n- `git log`: 初期状態のコミットだけで、検証条件の弱体化は見つからなかった。`$AQ trace` で全要求が「合格・反証未実施」だと確認した。\n- `$AQ gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

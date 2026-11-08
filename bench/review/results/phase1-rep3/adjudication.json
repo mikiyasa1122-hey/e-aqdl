@@ -1,0 +1,83 @@
+{
+ "AUTH-01#3": {
+  "findings": {
+   "重大3": "real_other"
+  }
+ },
+ "BND-03#1": {
+  "findings": {
+   "軽微1": "false_positive"
+  }
+ },
+ "BND-03#2": {
+  "findings": {
+   "重大2": "real_other",
+   "重大4": "real_other"
+  }
+ },
+ "BND-04#2": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "CLEAN-07#2": {
+  "findings": {
+   "重大4": "real_other"
+  }
+ },
+ "CLEAN-09#1": {
+  "findings": {
+   "軽微3": "real_other"
+  }
+ },
+ "EXC-01#1": {
+  "findings": {
+   "重大2": "real_other"
+  }
+ },
+ "EXC-02#3": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "SQL-02#2": {
+  "findings": {
+   "重大3": "real_other"
+  }
+ },
+ "SQL-02#3": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "SQL-04#2": {
+  "findings": {
+   "重大4": "real_other"
+  }
+ },
+ "TX-01#1": {
+  "findings": {
+   "重大4": "real_other"
+  }
+ },
+ "TX-03#1": {
+  "findings": {
+   "重大4": "real_other"
+  }
+ },
+ "TX-04#2": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "VAL-01#3": {
+  "findings": {
+   "重大4": "real_other"
+  }
+ },
+ "VAL-03#2": {
+  "findings": {
+   "重大3": "real_other"
+  }
+ }
+}

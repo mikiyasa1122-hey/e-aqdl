@@ -1,0 +1,43 @@
+{
+ "case": "RACE-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0679077,
+ "judge_raw": "## 判定\n\n**重大1**は埋め込み欠陥そのものです。`update_note` で version の比較を transaction の外の読み出し時だけで行っています。UPDATE の WHERE に version がないので、間に入った更新を上書きして消します。箇所・原因・影響が正解データと一致し、再現手順も示されています。\n\n**重大2**はテスト不足だけの指摘です。Conflict を確かめるテストがないと述べており、コードの欠陥の主張ではありません。\n\n**重大3**は実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせで、末尾に改行を含む `\"abc\\n\"` が通ります。実際に再現されています。\n\n**重大4**はテスト不足の一覧です。\n\n**重大5**は、コード上は数え漏れが起きにくいと認めています。そのうえで未検証であることだけを指摘しているので、テスト不足に分類します。\n\n**軽微1**は、可視性・権限の判定が transaction の外にあるため、移管後に古い判定で更新される余地があるという指摘です。実在する競合ではありますが、埋め込み欠陥の主題である version の比較とは別の論点です。ただし update_note と delete_note の同じ構造を根拠にしているので、real_other とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note で version 比較が transaction の外にあり、UPDATE の WHERE に version がないため先の更新を上書きする、という埋め込み欠陥そのものを指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"Conflict を確かめるテストがないという、テスト不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで、末尾に改行を含むタグが通る実在のバグ。再現も示されている。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"受け入れ条件に対するテスト不足の一覧であり、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"コードは妥当と認めたうえで、同時閲覧の未検証だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"可視性・権限の判定が transaction の外にあり、移管との競合で古い判定が使われる余地がある。version 比較の欠陥とは別の論点。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が update_note の version 比較の欠陥を原因・影響とも正確に特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note で version 比較が transaction の外にあり、UPDATE の WHERE に version がないため先の更新を上書きする、という埋め込み欠陥そのものを指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "Conflict を確かめるテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで、末尾に改行を含むタグが通る実在のバグ。再現も示されている。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "受け入れ条件に対するテスト不足の一覧であり、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "コードは妥当と認めたうえで、同時閲覧の未検証だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "可視性・権限の判定が transaction の外にあり、移管との競合で古い判定が使われる余地がある。version 比較の欠陥とは別の論点。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が update_note の version 比較の欠陥を原因・影響とも正確に特定している。"
+ }
+}

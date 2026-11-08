@@ -1,0 +1,48 @@
+{
+ "case": "AUTH-05",
+ "rep": 2,
+ "judge_cost_usd": 0.0680857,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `search_notes` の WHERE に非公開メモの除外条件がなく、同じ組織の他人の非公開メモが検索結果に出ると指摘しています。箇所・原因・影響が埋め込み欠陥と一致します。\n- **重大2**: テスト全般の不足を述べているだけで、コードの欠陥の主張ではありません。\n- **重大3**: `actor_key` の伏せ字テストがないという指摘で、実装自体は仕様どおりです。\n- **重大4**: RateLimiter の境界と共有リンクのテストが不足しているという指摘で、実装の欠陥ではありません。\n- **軽微1**: 先頭ゼロの note_id が `int()` で正規化されるため、同じリンクの別表記が通ります。仕様はこれを禁じていないので、欠陥とは言えず保守性の提案にとどまります。\n- **軽微2**: 権限判定を古い行で行うという指摘です。version による楽観ロックで多くは Conflict になり、仕様違反として根拠を示せていません。仕様の「読み出しから書き込みの間の更新は Conflict」を満たすため、実害のある欠陥とは言いにくいです。\n- **軽微3**: 呼び出し側を信用することは仕様の対象外で、指摘自身もそれを認めています。欠陥ではありません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes の WHERE に private/owner_id の条件がなく他人の非公開メモが検索に出るという、埋め込み欠陥と同じ箇所・原因・影響の指摘。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テスト全般の不足を述べており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"actor_key の伏せ字のテストがないという指摘で、実装は仕様どおり。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter と共有リンクの境界・同時実行のテスト不足の指摘にとどまる。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの別表記が通るが仕様違反ではなく、堅牢性の提案にとどまる。\"},\n{\"label\": \"軽微2\", \"class\": \"false_positive\", \"reason\": \"version の楽観ロックで競合は Conflict になり、仕様違反として根拠が示されていない。\"},\n{\"label\": \"軽微3\", \"class\": \"false_positive\", \"reason\": \"呼び出し側を信用することは仕様の対象外で、指摘自身もそれを認めている。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が search_notes の非公開メモ除外漏れを、原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes の WHERE に private/owner_id の条件がなく他人の非公開メモが検索に出るという、埋め込み欠陥と同じ箇所・原因・影響の指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テスト全般の不足を述べており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "actor_key の伏せ字のテストがないという指摘で、実装は仕様どおり。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter と共有リンクの境界・同時実行のテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの別表記が通るが仕様違反ではなく、堅牢性の提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "false_positive",
+    "reason": "version の楽観ロックで競合は Conflict になり、仕様違反として根拠が示されていない。"
+   },
+   {
+    "label": "軽微3",
+    "class": "false_positive",
+    "reason": "呼び出し側を信用することは仕様の対象外で、指摘自身もそれを認めている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が search_notes の非公開メモ除外漏れを、原因・影響とも正しく指摘している。"
+ }
+}

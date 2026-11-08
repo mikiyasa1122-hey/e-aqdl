@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-05",
+ "rep": 2,
+ "sec": 37.5,
+ "exit": 0,
+ "cost_usd": 0.15307990000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 22641,
+  "cache_read_input_tokens": 157459,
+  "output_tokens": 4675,
+  "output_tokens_details": {
+   "thinking_tokens": 667
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22641,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3076,
+    "cache_read_input_tokens": 41427,
+    "cache_creation_input_tokens": 320,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 320
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード bd3d930e\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 / 内容: `search_notes` が他人の非公開メモを返す。仕様は「他人の非公開メモは含めない」と定める。検索の WHERE が `org_id = ?` だけで、`private = 0 OR owner_id = ?` の条件がない。題名と本文の部分一致で、同じ組織の他人の非公開メモが見つかる。 / 根拠: notes/service.py の `search_notes`（SELECT 文は `WHERE org_id = ? AND (title LIKE ...)`）。再現では、alice が非公開メモ「secret」を作り、bob が `search_notes(conn, bob, 'secret')` を呼ぶと `[{'id': 1, 'title': 'secret'}]` が返った。 / 提案: `list_notes` と同じ `(private = 0 OR owner_id = ?)` を追加する。非公開メモが別の利用者の検索に出ないテストも追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 全般、K1〜K8 / 内容: テストが 12 件、90 行しかなく、受け入れ条件の大半を確かめていない。異常系・境界値・認可・並行性がほぼない。次の項目が未検証。\n  - R1: 題名 100/101 文字、本文 10000 文字、タグ 5/6 個、不正タグ、tags に文字列を渡す。途中で失敗したときのロールバック。\n  - R2: 他の組織・他人の非公開メモの NotFound。閲覧数が増えること。同時閲覧。\n  - R3: page・per_page・sort の範囲外、`%` と `_` の検索、タグ OR、SQL インジェクション。\n  - R4: Conflict、Forbidden、管理者の更新、非公開メモ、更新時の検証、削除失敗時の伝播。\n  - R5: 組織またぎの拒否、途中で失敗したときの元のまま。\n  - R6: api_key の伏せ字。\n  - R7: 枠の境界ちょうどと同時呼び出し。\n  - R8: 期限ちょうど、形の崩れ、署名の改ざん。\n  - R9: ログや例外に機密が出ないこと。\n  - R10: 例外後の接続の再利用。\n  設計書は `hooks.before_write` と `RateLimiter.hook` を並行・障害の再現用に用意しているが、どのテストも使っていない。重大1のバグもこのテスト不足のせいで見逃された。 / 根拠: tests/test_notes.py 全体。 / 提案: 上の項目ごとにテストを追加する。並行は sleep ではなく hook と Barrier で決定論的に再現する。\n- [重大3] 区分: テスト / 対象: R6, AC6, K7 / 内容: `export_audit` のテストは action と actor しか見ていない。`actor_key` の伏せ字（末尾4文字以外を `*`、8文字未満は全部伏せる）を一切確かめていない。 / 根拠: tests/test_notes.py の `test_export_audit`。 / 提案: 8文字以上・8文字未満・ちょうど8文字の鍵で、`actor_key` の完全一致を検証する。生の鍵が出力に含まれないことも確かめる。\n- [重大4] 区分: テスト / 対象: R7, AC7, R8, AC8, K3, K8 / 内容: RateLimiter の境界と同時呼び出しが未検証。テストは `t=61` だけで、`now - start == window` ちょうどで新しい枠になることを確かめていない。複数スレッドで limit を超えないことも確かめていない。共有リンクも、期限ちょうど（`now == expires`）と形の崩れ（改行付き、非16進、署名の長さ違い、非文字列）のテストがない。 / 根拠: tests/test_notes.py の `RateLimitTest`、`ShareTest`。 / 提案: 時計を注入して `window-ε`、`window` ちょうどを試す。ThreadPool と `hook` で同時呼び出しを再現する。期限の境界と各種の不正な形のリンクを試す。\n\n- [軽微1] 区分: 実装 / 対象: R8 / 内容: リンクの note_id は先頭ゼロを許し、`int()` で正規化して署名する。そのため `007.<exp>.<sig>` も有効になる。仕様の「10進の数字だけ」には反しないが、同じリンクの別表記を通す。 / 根拠: notes/share.py の `verify_link`。 / 提案: 署名する文字列は、正規化前のトークンの文字列にするか、先頭ゼロを拒否する。\n- [軽微2] 区分: 実装 / 対象: R4, K3 / 内容: `update_note` は権限判定（`_can_modify`）をトランザクションの外の古い行で行う。判定後に所有者が移管で変わっても、権限はそのまま通る。version の楽観ロックで多くは Conflict になるが、権限判定をトランザクション内に移す方が堅い。 / 根拠: notes/service.py の `update_note`。\n- [軽微3] 区分: 実装 / 対象: R5 / 内容: `transfer_notes` は from_user と to_user の dict の org_id を信用する。仕様の対象外（呼び出し側が確かめる前提）だが、DB 上の所属との突き合わせはない。 / 根拠: notes/service.py の `transfer_notes`。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の拒否だけ。長さの境界、タグ、ロールバックがなく不十分。\n- AC2: V2 は自分のメモの取得だけ。組織違い・非公開・存在しない場合、閲覧数、同時閲覧がなく不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけ。検索の非公開除外が実装に欠陥のまま見逃された。入力の拒否、`%` と `_`、タグ OR、SQL インジェクションも未検証で不十分。\n- AC4: V4 は作成者による更新と削除の正常系だけ。Conflict、Forbidden、管理者、非公開、同時更新がなく不十分。\n- AC5: V5 は正常移管と非管理者の拒否だけ。組織またぎと失敗時の巻き戻しがなく不十分。\n- AC6: V6 は伏せ字を検証していない。不十分。\n- AC7: V7 は枠の境界ちょうどと同時呼び出しを検証していない。不十分。\n- AC8: V8 は往復と改ざん1種だけ。期限切れ・期限ちょうど・形の崩れがなく不十分。\n- AC9: V9 に該当するテストなし。不十分。\n- AC10: V10 に該当するテストなし。不十分。\n- エンジンが検出したテストの兆候はなし。skip や `.only` はないが、そもそも検証が少ない。\n\n### E2E の要否\n- 不要（HTTP のないライブラリで、単体テストと SQLite のテスト用 DB で足りる）。ただしその単体テストが前述のとおり不足している。\n\n### 不足しているリスク\n- K1: 検索で他人の非公開メモが漏れる（実装の欠陥。再現済み）。\n- K2: LIKE のエスケープとプレースホルダーを確かめるテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行を確かめるテストがない。\n- K4: 作成・更新・削除・移管の途中で失敗したときの巻き戻しを確かめるテストがない。\n- K5: ログや例外に本文・署名・api_key が出ないことを確かめるテストがない。\n- K6: 組織またぎの移管の拒否を確かめるテストがない。\n- K7: 伏せ字を確かめるテストがない。\n- K8: 期限ちょうど・形の崩れ・署名違いのリンクを確かめるテストが不足している。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py と tests/test_notes.py を全文確認した。\n- `python3 -m unittest discover -s tests -t .` は 12 件が OK だった。\n- 再現スクリプトで、bob が alice の非公開メモを検索で取得できることを確認した（重大1）。update_note に空白だけの題名を渡すと ValidationError になることも確認した。\n- `aqdlc trace` と `history` を確認した。検証条件が弱められた形跡はなかった。ただし全 V は「AC を単体テストで確かめる」という記述だけで、具体性が低い。\n- gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

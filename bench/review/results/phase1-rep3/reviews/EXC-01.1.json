@@ -1,0 +1,49 @@
+{
+ "case": "EXC-01",
+ "rep": 1,
+ "sec": 33.0,
+ "exit": 0,
+ "cost_usd": 0.149578,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23648,
+  "cache_read_input_tokens": 124100,
+  "output_tokens": 4256,
+  "output_tokens_details": {
+   "thinking_tokens": 543
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23648,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3085,
+    "cache_read_input_tokens": 41627,
+    "cache_creation_input_tokens": 2154,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2154
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2e25bbfa\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1, R4 / 対応区分: 修正必須 / 内容: `get_note` が、存在するが見られないメモ（他の組織・他人の非公開）に対して `Forbidden` を返す。存在しないメモは `NotFound` を返す。仕様 R2 は、見られないメモはどれも `NotFound` にして存在を明かさないと定めている。 / 成立条件: 他の組織の利用者、または他人の非公開メモを見ようとする利用者が `get_note` を呼ぶ。 / 影響: 例外の種類の違いで、他の組織や他人の非公開メモの存在を推測できる（K1 の漏えい）。 / 確認した保証: `_visible` を通った後の再確認は `NotFound` だが、先頭の検査は `Forbidden` のまま。呼び出し元に例外を丸める層はない。 / 根拠: notes/service.py の `get_note`（`if not _visible(user, row): raise Forbidden(...)`）。`update_note` と `delete_note` は `NotFound` を返しており、実装内でも不統一。 / 提案: `row is None` と `not _visible` をまとめて `NotFound` にする。\n- [重大2] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` が、読み出しから書き込みの間に起きたタグの変更や権限・可視性の変更を検出できない。`UPDATE` の条件は version だけで、タグの置換は同じトランザクション内だが可視性は再確認していない。`transaction` の外で `_row` を読んで `title` と `body` を補完しているため、`title` だけ・`body` だけ更新する呼び出しで、`version` が最新でも他の更新が入ると古い値で上書きされる余地がある。 / 成立条件: version を渡しても、他の更新との間に挟まる読み出しの値を使う部分更新。 / 影響: 仕様の「後から書いた側が先の更新を消さない」が、部分更新では version の一致だけでは守られない場合がある。 / 確認した保証: `UPDATE` の `WHERE version = ?` で、渡された version が古ければ `Conflict` になる。ただし補完値が読んだ時点のものである点は、`BEGIN IMMEDIATE` 内で再読み出ししていないため未確認。 / 根拠: notes/service.py の `update_note`（`_row` の呼び出しが `transaction` の外）。 / 提案: 権限確認と `row` の読み出しを `transaction` の内側に移し、version の一致を内側で先に確かめる。\n- [重大3] 区分: テスト / 対象: AC1〜AC10、K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系の smoke test だけ。仕様が求める次の検証が一つもない。 / 成立条件: 該当なし（検証がない）。 / 影響: 重大1のような仕様違反を、gate が通ったまま見逃している。 / 根拠: tests/test_notes.py 全体。 / 提案: 下記の検証を追加する。\n  - 他の組織・他人の非公開メモが `NotFound` になること（K1）\n  - 一覧と検索で非公開メモが除かれること\n  - `%` と `_` を含む検索語の扱い、SQL インジェクション相当の入力、タグの OR 検索（K2）\n  - 各入力検証の境界値（題名100文字、タグ5個・20文字、`per_page` 50、`page` 0）\n  - 閲覧数が同時に正しく増えること（スレッドと `hooks`、K3）\n  - 更新の version 競合と、`before_write` による途中失敗でタグ・監査ログが残らないこと（K4）\n  - 管理者による更新・削除と非管理者の `Forbidden`\n  - 移管の組織またぎの拒否と、途中失敗時に元のままであること（K6）\n  - 監査ログの api_key 伏せ（8文字未満・8文字・末尾4文字、K7）\n  - `RateLimiter` の枠の境界（ちょうど window 秒）と同時呼び出し（`hook` 使用）\n  - 共有リンクの期限ちょうど・形の崩れ・署名改ざん（K8）\n  - 例外後に接続を再利用できること（AC10）\n  - ログに本文・署名・api_key が出ないこと（AC9）\n- [重大4] 区分: テスト / 対象: AC7, K3, 設計「テスト方針」 / 対応区分: 証拠不足 / 内容: 設計が用意した `service.hooks.before_write` と `RateLimiter.hook` の差し込み口を使うテストが皆無。並行実行を決定論的に再現する検証がなく、同時の閲覧・更新・呼び出しで更新や数が失われないことの証拠がない。 / 成立条件: 該当なし。 / 影響: R2（閲覧数）、R4（更新）、R7（制限）の同時実行の要求が未検証。 / 根拠: tests/ に `hooks` や `Thread` の使用がない（grep 相当で確認）。 / 提案: 重大3の同時実行のテストを、sleep ではなく `hook` 内の `Event` で順序を固定して書く。\n- [軽微1] 区分: 実装 / 対象: R1 / 対応区分: 改善提案 / 内容: `create_note` の `tags` 検査は `_validate` に集約されているが、`search_notes` は同じ検査を重複して書いている。 / 提案: 検査を共通関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` のみで不十分。境界値、タグの規則、失敗時に何も残らないこと、tags が文字列のときの拒否を確かめていない。\n- AC2: 不十分。閲覧数の増加も同時実行も見ておらず、実装にも `Forbidden` の誤りがある（重大1）。\n- AC3: 不十分。ページングの正常系1件と検索1件のみで、境界、`%` と `_`、OR 検索、範囲外の拒否、非公開の除外がない。\n- AC4: 不十分。所有者による更新と削除の正常系のみ。競合、`Forbidden`、`NotFound`、入力検証、削除の失敗時の伝播がない。\n- AC5: 不十分。正常系と非管理者の拒否のみ。組織またぎと途中失敗がない。\n- AC6: 不十分。`actor` と `action` しか見ておらず、`actor_key` の伏せ方を確認していない。\n- AC7: 不十分。限度超過と窓の外の正常系のみで、ちょうど window 秒の境界と同時呼び出しがない。\n- AC8: 不十分。往復と note_id の差し替えのみで、期限ちょうど、形の崩れ、署名改ざんがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip や弱いアサーションの改ざんは見当たらない。ただし内容が薄い。\n\n### E2E の要否\n- 不要（HTTP 層のないライブラリで、単体テストと並行実行のテストで足りる）。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを防ぐ検証がない。\n- K2: SQL インジェクションを防ぐ検証がない。\n- K3: 同時実行の検証がない。\n- K4: 途中失敗時の巻き戻しの検証がない。\n- K5: 機密情報の露出を防ぐ検証がない。\n- K6: 移管の組織またぎ・部分移管を防ぐ検証がない。\n- K7: api_key の伏せの検証が不十分。\n- K8: 共有リンクの期限・改ざん・形の崩れの検証が不足。\n\n### 確認したこと\n- spec.md と design.md を通読した。\n- `notes/*.py` と `tests/test_notes.py` をすべて読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が合格した。\n- `aqdlc.py trace` と `history` を確認した。検証条件の弱体化は見当たらなかった。\n- `$AQ gate` は実行していない。コードも変更していない。\n- 重大2は、トランザクション外の読み出しという構造から指摘している。実際に更新が失われる再現は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-06",
+ "rep": 3,
+ "judge_cost_usd": 0.0702137,
+ "judge_raw": "**判定**: 欠陥なしのケースです。変更は verify_link で現在時刻を先に求めるだけで、振る舞いは変わっていません。この変更に関する指摘はありませんでした。\n\n- 重大1: 実在する欠陥です。`$` と `.match` の組み合わせで、末尾に改行が付いたタグ（`\"abc\\n\"`）が検査を通ります。service.py の行 14・64・150 を見て、そのとおりだと確認しました。\n- 重大2: コードの欠陥の指摘ではなく、テストの不足だけを述べています。\n- 重大3: 実在する欠陥です。delete_note の認可判定がトランザクションの外にあり、DELETE に version や owner の条件がありません。移管が間に入ると、元の持ち主が他人のメモを消せます。\n- 軽微1: 欠陥の主張というより挙動への好みです。削除済みのメモに対して Conflict を返すのは、楽観的ロックの失敗として許容できます。\n- 軽微2: 仕様にない整合性の改善提案です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と .match により末尾改行付きタグが検査を通るのは、仕様に反する実在のバグ。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを述べており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note の認可がトランザクションの外にあり、移管との競合で元の持ち主が削除できる実在の競合。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"削除済みメモへの更新が Conflict になるのは許容範囲で、欠陥ではなく挙動への好み。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"list_notes の total と items のずれは仕様にない整合性の改善提案。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1と重大3は変更とは別の実在する問題として指摘されている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と .match により末尾改行付きタグが検査を通るのは、仕様に反する実在のバグ。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを述べており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note の認可がトランザクションの外にあり、移管との競合で元の持ち主が削除できる実在の競合。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "削除済みメモへの更新が Conflict になるのは許容範囲で、欠陥ではなく挙動への好み。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "list_notes の total と items のずれは仕様にない整合性の改善提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1と重大3は変更とは別の実在する問題として指摘されている。"
+ }
+}

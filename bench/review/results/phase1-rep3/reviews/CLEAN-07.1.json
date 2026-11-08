@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-07",
+ "rep": 1,
+ "sec": 51.3,
+ "exit": 0,
+ "cost_usd": 0.167572,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22693,
+  "cache_read_input_tokens": 114040,
+  "output_tokens": 6538,
+  "output_tokens_details": {
+   "thinking_tokens": 1849
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22693,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4348,
+    "cache_read_input_tokens": 36595,
+    "cache_creation_input_tokens": 6231,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6231
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d524f16c\n\n実装コードを読んだ範囲では、仕様に反する明確な欠陥は見つかりませんでした。ただし、検証がほとんどありません。`tests/test_notes.py` は正常系 12 件だけで、受け入れ条件の大半とリスクを確かめていません。そのため、重大な指摘はすべて「証拠不足」です。\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC3, AC4, AC5, K1, K6 / 対応区分: 証拠不足 / 内容: 認可を確かめるテストが1件もない。具体的に次のものがない。\n  - 他組織のメモ、他人の非公開メモ、存在しないメモが、どれも NotFound になること。\n  - 管理者が非公開メモを扱うと NotFound になること。\n  - 作成者でも管理者でもない者の update / delete が Forbidden になること。\n  - 一覧・検索に他人の非公開メモが含まれないこと。\n  - 移管で、他組織の移す元・移す先・管理者が Forbidden になること。\n  - 存在するのは `test_transfer_requires_admin` だけ。\n  / 成立条件: `_visible` / `_can_modify` / `transfer_notes` の条件を外しても、現在のテストは全部通る。 / 影響: 情報漏えい(K1, K6)を防ぐ条件が、回帰しても検出されない。 / 根拠: tests/test_notes.py 全体(組織が2つ目の利用者もいない)。notes/service.py:73-78, 98-106, 159-167 は条件を実装しているが、検証がない。 / 提案: 別組織の利用者、他人の非公開メモ、管理者、非公開メモを扱う管理者を使い、`get_note` / `list_notes` / `search_notes` / `update_note` / `delete_note` / `transfer_notes` で NotFound / Forbidden を検証するテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4, R10 / 対応区分: 証拠不足 / 内容: 失敗時に何も残らないこと、楽観的ロック、接続の復帰を確かめるテストがない。具体的に次のものがない。\n  - `hooks.before_write` を使った create / delete / transfer 途中の失敗の再現。\n  - 失敗後に何も残らないこと。\n  - 古い version での Conflict。\n  - 読み出しと書き込みの間に他の更新が入った場合の Conflict(後から書いた側が先の更新を消さない)。\n  - 例外後に同じ接続が使えること。\n  - 入力検証の境界値(題名100/101文字、空白だけの題名、本文10000文字、タグ5/6個、重複タグ、不正なタグ、文字列の tags)。\n  / 成立条件: `transaction()` のロールバックや UPDATE の `version` 条件を外しても、テストは通る。 / 影響: データ整合性(K4)と更新の消失(K3)が未検証。 / 根拠: tests/test_notes.py に `hooks` の使用がなく、`Conflict` を import すらしていない。設計書のテスト方針は差し込み口での再現を想定している。 / 提案: `service.hooks.before_write` を差し替えて例外を投げ、件数が不変で、接続がその後も使えることを検証する。Conflict は、update の `hooks.before_write` の中で別の接続から更新する形で決定論的に再現する。\n- [重大3] 区分: テスト / 対象: AC2, AC7, K3, R7 / 対応区分: 証拠不足 / 内容: 同時実行の検証と、時間枠の境界の検証が足りない。\n  - 閲覧数を複数スレッド(別接続)から同時に増やしても数え漏れがない、というテストがない。\n  - RateLimiter は、`hook` を使った同時の呼び出しで上限を超えないこと、と枠の開始からちょうど window 秒で新しい枠になること(window-ε では拒否)、のテストがない。\n  - 現在の `test_limit` は t=0 と t=61 だけで、境界(t=60)を確かめていない。\n  / 成立条件: `<=` / `>=` の誤りや、ロック除去、`BEGIN IMMEDIATE` 除去が検出されない。 / 影響: 数え漏れ・制限超過(K3)が未検証。 / 根拠: tests/test_notes.py:66-76。notes/ratelimit.py:19-27 の境界とロックは、コードを読む限りは正しい。 / 提案: ファイル DB と複数スレッドで閲覧数を検証し、`RateLimiter.hook` で競合を再現して `RateLimited` の件数を検証する。clock を使って window-ε / window の境界テストを追加する。\n- [重大4] 区分: テスト / 対象: AC3, AC6, AC8, AC9, K2, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 次の項目を確かめるテストがない。\n  - 検索で `%` / `_` / `\\` を普通の文字として扱うこと、SQL 断片を検索語に入れても漏れないこと、タグの OR 絞り込み。\n  - 一覧の page / per_page / sort の範囲外が ValidationError になること。\n  - `export_audit` の api_key の伏せ字(末尾4文字だけ残す、7文字以下は全部伏せる、8文字ちょうど)と、非管理者が Forbidden になること。\n  - 共有リンクの検証。期限ちょうど(`now == expires`)、期限の1秒前、署名の改ざん、形の崩れたリンク(改行付き、大文字16進、非数字、桁数違い、str 以外)がどれも Forbidden になること。\n  - ログ・例外メッセージに本文、署名、api_key が出ないこと。\n  - `test_export_audit` は action と actor しか見ておらず、伏せ字の assert がない。`test_tampered` は note_id の差し替えだけ。\n  / 成立条件: 伏せ字の処理を消しても、期限の比較を `>` にしても、LIKE の ESCAPE を外しても、テストは通る。 / 影響: 機密の露出や不正なリンクの通過が未検証。 / 根拠: tests/test_notes.py:57-61, 82-90。実装側の notes/service.py:128-140, 207-218 と notes/share.py:28-39 は仕様どおりに読める。 / 提案: 上の各項目を境界値つきで追加する。ログは `assertLogs` で、本文・署名・api_key が含まれないことを検証する。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 対応区分: 改善提案 / 内容: `delete_note`(notes/service.py:159-171)は、認可の判定をトランザクションの外で行い、トランザクション内で再確認しない。`delete_note` は version も取らない。判定後に `transfer_notes` や別の削除が割り込むと、元の所有者が移管済みのメモを消せる余地がある。 / 提案: トランザクション内で行を再取得して `_visible` / `_can_modify` を再判定する。または DELETE の条件に `owner_id` を入れる。\n- [軽微2] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `list_notes` に `page=10**30` を渡すと、OFFSET の計算で sqlite3 が OverflowError を出し、ValidationError にならない。 / 提案: page に現実的な上限を設けて ValidationError にする。\n- [軽微3] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: `transfer_notes` は、移す先の利用者が存在するかを、メモが1件もない場合に確認しない。メモがある場合は外部キー制約で失敗してロールバックされる。 / 提案: 移す先の存在を事前に確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成して取得する正常系と、空の題名の拒否だけで、不十分。境界値、タグ、失敗時に何も残らないことが未確認。\n- AC2: V2 は不十分。閲覧数の増加も、見えない場合の NotFound も、同時実行も確認していない。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで、不十分。範囲外の拒否、`%` / `_`、タグの OR、他人の非公開メモの除外が未確認。\n- AC4: V4 は所有者の update / delete の正常系だけで、不十分。Conflict、Forbidden、NotFound、タグの検証、削除の失敗時の動作が未確認。\n- AC5: V5 は件数が 2 であることと非管理者の拒否だけで、不十分。移管後の所有者、他組織の拒否、途中失敗時に元のままであることが未確認。\n- AC6: V6 は伏せ字を確認しておらず、不十分。\n- AC7: V7 は限度到達と t=61 での再開だけで、不十分。ちょうど window 秒の境界と、スレッドからの同時呼び出しが未確認。\n- AC8: V8 は往復と note_id の改ざんだけで、不十分。期限の境界、署名の改ざん、形の崩れ、期限切れが未確認。\n- AC9: V9 は不十分。機密情報が出ないことを確かめるテストが存在しない。\n- AC10: V10 は不十分。例外の後に接続を使い続けられることを確かめるテストが存在しない。\n- リスク K1〜K8: 対応する検証はどれも実質的に空洞。trace 上の VK* は `unit` に紐づくだけで、該当するテストが存在しない。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなく、テストの弱体化も `history` では見つからなかった(`bind` のみ)。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使う unit / integration で足りる。ただし並行実行のテストは、ファイル DB と複数接続・複数スレッドで行う必要がある。\n\n### 不足しているリスク\n- K1・K6: 認可、組織を越えた漏えい、移管の組織検査(重大1)\n- K3: 閲覧数と RateLimiter の同時実行、Conflict(重大2・3)\n- K4: ロールバックと全部移すか何も移さないか(重大2)\n- K2: LIKE のエスケープと SQL 断片の入力(重大4)\n- K5・K7・K8: 伏せ字、ログの機密、リンクの境界(重大4)\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が通った(出力はプロジェクト外には書いていない)。\n- notes/ の全ソース(db / service / ratelimit / share / errors)と tests/test_notes.py を読んだ。仕様の R1〜R10 と設計との差異をコードで確認した。実装コードに修正必須の欠陥は見つからなかった。\n- `$AQ trace` と `$AQ history --since 0` を実行した。テスト・検証条件の改ざんや弱体化はなかった。反証テストは無効のため、`passed_but_unchallenged` の状態。\n- `gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

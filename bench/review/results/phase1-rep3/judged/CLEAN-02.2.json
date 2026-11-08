@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0692697,
+ "judge_raw": "## 判定\n\nこのケースは欠陥なしです。変更は、入力検証の順番を入れ替えただけで、振る舞いは変わりません。\n\n### 各指摘の分類\n\n- **重大1**: `real_other` です。`TAG_RE` は `$` で終わるので、`re.match` では末尾が改行のタグ（`\"abc\\n\"`）を通します。仕様は「英小文字・数字・ハイフンの1〜20文字」なので、改行を許すのは仕様違反です。レビュー担当は再現も実行して確かめています。順番の入れ替えで入った欠陥ではなく、元からある実在のバグです。\n- **重大2**: `test_gap` です。テストの不足だけを指摘していて、コードの欠陥の主張ではありません。\n- **重大3**: `test_gap` です。api_key の伏せ字と機密情報の非表示を確かめるテストがない、という指摘です。\n- **軽微1**: `real_other` です。権限確認はトランザクションの外で行われます。そのため、確認の後に削除や移管が入ると、`delete_note` は 0 行でも成功扱いになり、監査ログが残ります。`update_note` は version 条件の UPDATE の `rowcount` で Conflict になります。ただ、削除と移管の競合では、仕様の「途中で他の更新が入った場合は Conflict」の趣旨から外れる部分があり、実在する欠陥です。\n- **軽微2**: `real_other` です。`page` に巨大な整数を渡すと、OFFSET が SQLite の整数範囲を超えて OverflowError になり得ます。仕様は範囲外を ValidationError とするので、仕様に反します。ただし、レビュー担当は実行して確かめていません。\n\n### 欠陥の検出\n\n欠陥なしのケースなので、`matches_defect` は使いません。`defect_detected` は `n/a` です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE を $ 付きの re.match で使うため末尾改行のタグを通すという、仕様に反する実在のバグ（再現済み）で、順番の入れ替えとは無関係。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"境界・異常系・同時実行のテスト不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字と機密情報の非表示を確かめるテストがない、という指摘である。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限確認がトランザクションの外にあるため、削除は競合時に 0 行でも成功扱いとなり監査ログが残る、実在する競合の穴。\"},\n  {\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"page が非常に大きいと OFFSET が範囲を超えて OverflowError になり得て、ValidationError という仕様に反する（実行での確認はなし）。\"}\n ],\n \"defect_detected\": \"n/a\",\n \"matched_label\": null,\n \"note\": \"欠陥なしのケース。重大1は順番の入れ替えとは無関係の、元からあるタグ検査のバグ。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE を $ 付きの re.match で使うため末尾改行のタグを通すという、仕様に反する実在のバグ（再現済み）で、順番の入れ替えとは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "境界・異常系・同時実行のテスト不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字と機密情報の非表示を確かめるテストがない、という指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限確認がトランザクションの外にあるため、削除は競合時に 0 行でも成功扱いとなり監査ログが残る、実在する競合の穴。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "page が非常に大きいと OFFSET が範囲を超えて OverflowError になり得て、ValidationError という仕様に反する（実行での確認はなし）。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケース。重大1は順番の入れ替えとは無関係の、元からあるタグ検査のバグ。"
+ }
+}

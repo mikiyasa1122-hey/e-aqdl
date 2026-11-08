@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 2,
+ "sec": 34.0,
+ "exit": 0,
+ "cost_usd": 0.12144950000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 16356,
+  "cache_read_input_tokens": 123995,
+  "output_tokens": 4361,
+  "output_tokens_details": {
+   "thinking_tokens": 735
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16356,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2716,
+    "cache_read_input_tokens": 38852,
+    "cache_creation_input_tokens": 3679,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3679
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3 (notes/service.py:120 `list_notes`) / 対応区分: 修正必須 / 内容: page の検査が `page < 0` で、page=0 を通してしまう。仕様は「page は1以上、範囲外は ValidationError」。 / 成立条件: `list_notes(..., page=0)` を呼ぶ。 / 影響: ValidationError にならず、OFFSET が負になって先頭ページが返る。入力拒否の規則に違反する。 / 根拠: 実行して確認した。`list_notes(conn, u, page=0)` が例外を出さず items を返した。上流の検証や既存テストでは防がれていない。 / 提案: `page < 1` に直す。page=0・-1 が ValidationError になるテストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 (notes/service.py:14, 64, 150 の `TAG_RE`) / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。Python の `$` は末尾の改行の直前にも一致するため、`\"ab\\n\"` のように末尾が改行のタグが通る。 / 成立条件: tags に末尾が `\\n` の文字列を渡す（作成・更新・検索のすべて）。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に違反するタグが保存される。保存されるタグの規則が崩れる。 / 根拠: 実行して確認した。`create_note(..., tags=['ab\\n'])` が成功して id=2 を返した。share.py は `fullmatch` を使っており、同じ落とし穴を避けている。 / 提案: `TAG_RE.fullmatch` にするか、`\\Z` を使う。末尾が改行のタグが拒否されるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC10 とリスク K1〜K8（tests/test_notes.py 全体、12件） / 対応区分: 証拠不足 / 内容: 正常系の1本ずつだけで、仕様が必須とする異常系・境界値・並行系の検証がほぼない。trace ではすべての V が「合格」になっているが、実体は空洞に近い。 / 成立条件: 次の検証が1つもない。\n  - 他組織・他人の非公開メモが NotFound になること（K1）。\n  - 閲覧数の同時加算（AC2・K3）。\n  - 競合（Conflict）と version の不一致（AC4）。\n  - 非作成者の Forbidden。\n  - 失敗時のロールバック（hooks.before_write で途中失敗させる。AC1・AC5・AC10・K4）。\n  - 検索の `%` `_` とインジェクション文字列（K2）。\n  - page・per_page・sort の範囲外（AC3）。\n  - api_key の伏せ字（AC6・K7。現状は actor 名しか確かめていない）。\n  - RateLimiter の枠の境界（ちょうど window 秒）と同時の呼び出し（AC7）。\n  - 共有リンクの期限ちょうど、期限切れ、形の崩れ（AC8）。\n  - ログ・例外に機密情報が出ないこと（AC9）。\n  - 例外の後に接続を使い続けられること（AC10）。\n / 影響: 重大1・2のような受け入れ条件の違反を gate が検出できなかった。K1・K3・K4・K7・K8 はテストで確かめられていない。 / 根拠: tests/test_notes.py 全体を読んだ。設計のテスト方針にある hooks と RateLimiter.hook を使うテストが0件。 / 提案: 上記の AC ごとに、拒否と境界の検証、スレッドと hook による決定論的な競合の検証、失敗の注入によるロールバックの検証を追加する。sleep には頼らない。\n\n- [軽微1] 区分: 実装 / 対象: R4 (notes/service.py:158-167 `update_note`) / 対応区分: 改善提案 / 内容: 認可の判定（_visible・_can_modify）がトランザクションの外にある。動作は version 条件で守られている。 / 提案: 認可の判定もトランザクションの中で読み直すと、移管との競合に強くなる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成の成功と空の題名の拒否だけを確認している。本文・タグ・上限の境界、tags が文字列の場合、ロールバックを確認していない。重大2のとおり実装にも欠陥があり、不十分。\n- AC2: V2 は同じ作成者による閲覧だけ。他組織・非公開の NotFound、閲覧数の加算、同時加算を確認していない。不十分。\n- AC3: V3 は一覧の1ページ目と検索の正常系だけ。page=0 などの範囲外、% と _、タグの OR を確認しておらず、重大1を見逃している。不十分。\n- AC4: V4 は作成者による更新・削除の正常系だけ。Conflict、Forbidden、管理者、タグの更新を確認していない。不十分。\n- AC5: V5 は正常系と非管理者の拒否だけ。別の組織への移管、全部か何もしないか（hook による失敗）を確認していない。不十分。\n- AC6: V6 は actor 名だけを確認している。api_key の伏せ字は確認していない。不十分。\n- AC7: V7 は単純な超過と枠の更新（61秒後）だけ。ちょうど window 秒の境界、スレッド同時を確認していない。不十分。\n- AC8: V8 は成功と改ざんの1ケースだけ。期限ちょうど、期限切れ、形の崩れを確認していない。不十分。\n- AC9: V9 は対応するテストがない。\n- AC10: V10 は対応するテストがない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。`history` では検証条件を弱めた変更は見つからなかった（bind だけ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使った unittest が最も近い検証になる。ただし並行・ロールバックの検証は hook を使った統合テストとして追加が必要（重大3）。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K7・K8: テストで確かめられていない（重大3）。\n- 実装で確認できたこと（コードの読み取りによる）: SQL はプレースホルダーと ESCAPE を使っている。閲覧数は `views = views + 1` を `BEGIN IMMEDIATE` の中で実行している。更新は version 条件の UPDATE で判定している。共有リンクは `fullmatch`、`compare_digest`、期限の `>=` を使っている。いずれも実装は妥当だが、テストがない。\n\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が OK だった。\n- 再現の実行で、`list_notes(page=0)` が例外を出さず、`create_note(tags=['ab\\n'])` が成功することを確認した。\n- `history --since 0` で、検証条件の弱体化がないことを確認した。\n- `trace` で、全 V が「合格・反証未実施」と記録されていることを確認した。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

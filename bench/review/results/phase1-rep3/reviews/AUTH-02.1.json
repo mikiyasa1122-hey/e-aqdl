@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-02",
+ "rep": 1,
+ "sec": 36.4,
+ "exit": 0,
+ "cost_usd": 0.16396260000000001,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 26855,
+  "cache_read_input_tokens": 120266,
+  "output_tokens": 4450,
+  "output_tokens_details": {
+   "thinking_tokens": 586
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 26855,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3147,
+    "cache_read_input_tokens": 41325,
+    "cache_creation_input_tokens": 2405,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2405
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7a4e3663\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 / 対応区分: 修正必須 / 内容: `list_notes` が他人の非公開メモを除外していない。 / 成立条件: 同じ組織の利用者 A が非公開メモを作り、同じ組織の B が `list_notes` を呼ぶ。 / 影響: B の一覧に A の非公開メモの題名と ID が出て、`total` にも数えられる。仕様の「他人の非公開メモは含めない」に反し、K1 の漏えいにあたる。 / 確認した保証: 上流に絞り込みはない。`search_notes` は `private = 0 OR owner_id = ?` を持つが、`list_notes` にはない。 / 根拠: `notes/service.py` の `list_notes` は `where = \"org_id = ?\"` だけ。再現として、`create_note(a, 'secret', 'x', private=True)` の後に `list_notes(c, b)` を呼ぶと `items` に secret が入り `total` は 1 になった。 / 提案: `where` を `org_id = ? AND (private = 0 OR owner_id = ?)` にし、引数に `user[\"id\"]` を足す。COUNT と SELECT の両方に適用する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち、V1, V2, V4, V5, V6, V7, V8, V9, V10, VK1〜VK8 / 対応区分: 証拠不足 / 内容: 仕様の異常系・境界値・並行・失敗注入の検証がほぼない。テストは 12 件だけで、正常系と一部の拒否しか確かめていない。 / 成立条件: テストに次のものがない。\n  - 他組織・他人の非公開メモが NotFound になること\n  - 閲覧数の並行実行\n  - Conflict、および読み出しから書き込みの間に入る更新\n  - 更新・削除で Forbidden になること\n  - 管理者が非公開メモを扱えないこと\n  - 移管の組織またぎと途中失敗の巻き戻し\n  - `create_note` のタグ挿入失敗時の巻き戻し\n  - 検索での `%` / `_` と SQL インジェクション\n  - 検索のタグ OR\n  - `api_key` の伏せ字(8 文字未満を含む)\n  - RateLimiter の枠の境界ちょうどと並行実行\n  - 共有リンクの期限境界・期限切れ・形の崩れ\n  - ログに本文・署名・`api_key` が出ないこと\n  - 例外後の接続の再利用\n  / 影響: 重大1の欠陥(`list_notes` の非公開メモ漏れ)を、テストが通ったまま見逃している。`hooks.before_write` と `RateLimiter.hook` の差し込み口は用意されているが、テストから使われていない。 / 根拠: `tests/test_notes.py` 全体(90 行)。`test_list_first_page` は非公開メモを使っていない。`test_tampered` は改ざんの 1 例だけ。`test_export_audit` は `actor_key` を確かめていない。 / 提案: 上に挙げた各規則に、受け入れ条件ごとのテストを追加する。並行実行は `hooks` と `hook` を使って決定論的に再現する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `delete_note` の存在・権限チェックがトランザクションの外にある。トランザクション内で再確認も行っていない。同時に 2 つの削除が走ると、2 つ目も成功扱いになり、監査ログが二重に残る。 / 成立条件: 2 つのスレッドが同じメモを同時に削除する。または、削除の前に移管・非公開化などで権限が変わる。 / 影響: 存在しないメモの削除が NotFound にならず、削除済みメモの監査ログが重複する。移管直後に旧所有者が削除できる場合もある(`_can_modify` が古い行で判定される)。 / 確認した保証: `update_note` は UPDATE の WHERE に version を入れているため防げる。`delete_note` にはそれに相当するものがない。 / 根拠: `notes/service.py` の `delete_note`。`DELETE FROM notes WHERE id = ?` の rowcount を見ておらず、`BEGIN IMMEDIATE` の後に `_row` を取り直さない。 / 提案: `transaction` の中で `_row` を取り直し、`_visible` と `_can_modify` を再判定して、行がなければ NotFound にする。\n- [重大4] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` の `_can_modify` 判定が、トランザクションの外で読んだ古い行に基づく。移管やメモの変更が間に入っても、UPDATE は version だけで成否を判定する。 / 成立条件: 読み出し後・書き込み前に `transfer_notes` が走る。移管でも `version` は +1 されるので、通常は Conflict になる。ただし呼び出し側が移管後の version を渡した場合は通る。 / 影響: 旧所有者が、移管後の version を知っていれば更新できる。 / 確認した保証: version が不一致なら Conflict になるので、影響は限定的である。 / 根拠: `notes/service.py` の `update_note` で、`_row` と `_can_modify` が `transaction` の外にある。 / 提案: 重大3と同様に、トランザクション内で行を取り直して認可を再判定する。\n\n- [軽微1] 区分: テスト / 対象: 全体 / 対応区分: 改善提案 / 内容: `ratelimit.hit` が `self.hook()` を `n >= limit` の判定の前に呼ぶ。そのため差し込み口が、ロックを持った状態での並行実行の再現にしか役立たない。 / 提案: 競合の再現に使うなら、ロックの外にも差し込み口を設ける。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1(V1, VK4): 正常な作成と空題名の拒否だけで不十分。本文・タグの境界、タグの規則、途中失敗でも何も残らないことを確かめていない。\n- AC2(V2, VK1): 作成者本人による取得しか確かめておらず、不十分。他組織・他人の非公開メモの NotFound や閲覧数の並行実行がない。\n- AC3(V3, VK2): 一覧の最初のページと検索の 1 例だけで、不十分。非公開メモの除外、範囲外の入力、`%` / `_`、インジェクション、タグ OR がない。このために重大1の欠陥を見逃している。\n- AC4(V4, VK3): 所有者の更新・削除の正常系だけで、不十分。Conflict、Forbidden、管理者の扱い、削除の巻き戻しがない。\n- AC5(V5, VK6): 移管の正常系と非管理者の拒否だけで、不十分。組織またぎと途中失敗がない。\n- AC6(V6, VK7): `actor_key` を確認していないため不十分。\n- AC7(V7): 上限超過と枠の更新だけで、不十分。枠のちょうどの境界と、複数スレッドの同時呼び出しがない。\n- AC8(V8, VK8): 往復と改ざん 1 例だけで、不十分。期限の境界、期限切れ、形の崩れがない。\n- AC9(V9, VK5): 検証が存在しない。\n- AC10(V10): 検証が存在しない。\n- エンジンが検出したテストの兆候: なし。gate は合格しているが、反証テストは無効のため、欠陥を検出できる証拠にはならない。\n\n### E2E の要否\n- 不要。外部の入出力を持たない、ライブラリの単体テストの範囲である。ただし単体テストでの並行・失敗注入の検証が必要である(重大2)。\n\n### 不足しているリスク\n- K1: `list_notes` の漏えい(重大1)。\n- K3: 削除・更新の認可とトランザクション境界(重大3、重大4)。\n- K2, K4〜K8: コード上は大きな欠陥を見つけていないが、テストでの確認がない(重大2)。\n\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を通読した。\n- `$AQ trace` と `$AQ history` を確認した。検証条件の弱体化は見当たらなかった。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12 件が合格した。\n- 再現スクリプトで、`list_notes` が他人の非公開メモを返すことを確認した。\n- 重大3・重大4の同時実行そのものは再現しておらず、コードの経路からの判断である。",
+ "files_changed": [],
+ "valid": true
+}

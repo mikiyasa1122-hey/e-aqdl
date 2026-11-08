@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 3,
+ "sec": 36.7,
+ "exit": 0,
+ "cost_usd": 0.1112185,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13782,
+  "cache_read_input_tokens": 119145,
+  "output_tokens": 4416,
+  "output_tokens_details": {
+   "thinking_tokens": 733
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13782,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3248,
+    "cache_read_input_tokens": 36122,
+    "cache_creation_input_tokens": 3816,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3816
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K1, K6 / 対応区分: 修正必須 / 内容: `transfer_notes`（notes/service.py の `transfer_notes`）は、移す先 `to_user` の組織を検査していない。検査しているのは `admin[\"role\"]` と `from_user[\"org_id\"] == admin[\"org_id\"]` だけ。 / 成立条件: 管理者が `to_user` に別組織の利用者を渡す。`to_user` が存在する利用者かも確かめていない。 / 影響: 自組織のメモの `owner_id` が他組織の利用者に変わる。仕様の「移す先・元・管理者がすべて同じ組織のときだけ（それ以外は Forbidden）」に反する。K6（組織の外にメモが渡る）が実現してしまう。 / 確認した保証: 呼び出し元や DB に組織の検査はない。外部キーは `users.id` の存在だけを見ていて、組織は見ていない。 / 根拠: service.py の `transfer_notes` に `to_user[\"org_id\"]` の参照がない。 / 提案: `to_user[\"org_id\"] != admin[\"org_id\"]` なら Forbidden にする。この検査はトランザクションを開始する前に行う。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10 と K1〜K8 の大半 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほとんどが正常系の1ケースだけ。仕様が要求する次の検証が1つもない。 / 成立条件: 以下の「受け入れ条件ごとの検証の妥当性」のとおり。 / 影響: 重大1のようなバグがあるのにテストが通っている。K1〜K8 を確かめた証拠がない。 / 根拠: 12件のテストが通ることを確認した。AC ごとの有無は下記に書いた。 / 提案: 少なくとも次を追加する。\n  - 他組織・他人の非公開メモが NotFound になること、管理者でも非公開メモが NotFound になること、他人が更新・削除すると Forbidden になること\n  - 古い version で Conflict になること、`hooks.before_write` で更新の競合を再現すること\n  - 別々の接続・スレッドからの閲覧数の加算\n  - 作成・移管・削除の途中で失敗させたときの巻き戻し\n  - 入力の境界値（題名100/101文字、タグ5/6個、不正なタグ、`tags=\"abc\"`、per_page 0/51、sort の不正値）\n  - `%` `_` と SQL 文字列を含む検索語\n  - RateLimiter の枠の境界（ちょうど window 秒）と、スレッドからの同時呼び出し\n  - 共有リンクの期限ちょうど、形の崩れ、改ざん\n  - api_key の伏せ字（8文字未満を含む）\n  - ログと例外に本文・署名・api_key が出ないこと\n  - 例外の後も接続を使えること\n- [重大3] 区分: テスト / 対象: AC5, AC8, AC6, AC7 のテストの空洞化 / 対応区分: 証拠不足 / 内容: 既存のテストの一部は、確かめるべき内容を確かめていない。 / 根拠: `test_transfer` は件数が2であることしか見ていず、所有者が変わったことも他組織への移管の拒否も見ていない。`test_export_audit` は api_key の伏せ字を一切見ていない（AC6 / K7）。`test_tampered` は note_id を書き換えるだけで、署名の改ざんや期限の境界を見ていない。`test_limit` は枠の境界と並行実行を見ていない。 / 提案: 重大2のテスト追加と合わせて、各テストに結果の中身を確かめるアサーションを入れる。重大1を外したら失敗するテストを必ず含める。\n- [重大4] 区分: 実装 / 対象: R4, K3, R5 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、認可（`_visible` / `_can_modify`）をトランザクションの外で判定している。 / 成立条件: 判定の後、トランザクションに入る前に `transfer_notes` が `owner_id` を変える。 / 影響: 旧所有者が、すでに自分のものではないメモを更新できる。ただし version が合っている必要があり、`update_note` は version を `transfer_notes` が `version + 1` するので、古い version なら Conflict で防げる。`delete_note` には version 検査がなく、この場合は削除がそのまま通る。 / 確認した保証: `get_note` は同じ検査をトランザクション内でやり直している。`update_note` と `delete_note` にはそれがない。 / 根拠: service.py の `delete_note` は、`_row` を取った後に `with transaction` に入り、`DELETE ... WHERE id = ?` を認可の再確認なしで実行する。この実行順は確認した。実際の並行再現はしていない。 / 提案: トランザクション内で `_row` を取り直して `_visible` / `_can_modify` を再判定してから書く。\n\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: 共有リンクの検証は note_id を `int()` に変換してから署名を計算するので、`007.…` のような先頭ゼロ付きのリンクが `7` と同じ署名で有効になる。仕様の形式は満たすが、同じメモに複数の有効なリンクが存在することになる。 / 提案: 正規形（`str(int(x)) == x`）でなければ Forbidden にする。\n- [軽微2] 区分: 設計 / 対象: R2 / 対応区分: 改善提案 / 内容: `get_note` では、存在するメモも閲覧数の加算のたびに書き込みトランザクションを取る。そのため閲覧が書き込みのロックを待つ。仕様上は問題ない。 / 提案: 現状のままでよい。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空題名1件だけ。境界値（題名100/101文字、タグ数、不正なタグ、文字列のタグ）と、途中失敗で何も残らないことを確かめていないため不十分。\n- AC2: V2 は同一ユーザーの閲覧だけ。他組織・他人の非公開メモの NotFound も、同時閲覧の加算も確かめていないため不十分。\n- AC3: V3 はページ分けと単純な検索だけ。範囲外の入力の拒否、`%` と `_`、タグの OR、SQL を含む検索語、非公開メモの除外が未検証のため不十分。\n- AC4: V4 は作成者の正常系だけ。Forbidden、Conflict、非公開メモ、削除失敗時の巻き戻しが未検証のため不十分。\n- AC5: V5 は件数だけ。所有者の変化、他組織への移管の拒否、失敗時に元のままを確かめていないため不十分。\n- AC6: 伏せ字を確かめるアサーションがなく、不十分。\n- AC7: 限度を超えたときと枠が過ぎたときの2点だけ。ちょうど window 秒の境界と同時呼び出しが未検証のため不十分。\n- AC8: 往復と note_id の書き換えだけ。期限ちょうど、署名の改ざん、形の崩れが未検証のため不十分。\n- AC9, AC10: 対応するテストがなく、不十分。\n- エンジンが検出したテストの兆候: なし（skip、`.only`、アサーションなしのテストは見つからなかった）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest が検証の単位になる。ただし SQLite の一時ファイルを使い、別々の接続・スレッドからの並行テストは必要（重大2）。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいのテストがない。\n- K2: SQL インジェクションのテストがない。\n- K3: 同時の更新・閲覧・呼び出しのテストがない。\n- K4: 途中の失敗による不整合のテストがない。\n- K5: 機密情報の露出のテストがない。\n- K6: 他組織への移管（重大1）のテストがない。\n- K7: api_key の伏せ字のテストがない。\n- K8: 期限切れ・形の崩れたリンクのテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK。\n- `aqdlc history --since 0` を確認した。実装担当の `impl-map` と `bind` の操作が並んでいる。検証条件の弱体化は見当たらなかった。\n- 重大1・4は、コードの経路から立証した。実際の再現は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

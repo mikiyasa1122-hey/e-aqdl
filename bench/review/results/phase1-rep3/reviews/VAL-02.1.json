@@ -1,0 +1,49 @@
+{
+ "case": "VAL-02",
+ "rep": 1,
+ "sec": 36.3,
+ "exit": 0,
+ "cost_usd": 0.1387736,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20991,
+  "cache_read_input_tokens": 117836,
+  "output_tokens": 4301,
+  "output_tokens_details": {
+   "thinking_tokens": 615
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20991,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2876,
+    "cache_read_input_tokens": 38776,
+    "cache_creation_input_tokens": 2348,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2348
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f2b7a217\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: 作成と更新で、タグの個数の上限（5個、重複も数える）を検査していない。`service._validate`（service.py:56-63）はタグ1個ずつの形式しか見ず、`TAGS_MAX` は `search_notes` でしか使っていない。また `TAG_RE` は `^...$` と `re.match` の組み合わせのため、末尾に改行のあるタグ（`\"ab\\n\"`）を通す（service.py:14, 62）。 / 成立条件: `create_note` または `update_note` に6個以上のタグ、または改行付きのタグを渡す。 / 影響: 仕様の入力検証に反するデータが保存される。上限を超えた6個のタグと、改行付きのタグが保存される。 / 根拠: 実行して確かめた。`create_note(..., [\"a\"]*6)` と `[\"a\",\"b\",\"c\",\"d\",\"e\",\"f\"]` が ValidationError にならず保存され、`get_note` が6個のタグを返した。`[\"ab\\n\"]` も保存された。上流にこの検査はない。DB の制約もない。 / 提案: `_validate` で `len(tags) > TAGS_MAX` を拒否し、`TAG_RE.fullmatch` に変える（`search_notes` も同じ関数を使う）。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8, R2/R4/R7 の同時実行 / 対応区分: 証拠不足 / 内容: 受け入れ条件の大半を確かめるテストがない。tests/test_notes.py は正常系中心の約15件だけである。次のものがない。 / 成立条件: （検証の欠落。上記の実装バグも既存のテストでは検出できない。） / 影響: 認可・競合・ロールバックを壊しても gate が通る。trace の「合格」は空洞化している。 / 根拠: test_notes.py を全文確認した。`service.hooks.before_write` と `RateLimiter.hook` は設計で用意されているが、どのテストも使っていない。足りないものは次のとおり。\n  - AC1・K4: 入力検証の境界値（タグ6個・不正なタグ・title 100/101文字・空白のみ・body 10000/10001文字）と、途中で失敗したときに何も残らないこと。\n  - AC2・K1・K3: 他の組織・他人の非公開メモが NotFound になること、閲覧数が同時でも漏れないこと。\n  - AC3・K2: page/per_page/sort の範囲外、`%` と `_` の扱い、タグの OR 絞り込み、`' OR 1=1` のような入力。\n  - AC4・K3: Conflict（古い version、読み出しと書き込みの間の割り込み）、Forbidden（他人・member）、管理者が非公開メモを扱えないこと、削除の失敗が呼び出し側に伝わること。\n  - AC5・K6: 他の組織への移管が Forbidden になること、途中で失敗したら元のままになること。\n  - AC6・K7: api_key の伏せ字（8文字未満、8文字、長い鍵）。既存の `test_export_audit` は action と actor しか見ていない。\n  - AC7: 枠の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出し。\n  - AC8・K8: 期限ちょうど、期限切れ、形の崩れたリンク、署名が16進でないもの、改行付きのもの。\n  - AC9・K5: ログや例外に本文・署名・api_key が出ないこと。\n  - AC10: 例外の後も接続が使えること。\n  / 提案: 上記を、決定論的に再現する形（hooks とフェイクの clock、別スレッド・別接続、`BEGIN` を持つ別接続による割り込み、`assertLogs`）で追加する。条件を外すと失敗することも確かめる。\n- [重大3] 区分: テスト / 対象: R9, AC9, K5 / 対応区分: 証拠不足 / 内容: ログと例外に機密情報が出ないことを確かめるテストが1件もない。 / 成立条件: （検証の欠落。） / 影響: 将来ログに本文・署名・api_key が混ざっても検出できない。実装は現状 ID のみを出しており、実装の欠陥は見つからなかった。 / 根拠: `assertLogs` を使うテストがなく、tests/test_notes.py に例外メッセージを検査する箇所もない。 / 提案: 作成・閲覧・共有リンクの作成と検証・失敗時に、`assertLogs` で記録された全文に本文・署名・api_key が含まれないことを検査する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` は認可の確認（`_row`, `_visible`, `_can_modify`）をトランザクションの外で行う。そのため、確認後にメモが非公開に変わっても、古い所有者の判断で更新される。version 条件で多くは Conflict になるので実害は小さい。 / 提案: 認可の確認をトランザクションの内側（`BEGIN IMMEDIATE` の後）に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。タグ個数の上限が未実装なのに、検証が通っている。ロールバックの検証もない。\n- AC2: 不十分。見え方のテストも、同時の閲覧数のテストもない。\n- AC3: `test_list_first_page` と `test_search` は正常系だけで不十分。範囲外、`%` や `_`、タグ、SQL インジェクションがない。実装は、プレースホルダー、LIKE の ESCAPE、固定の sort 表になっており、コード上は妥当と読めた。\n- AC4: `test_update_by_owner` と `test_delete_by_owner` は正常系だけで不十分。Conflict・Forbidden・競合がない。\n- AC5: `test_transfer` と `test_transfer_requires_admin` だけで不十分。組織をまたぐ拒否と、途中失敗のロールバックがない。\n- AC6: 不十分。伏せ字を確かめるテストがない。実装は規則どおりに読めた。\n- AC7: `test_limit` は基本の動作だけで不十分。ちょうど window 秒の境界と、スレッドの同時呼び出しがない。\n- AC8: `test_roundtrip` と `test_tampered` だけで不十分。期限の境界、形の崩れ、期限切れがない。実装（fullmatch、`compare_digest`、`>=` で期限判定）は妥当。\n- AC9: テストなしで不十分（重大3）。\n- AC10: テストなしで不十分。\n- エンジンが検出したテストの兆候: なし。ただし、`git diff` で見ると tests/ と notes/ は新規の未追跡で、検証条件の弱体化の履歴は確認していない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest で足りる。ただし、同時実行と途中失敗の再現は hooks を使った決定論的なテストが必須。\n\n### 不足しているリスク\n- なし（K1〜K8 は仕様に列挙済みで、検証が足りないものは重大2に記載した）。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を全文読んだ。\n- `aqdlc trace` で、すべての要求が「合格・反証未実施」になっていることを確認した。\n- 一時的なインメモリ DB で `create_note` に6個のタグと改行付きのタグを渡し、保存されることを再現した。\n- gate と全テスト（unittest）の再実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

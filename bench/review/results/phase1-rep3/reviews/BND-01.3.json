@@ -1,0 +1,49 @@
+{
+ "case": "BND-01",
+ "rep": 3,
+ "sec": 42.3,
+ "exit": 0,
+ "cost_usd": 0.1114452,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14103,
+  "cache_read_input_tokens": 120872,
+  "output_tokens": 4293,
+  "output_tokens_details": {
+   "thinking_tokens": 791
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14103,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2713,
+    "cache_read_input_tokens": 37422,
+    "cache_creation_input_tokens": 2843,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2843
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 71ec4f30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: `list_notes` が per_page=51 を受け付ける。 / 成立条件: `per_page=51` を渡す。 / 影響: 仕様は 1〜50 で、範囲外は ValidationError。51 件を返してしまう。 / 根拠: `notes/service.py:122` が `1 <= per_page <= PER_PAGE_MAX + 1` になっている。`list_notes(c,u,per_page=51)` が例外にならず `per_page: 51` を返すのを実行で確認した。 / 提案: `PER_PAGE_MAX + 1` を `PER_PAGE_MAX` にする。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査が末尾の改行を通す。 / 成立条件: `tags=[\"ab\\n\"]` のように、末尾が改行のタグを渡す。 / 影響: `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使うと、`$` が末尾の改行の手前にも一致する。規則外のタグが保存され、検索の絞り込みにも使える。 / 根拠: `notes/service.py:14`, `:64`, `:150`。`create_note(..., [\"ab\\n\"])` がメモ ID 1 を返すのを実行で確認した。 / 提案: `fullmatch` に変える。`share.py` は同じ理由で `fullmatch` を使っている。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心の 12 件だけで、受け入れ条件を確かめていない。次の検証がない。\n  - 題名・本文・タグの境界値と異常系（AC1）。\n  - 作成途中の失敗でロールバックされること（hooks.before_write を使う）。\n  - 他の組織・他人の非公開メモが NotFound になること（AC2, K1）。\n  - 閲覧数の並行増加（AC2）。\n  - 一覧の範囲外（AC3）。\n  - 検索の `%`・`_`・タグの OR・SQL インジェクション（AC3, K2）。\n  - 更新の Conflict と並行更新（AC4）。\n  - 削除と移管の失敗時に元のままであること（AC4, AC5）。\n  - 組織をまたぐ移管の拒否（K6）。\n  - api_key の伏せ字（AC6, K7）。\n  - RateLimiter の枠の境界ちょうどと並行呼び出し（AC7）。\n  - 共有リンクの期限ちょうど・形の崩れ（AC8, K8）。\n  - ログに機密情報が出ないこと（AC9）。\n  - 例外の後も接続を使えること（AC10）。\n  / 成立条件: 重大 1・2 の欠陥が既存テストをすべて通過している。 / 影響: 仕様のリスクがほぼ未検証で、欠陥があっても気づけない。 / 根拠: `tests/test_notes.py` 全 90 行。`python3 -m unittest` は 12 件が通った。 / 提案: 上の各項目について、決定論的なテストを追加する。並行系は `service.hooks`・`RateLimiter.hook` と、`threading.Barrier` または別接続を使う。\n- [重大4] 区分: テスト / 対象: AC4, AC5, K3, K4 / 対応区分: 証拠不足 / 内容: 並行と途中失敗の差し込み口（hooks）を使うテストが 1 つもない。 / 成立条件: 同時の更新、または書き込み途中の失敗が起きる。 / 影響: 実装は更新の WHERE に version を入れ、BEGIN IMMEDIATE で囲んでいるが、これを外しても全テストが通る。 / 根拠: `tests/` に hooks・threading の使用がない。 / 提案: before_write で別接続から先に更新し、Conflict になることを確かめる。transfer と create の途中で例外を起こし、何も残らないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `007.123.sig` のように、先頭にゼロが付いた note_id は int にして署名するため、同じ署名で通る。仕様は「10進の数字だけ」なので違反ではない。 / 提案: 必要なら、正規形（先頭のゼロなし）だけを通す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V は正常系と空の題名だけで不十分。タグと本文の境界、ロールバックがない。タグ検査の欠陥（重大2）を検出できない。\n- AC2: 作成後の閲覧と、削除後の NotFound だけ。他の組織・非公開・閲覧数の増加・並行が未検証で不十分。\n- AC3: 1 ページ目と単純な検索だけ。範囲外・`%`・`_`・タグ・インジェクションがなく不十分。per_page=51 の欠陥（重大1）を検出できない。\n- AC4: 所有者の更新と削除だけ。Conflict・Forbidden・管理者・非公開・並行・削除の失敗が未検証で不十分。\n- AC5: 件数と管理者以外の拒否だけ。組織をまたぐ場合と途中の失敗が未検証で不十分。\n- AC6: 伏せ字を確かめるテストがない。actor の名前だけ見ていて不十分。\n- AC7: 上限と、枠を 61 秒進めた後の再開だけ。ちょうど window 秒の境界と並行呼び出しが未検証で不十分。\n- AC8: 往復と、note_id を書き換えた改ざんだけ。期限ちょうど・期限切れ・形の崩れが未検証で不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要（ライブラリで、UI・HTTP は対象外）。ただし SQLite の別接続・別スレッドによる並行テストは必要。\n\n### 不足しているリスク\n- K1: 組織をまたぐ閲覧・一覧・更新・移管の拒否が未検証。\n- K2: 検索の SQL インジェクションと、LIKE のエスケープが未検証。\n- K3: 閲覧数・更新・RateLimiter の並行が未検証。\n- K4: 作成・削除・移管の途中失敗が未検証。\n- K5, K7: ログ・例外・監査ログの機密情報の露出が未検証。\n- K6: 移管の組織境界が未検証。\n- K8: 期限の境界・形の崩れが未検証。\n\n### 確認したこと\n- `spec.md`, `design.md`, `notes/*.py`, `tests/test_notes.py` を通読した。\n- `python3 -m unittest discover -s tests -t .` は 12 件が成功した。\n- `list_notes(per_page=51)` が受け付けられるのを実行で確認した。\n- `create_note` が `tags=[\"ab\\n\"]` を受け付けるのを実行で確認した。\n- 実行していないこと: `$AQ trace`, `$AQ history`。そのため、検証条件の弱体化は確認できていない。\n- 実行していないこと: 並行実行の再現。並行系は、コードの読み取りだけで判断した。",
+ "files_changed": [],
+ "valid": true
+}

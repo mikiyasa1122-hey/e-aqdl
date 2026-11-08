@@ -1,0 +1,43 @@
+{
+ "case": "CLEAN-04",
+ "rep": 2,
+ "judge_cost_usd": 0.0699637,
+ "judge_raw": "欠陥なしのケースなので、各指摘を実在の欠陥かどうかで分類しました。\n\n- **重大1**: `TAG_RE` の `$` は末尾の改行の直前にも一致するので、`.match` を使うと `\"abc\\n\"` を通してしまいます。コードを読むと実在する仕様違反で、`:63` と `:150` の両方に当てはまります。real_other です。\n- **重大2**: テストが足りないという指摘だけで、コードの欠陥の主張ではありません。test_gap です。\n- **重大3**: `delete_note` は、認可の確認をトランザクションの外で行っています。確認後に別の接続が削除すると、DELETE が 0 件のまま監査ログ `delete` を書きます。移管後に旧所有者が削除できる点も、R4 の「読み出しから書き込みの間に他の更新が入った場合」に反します。実在の欠陥なので real_other です。\n- **軽微1**: `page` が極端に大きいと OverflowError になります。ValidationError にならないので、R3 の「範囲外は ValidationError」に反します。実在の問題なので real_other です。\n- **軽微2**: 先頭ゼロ付きの別表記でも検証を通ります。仕様は「10進の数字だけ」としており、正規形までは求めていません。署名の偽造にもならないので、好みの提案です。style にしました。\n- **軽微3**: 削除済みのメモに対する `update_note` は、`_row` が None になるので `_visible` で先に NotFound になります。Conflict になるのは、確認後に削除された競合の場合だけです。この場合の Conflict は妥当で、読み違いです。false_positive です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"`$` と `.match` の組み合わせで末尾改行付きのタグが通るのは実在する仕様違反だが、埋め込んだ欠陥はないケースである。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足を指摘しているだけで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note は認可の確認がトランザクションの外にあり、確認後に削除されても監査ログを書いてしまう。実在する競合である。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"page が極端に大きいと OverflowError になり、範囲外は ValidationError という仕様に反する。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭ゼロの別表記は仕様の範囲内で、署名の偽造にもならない。正規形を求めるのは好みの提案である。\"},\n{\"label\": \"軽微3\", \"class\": \"false_positive\", \"reason\": \"削除済みのメモは _visible で先に NotFound になる。Conflict になるのは確認後に削除された競合の場合だけで、読み違いである。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1・重大3・軽微1は実在する別の問題、重大2はテスト不足、軽微2は好み、軽微3は読み違いである。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "`$` と `.match` の組み合わせで末尾改行付きのタグが通るのは実在する仕様違反だが、埋め込んだ欠陥はないケースである。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足を指摘しているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note は認可の確認がトランザクションの外にあり、確認後に削除されても監査ログを書いてしまう。実在する競合である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "page が極端に大きいと OverflowError になり、範囲外は ValidationError という仕様に反する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭ゼロの別表記は仕様の範囲内で、署名の偽造にもならない。正規形を求めるのは好みの提案である。"
+   },
+   {
+    "label": "軽微3",
+    "class": "false_positive",
+    "reason": "削除済みのメモは _visible で先に NotFound になる。Conflict になるのは確認後に削除された競合の場合だけで、読み違いである。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1・重大3・軽微1は実在する別の問題、重大2はテスト不足、軽微2は好み、軽微3は読み違いである。"
+ }
+}

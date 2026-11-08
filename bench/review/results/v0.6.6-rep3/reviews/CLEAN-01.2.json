@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-01",
+ "rep": 2,
+ "sec": 40.7,
+ "exit": 0,
+ "cost_usd": 0.1560264,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23672,
+  "cache_read_input_tokens": 116724,
+  "output_tokens": 4965,
+  "output_tokens_details": {
+   "thinking_tokens": 1254
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23672,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2905,
+    "cache_read_input_tokens": 39810,
+    "cache_creation_input_tokens": 2968,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2968
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3985b563\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC4, AC5, AC1, AC10, K3, K4, K6, V4, V5, VK3, VK4, VK6 / 内容: 競合・巻き戻しを確かめるテストがない。設計は `hooks.before_write` を用意しているが、`tests/test_notes.py` は一度も使っていない。Conflict（古い version、読み出しと書き込みの間の更新）、Forbidden（他人のメモの更新・削除）、作成・移管・削除の途中失敗での巻き戻し、失敗後に接続を使い続けられること、が未検証。移管のテストは件数しか見ておらず、移管先の組織が違う場合の Forbidden もない。 / 根拠: tests/test_notes.py 全体（12 テスト）。`grep hooks` で 0 件。 / 提案: before_write で例外を起こし、メモ・タグ・監査ログが残らないことと、その後の操作ができることを確かめる。before_write の中で別の接続から update して Conflict になることも確かめる。他の組織への移管は Forbidden。\n- [重大2] 区分: テスト / 対象: AC2, AC7, K1, K3, VK1, VK3, V2, V7 / 内容: 同時実行のテストがなく、認可の漏えいも確かめていない。閲覧数の数え漏れ（複数スレッド、別接続）、RateLimiter の同時呼び出し（hook でスレッドの切り替えを再現する）、枠の境界（ちょうど window 秒）が未検証。他の組織・他人の非公開メモが NotFound になること、閲覧数が 1 ずつ増えることもテストされていない。 / 根拠: tests/test_notes.py の RateLimitTest は 1 スレッドで 61 秒後しか見ていない。NotFound のテストは削除後の 1 件だけ。 / 提案: 他の組織・非公開・存在しない ID のテスト、N スレッドで閲覧して views=N になるテスト、ちょうど window 秒のテスト、スレッド同時 hit のテストを追加する。\n- [重大3] 区分: テスト / 対象: AC3, AC6, AC8, AC9, K2, K5, K7, K8 / 内容: 次の項目が未検証。(a) 範囲外の入力（page=0、per_page=51、不正な sort）、(b) `%` と `_` を普通の文字として探すこと、タグの OR 絞り込み、SQL インジェクションの文字列、(c) api_key のマスク（末尾4文字だけ表示、8文字未満は全部伏せる）。現状は `rows[0][\"actor\"]` と action しか見ておらず、actor_key を一度も検証していない。(d) 共有リンクの期限ちょうど以降の無効、形の崩れ・署名の改ざん、(e) ログと例外メッセージに本文・署名・api_key が出ないこと。 / 根拠: tests/test_notes.py:47-50, 82-89。 / 提案: 各境界値と異常系のテストを追加する。\n- [重大4] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 内容: タグの検査で `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾が改行のタグ（\"ab\\n\"）が通ってしまう。`$` は末尾の改行の手前にも一致する。仕様は英小文字・数字・ハイフンの1〜20文字だけを許す。 / 根拠: notes/service.py:14, 64, 152。再現: `create_note(conn, u, 't', 'b', ['ab\\n'])` が成功した（実行して確認済み）。share.py は fullmatch を使っており、この点だけ不整合。 / 提案: `fullmatch` に変えるか、`\\Z` を使う。20文字+改行のテストも追加する。\n- [軽微1] 区分: 実装 / 対象: R3 / 内容: `page=10**30` で sqlite3 の OverflowError が出て、ValidationError にならない。 / 根拠: 実行して確認済み。 / 提案: page の上限を設けるか、OverflowError を ValidationError に変換する。\n- [軽微2] 区分: 実装 / 対象: R4, K1 / 内容: update_note と delete_note は、認可の判定をトランザクションの外で読んだ行で行っている。判定の後に移管で所有者が変わっても、古い判定で削除できる。delete は、メモが既に消えていても監査ログに \"delete\" を書いてしまう。 / 根拠: notes/service.py:160-193。 / 提案: BEGIN IMMEDIATE の中で読み直して認可を判定し、delete は rowcount を確認する。\n- [軽微3] 区分: 実装 / 対象: R8 / 内容: 先頭がゼロのリンク（\"007.…\"）も、同じ署名で note_id=7 として検証が通る。害は小さいが、リンクの表現が一意でなくなる。 / 根拠: notes/share.py:11, 33。 / 提案: 先頭ゼロを拒否するか、正規化した文字列と比較する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と題名が空の拒否だけを確かめている。本文・タグの境界、タグの重複、失敗時に何も残らないことは未検証で、不十分（重大1、4）。\n- AC2: V2 は作成者本人の取得だけ。他の組織・非公開・存在しない ID、閲覧数の増加、同時の閲覧は未検証で、不十分（重大2）。\n- AC3: V3 は一覧の1ページ目と単純な検索だけ。範囲外の入力、`%` と `_`、タグの OR、非公開メモの除外、SQL インジェクションは未検証で、不十分（重大3）。\n- AC4: V4 は作成者の更新と削除の正常系だけ。Conflict、Forbidden、管理者の扱い、更新時のタグ検査、削除の失敗は未検証で、不十分（重大1）。\n- AC5: V5 は件数と非管理者の拒否だけ。他の組織の拒否、途中失敗での元の状態は未検証で、不十分（重大1）。\n- AC6: V6 は actor の名前と action だけを確認している。マスクした actor_key を検証しておらず、空洞（重大3）。\n- AC7: V7 は 1 スレッドで超過と 61 秒後を確認している。同時の呼び出しとちょうど window 秒は未検証で、不十分（重大2）。\n- AC8: V8 は往復と1パターンの改ざんだけ。期限の境界、期限切れ、形の崩れは未検証で、不十分（重大3）。\n- AC9: V9 に相当するテストがなく、未検証。\n- AC10: V10 に相当するテストがなく、未検証。\n- エンジン検出の兆候: なし。skip や弱体化はない。ただし、そもそもテストが薄い。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストで足りる。ただし、決定論的な並行実行（hook、別接続）のテストは必須。\n\n### 不足しているリスク\n- K1、K3、K4、K5、K6、K7、K8: 検証が足りない（上記）。\n- K2: SQL の実装自体はプレースホルダーと ESCAPE で問題ない。ただし攻撃的な文字列のテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py をすべて読み、設計とは整合していた。\n- `python3 -B -m unittest discover -s tests -t .` は 12 件とも成功。ただしカバレッジが薄い。\n- 自分のスクリプトでタグ \"ab\\n\" が受理されること、page=10**30 で OverflowError が出ることを確認した。\n- `$AQ trace` と `$AQ history`: 検証条件の弱体化の形跡はない。",
+ "files_changed": [],
+ "valid": true
+}

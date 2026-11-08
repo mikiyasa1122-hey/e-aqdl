@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 3,
+ "sec": 34.4,
+ "exit": 0,
+ "cost_usd": 0.12803540000000002,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 16974,
+  "cache_read_input_tokens": 158094,
+  "output_tokens": 4431,
+  "output_tokens_details": {
+   "thinking_tokens": 464
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16974,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2786,
+    "cache_read_input_tokens": 40720,
+    "cache_creation_input_tokens": 344,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 344
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 内容: 移管が「全部か、何もしないか」になっていない。メモ1件ごとに別のトランザクションで UPDATE し、監査ログも別のトランザクションにしている。途中で失敗すると一部だけ移った状態が残る。 / 根拠: notes/service.py の transfer_notes（for ループ内の `with transaction(conn)`）。before_write の2件目で例外を起こして再現した。結果は `[(1, 2), (2, 1)]`（1件目だけ移っている）。 / 提案: ID の取得・全 UPDATE・監査ログを1つの transaction で行う。\n- [重大2] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 内容: TAG_RE の `^...$` と `.match` では、末尾に改行がある `\"abc\\n\"` を通してしまう。再現すると create_note がタグ `abc\\n` を受理して保存した。仕様は英小文字・数字・ハイフンの1〜20文字だけを許す。 / 根拠: notes/service.py の TAG_RE と `_validate`、search_notes のタグ検査。 / 提案: `fullmatch` を使うか `\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10 / 内容: テストが仕様の規則を確かめていない。tests/test_notes.py は12件で、ほとんど正常系だけ。異常系・境界値・失敗時の巻き戻しの検証がない。そのため重大1・2を検出できず、gate は通っている。 / 根拠: tests/test_notes.py 全体。確認できなかった項目は次のとおり。\n  - 長さ・個数・タグの境界\n  - 他の組織・非公開メモの NotFound（K1）\n  - 閲覧数の同時加算\n  - LIKE の `%` `_` とインジェクション（K2）\n  - Conflict、Forbidden、管理者の扱い\n  - 移管の失敗\n  - api_key の伏せ字\n  - 期限ちょうど、改ざん、形の崩れ\n  - 枠のちょうど window 秒、スレッドでの同時呼び出し\n  - ログに機密情報が出ないこと（R9）\n  - 例外後の接続再利用（R10） / 提案: 受け入れ条件ごとに異常系・境界値のテストを足す。hooks.before_write と RateLimiter.hook を使い、sleep に頼らず決定論的に並行実行・途中失敗を再現する。\n- [重大4] 区分: テスト / 対象: AC7, K3 / 内容: 同時実行の検証がない。RateLimiter の同時呼び出しも、閲覧数・更新の競合（K3）も、一度も実行されていない。 / 根拠: tests/test_notes.py に threading や hook の利用がない。 / 提案: 別々の接続・スレッドで get_note と update_note を競合させ、閲覧数が正確に増えること、旧 version が Conflict になることを確かめる。RateLimiter は hook で割り込ませて上限を超えないことを確かめる。\n- [重大5] 区分: テスト / 対象: AC5, AC6, AC9, K5, K7 / 内容: 機密情報（api_key・本文・署名）のマスクと非出力をテストしていない。test_export_audit は actor_key を見ていない。 / 根拠: tests/test_notes.py:63-67 / 提案: 8文字未満・ちょうど8文字・長い鍵のマスク結果を検証し、ログ（assertLogs）と例外メッセージに本文・署名・鍵が含まれないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4 / 内容: update_note の認可と存在確認はトランザクションの外にある。確認後に所有者が変わる（移管）と、古い判断で更新される。楽観的ロックは version を見るが、移管でも version を上げるため実害は小さい。 / 提案: 確認をトランザクション内に移す。\n- [軽微2] 区分: 実装 / 対象: R7 / 内容: 同時刻の clock 呼び出しや hook の位置など、枠の境界は `now - start >= window` で正しいが、テストで固定されていない。 / 提案: 境界のテストを足す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の拒否だけで不十分。長さ・個数・タグ形式・tags が文字列のとき・途中失敗で何も残らないこと（K4）を確かめていない。実装にもタグの改行の穴がある。\n- AC2: V2 は閲覧を通常の流れでしか見ていないため不十分。他の組織・非公開・存在しないメモの NotFound も、閲覧数の同時加算も確かめていない（K1）。\n- AC3: V3 は不十分。page・per_page・sort の範囲外、% と _、OR のタグ絞り込み、他人の非公開メモが含まれないことがない（K2）。\n- AC4: V4 は不十分。Conflict、Forbidden、管理者、非公開、更新時の検証、削除の失敗が空洞（K3）。\n- AC5: V5 は不十分。失敗時に元のままであることを確かめておらず、実装が原子的でない。別の組織への移管の拒否もない（K6）。\n- AC6: V6 は不十分。api_key のマスクを見ていない（K7）。\n- AC7: V7 は不十分。window 秒ちょうどの境界と並行呼び出しがない。\n- AC8: V8 は不十分。期限ちょうど・期限切れ・形の崩れ・署名の改ざん・改行付きのリンクがない（K8）。改ざんは note_id の置換だけ。\n- AC9: V9 は確かめていない。ログや例外に本文・署名・鍵が出ないことのテストがない（K5）。\n- AC10: V10 は確かめていない。例外の後に接続を再利用するテストがない。\n- エンジンが検出したテストの兆候: なし（skip や .only は見つからなかった）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest で足りる。ただし並行・巻き戻しのテストが必須。\n\n### 不足しているリスク\n- K1: 他の組織・非公開メモの NotFound を確かめるテストがない。\n- K2: LIKE のエスケープ・インジェクションを確かめるテストがない。\n- K3: 並行の閲覧・更新・RateLimiter を確かめるテストがない。\n- K4: create_note・delete_note・transfer_notes の途中失敗を確かめるテストがない。移管は実装も不整合。\n- K5・K7: マスクと非出力を確かめるテストがない。\n- K6: 別の組織への移管の拒否を確かめるテストがない。\n- K8: 期限ちょうど・改ざん・形の崩れを確かめるテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -B -m unittest discover -s tests -t .` は12件 OK。\n- before_write の例外による再現で、移管の途中失敗が一部だけ移った状態を残すことを確認した（`[(1, 2), (2, 1)]`）。\n- `create_note` にタグ `\"abc\\n\"` を渡すと受理された（改行付きタグ）。\n- `trace` で全 AC が「合格・反証未実施」であることを確認した。history は `--since 0` の先頭30行のみ確認した。検証条件の弱体化は見当たらないが、全件は見ていない。\n- gate は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}
