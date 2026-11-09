@@ -10,6 +10,7 @@
   python3 bench/review/run_bench.py report --out DIR
       集計（report.md・summary.json）
 
+--set with-sql で、既存の40ケースに SQL の追加ケース（sql_cases.py。EVAL-02）を足す（--set sql で追加ケースだけ）。
 --set clean で、クリーンケース群（clean_cases.py。欠陥なし・受け入れ条件ごとのテストあり）を使う（EVAL-01）。
 集計は clean_report.py。既存の40ケースとは別の DIR に出し、結果を混ぜない。
 
@@ -33,6 +34,7 @@ sys.path.insert(0, os.path.join(ROOT, "tests"))
 import cases as CS  # noqa: E402
 import check_cases as CC  # noqa: E402
 import clean_cases as CL  # noqa: E402
+import sql_cases as SQ  # noqa: E402
 import run_docs as D  # noqa: E402
 
 REVIEWER_MD = os.path.join(ROOT, "plugins", "aq-dlc", "agents", "reviewer.md")
@@ -45,7 +47,7 @@ def arg(name, default=None):
 
 def selected():
     ids = arg("--cases")
-    pool = CL.CASES if arg("--set") == "clean" else CS.CASES
+    pool = {"clean": CL.CASES, "sql": SQ.CASES, "with-sql": CS.CASES + SQ.CASES}.get(arg("--set"), CS.CASES)
     return [c for c in pool if not ids or c["id"] in ids.split(",")]
 
 

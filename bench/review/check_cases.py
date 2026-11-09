@@ -6,7 +6,8 @@
 - 欠陥なしケース: 置き換えがちょうど1か所に当たる / 見えるテストとすべての repro が合格する
 - クリーンケース群（--set clean。clean_cases.py）: 各ケースでテストがすべて合格し、30件の欠陥の repro と
   残っていた欠陥の repro もすべて合格する。参照コードに30件の欠陥を1つずつ入れると、テストが失敗する（テストの強さ）
-使い方: python3 check_cases.py [--set clean] [--json 出力先]
+- SQL の追加ケース（--set sql。sql_cases.py）: 既存のケースと同じ確かめ方をする
+使い方: python3 check_cases.py [--set clean|sql] [--json 出力先]
 """
 import json
 import os
@@ -19,12 +20,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cases as CS  # noqa: E402
 import clean_cases as CL  # noqa: E402
+import sql_cases as SQ  # noqa: E402
 
 APP = os.path.join(HERE, "app")
 
 
 def all_cases():
-    return CS.CASES + CL.CASES
+    return CS.CASES + CL.CASES + SQ.CASES
 
 
 def materialize(case, dest, app=None, changes=None):
@@ -164,6 +166,8 @@ if __name__ == "__main__":
             print("問題:", p)
         print("OK" if not rep["problems"] else f"問題 {len(rep['problems'])} 件")
         sys.exit(1 if rep["problems"] else 0)
+    if "--set" in sys.argv and sys.argv[sys.argv.index("--set") + 1] in ("sql", "with-sql"):
+        CS.CASES = CS.CASES + SQ.CASES  # 追加ケースも、既存のケースと同じ確かめ方をする
     rep = check()
     if "--json" in sys.argv:
         with open(sys.argv[sys.argv.index("--json") + 1], "w", encoding="utf-8") as f:
