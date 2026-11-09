@@ -123,7 +123,12 @@ def pending_fix(ctx):
                   "内容を確認し、正しければ取り込み、不要なら元に戻す）"} for i, f in enumerate(unowned[:20])]
     if rv and not review_passed(rv) and (not li or li["seq"] < rv["seq"]):
         kind = kind or ("review", rv["n"])
-        items += [f for f in rv.get("findings", []) if f.get("severity") == "重大"] or rv.get("findings", [])
+        fs = rv.get("findings", [])
+        items += [f for f in fs if f.get("severity") == "重大"] or fs
+        # 改善提案は完了を妨げない。参考として渡し、対応の記載は求めない（[重大] があるときだけ。旧形式の記録で
+        # 重大がなければ、従来どおりすべての指摘を修正依頼として渡す）
+        if any(f.get("severity") == "重大" for f in fs):
+            items += [dict(f, info=True) for f in fs if f.get("action_type") == "suggestion"]
     if kind:
         if kind[0] == "unowned":  # 担当外の変更の後の gate の不合格も合わせて伝える
             items += [dict(f, info=True) for f in _gate_items(s, li)[1]]  # 参考（対応の記載は必須にしない）
@@ -386,8 +391,11 @@ def _impl_tail(ctx, s, kind, items):
         if kind[0] == "unowned" and any(not str(f["label"]).startswith("担当外") for f in items):
             what += "と、その後の gate の不合格"
         lines += [f"## 今回の修正依頼（{what}）"]
-        for f in items:
-            lines.append(f"- [{f['label']}] {f['text']}")
+        if kind[0] == "review":
+            lines += _review_fix_lines(items)
+        else:
+            for f in items:
+                lines.append(f"- [{f['label']}] {f['text']}")
         lines.append("")
     from . import holdout as HO
     if HO.enabled(ctx.cfg) and HO.items(s):
@@ -403,6 +411,46 @@ def _impl_tail(ctx, s, kind, items):
     lines += ["", "## Quality Gate のチェック"] + ([f"- {c['name']}（{c.get('kind', 'other')}）: {c['command']}"
                                                   for c in ctx.checks] or ["（未登録）"])
     return lines
+
+
+# レビューの指摘を、対応区分ごとに修正依頼として渡す（REV-02）。区分ごとに、何をすれば完了かを書く
+REVIEW_FIX_GROUPS = [
+    ("fix_required", "実装の修正（修正必須）",
+     "根拠と成立条件を確かめてから、最小の修正をする。仕様そのものが決まっていない・矛盾している場合は直さず、"
+     "実装報告の「## 差し戻し」に書く。",
+     "成立条件の入力・状態で期待どおりに動き、その欠陥で失敗するテストが gate で実行されて合格する"),
+    ("missing_evidence", "検証の追加（証拠不足）",
+     "テスト・検証条件・証拠を足す。根拠のないまま実装を書き換えない。足したテストが失敗して欠陥が見つかった場合に限り"
+     "実装を直し、「## 指摘への対応」にそのことを書く。",
+     "対象の受け入れ条件・リスクを確かめるテストが gate で実行されて合格する（正常系だけでなく、指摘された異常系・境界値も）"),
+    (None, "指摘（対応区分の記録なし）", "指摘の内容と根拠を確かめて対応する。", None),
+]
+
+
+def _review_fix_lines(items):
+    out = []
+    groups = {}
+    for f in items:
+        if f.get("info"):
+            continue
+        key = f.get("action_type") if f.get("action_type") in ("fix_required", "missing_evidence") else None
+        groups.setdefault(key, []).append(f)
+    for key, title, how, done in REVIEW_FIX_GROUPS:
+        fs = groups.get(key)
+        if not fs:
+            continue
+        out += [f"### {title}", how]
+        for f in fs:
+            out.append(f"- [{f['label']}] {f['text']}")
+            if done:
+                out.append(f"  - 完了条件: {done}")
+    opt = [f for f in items if f.get("info") and f.get("action_type") == "suggestion"]
+    if opt:
+        out += ["### 任意の改善（改善提案。完了を妨げない。対応しなくてよい）"]
+        out += [f"- [{f['label']}] {f['text']}" for f in opt]
+    out.append("どの区分でも、テストの削除・skip・アサーションの緩和で合格させることは修正として認めない"
+               "（検証条件の変更履歴はレビューで確かめる）。")
+    return out
 
 
 def _cf_lines(ctx):
@@ -1027,7 +1075,9 @@ def on_subagent_start(payload, project, state, spath):
     entry = {"role": role, "since": now_iso(), "epoch": time.time(), "start_seq": state.get("seq", 0),
              "code_fp_start": ctx.code_fp, "gate_ok_at_start": gate_ok, "blocks": 0,
              "impl_hash_start": doc_hash(ctx.rd, "impl") if role == "implementer" else None,
-             "fix": {"kind": kind[0], "ref": kind[1], "labels": [f["label"] for f in items if not f.get("info")]} if kind else None,
+             "fix": {"kind": kind[0], "ref": kind[1], "labels": [f["label"] for f in items if not f.get("info")],
+                     "actions": {f["label"]: f["action_type"] for f in items
+                                 if not f.get("info") and f.get("action_type")}} if kind else None,
              "test_signals": signals, "web_app": web, "role_fp": sel["fp"], "role_trigger": rrec["trigger"],
              "cf_fp": CF.record_fp(state) if role == "reviewer" else None}
     state["agents"]["running"][aid] = entry
