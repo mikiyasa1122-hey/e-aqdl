@@ -4,7 +4,9 @@
 - 参照コード: 見えるテストと、すべての repro が合格する
 - 欠陥ケース: 置き換えがちょうど1か所に当たる / 見えるテストは合格する（gate を通る）/ その repro が失敗する
 - 欠陥なしケース: 置き換えがちょうど1か所に当たる / 見えるテストとすべての repro が合格する
-使い方: python3 check_cases.py [--json 出力先]
+- クリーンケース群（--set clean。clean_cases.py）: 各ケースでテストがすべて合格し、30件の欠陥の repro と
+  残っていた欠陥の repro もすべて合格する。参照コードに30件の欠陥を1つずつ入れると、テストが失敗する（テストの強さ）
+使い方: python3 check_cases.py [--set clean] [--json 出力先]
 """
 import json
 import os
@@ -16,14 +18,20 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import cases as CS  # noqa: E402
+import clean_cases as CL  # noqa: E402
 
 APP = os.path.join(HERE, "app")
 
 
-def materialize(case, dest):
-    """参照コードをコピーし、ケースの置き換えを適用する。"""
-    shutil.copytree(APP, dest, ignore=shutil.ignore_patterns("__pycache__"))
-    for rel, old, new in (case["changes"] if case else []):
+def all_cases():
+    return CS.CASES + CL.CASES
+
+
+def materialize(case, dest, app=None, changes=None):
+    """参照コードをコピーし、ケースの置き換えを適用する（クリーンケース群は app_clean を使う）。"""
+    src = os.path.join(HERE, app) if app else os.path.join(HERE, case["app"]) if case and case.get("app") else APP
+    shutil.copytree(src, dest, ignore=shutil.ignore_patterns("__pycache__"))
+    for rel, old, new in (changes if changes is not None else case["changes"] if case else []):
         p = os.path.join(dest, rel)
         with open(p, encoding="utf-8") as f:
             s = f.read()
@@ -97,7 +105,65 @@ def check():
     return report
 
 
+def check_clean():
+    """クリーンケース群の確認。"""
+    defects = [c for c in CS.CASES if c["defect"]]
+    residual = [{"id": k, "repro": v} for k, v in CL.RESIDUAL_REPROS.items()]
+    report = {"reference": {}, "cases": {}, "mutations": {}}
+    problems = []
+    with tempfile.TemporaryDirectory() as tmp:
+        # テストの強さ: 参照コードに30件の欠陥を1つずつ入れると、テストが失敗する
+        for d in defects:
+            dest = os.path.join(tmp, "mut-" + d["id"])
+            changes = CL.MUTATIONS_ADAPTED.get(d["id"], d["changes"])
+            try:
+                materialize(None, dest, app=CL.APP_DIR, changes=changes)
+            except ValueError as e:
+                problems.append(f"欠陥 {d['id']} を参照コードに入れられない: {e}")
+                continue
+            killed = not run_visible(dest)[0]
+            report["mutations"][d["id"]] = "killed" if killed else "survived"
+            if not killed:
+                problems.append(f"欠陥 {d['id']} を入れてもテストが合格する（テストが弱い）")
+        # 残っていた欠陥の repro は、元の参照コード（app）では失敗する（repro が欠陥を捉えている）
+        old = os.path.join(tmp, "old-app")
+        materialize(None, old)
+        for r in residual:
+            if run_repro(old, r)[0]:
+                problems.append(f"{r['id']}: 元の参照コードでも repro が合格する（欠陥を再現できていない）")
+        for c in CL.CASES:
+            dest = os.path.join(tmp, c["id"])
+            r = report["cases"][c["id"]] = {}
+            try:
+                materialize(c, dest)
+            except ValueError as e:
+                problems.append(str(e))
+                r["apply"] = False
+                continue
+            r["apply"] = True
+            r["tests"], out = run_visible(dest)
+            if not r["tests"]:
+                problems.append(f"{c['id']}: テストが失敗:\n{out}")
+            bad = [d["id"] for d in defects + residual if not run_repro(dest, d)[0]]
+            r["all_repro_pass"] = not bad
+            if bad:
+                problems.append(f"{c['id']}: 欠陥なしのはずが repro {bad} が失敗")
+    report["problems"] = problems
+    return report
+
+
 if __name__ == "__main__":
+    if "--set" in sys.argv and sys.argv[sys.argv.index("--set") + 1] == "clean":
+        rep = check_clean()
+        if "--json" in sys.argv:
+            with open(sys.argv[sys.argv.index("--json") + 1], "w", encoding="utf-8") as f:
+                json.dump(rep, f, ensure_ascii=False, indent=1)
+        killed = sum(1 for v in rep["mutations"].values() if v == "killed")
+        print(f"クリーンケース {len(CL.CASES)} 件 / テストが検出した欠陥 {killed}/{len(rep['mutations'])}")
+        for p in rep["problems"]:
+            print("問題:", p)
+        print("OK" if not rep["problems"] else f"問題 {len(rep['problems'])} 件")
+        sys.exit(1 if rep["problems"] else 0)
     rep = check()
     if "--json" in sys.argv:
         with open(sys.argv[sys.argv.index("--json") + 1], "w", encoding="utf-8") as f:

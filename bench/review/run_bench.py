@@ -10,6 +10,9 @@
   python3 bench/review/run_bench.py report --out DIR
       集計（report.md・summary.json）
 
+--set clean で、クリーンケース群（clean_cases.py。欠陥なし・受け入れ条件ごとのテストあり）を使う（EVAL-01）。
+集計は clean_report.py。既存の40ケースとは別の DIR に出し、結果を混ぜない。
+
 レビュー担当には正解（cases.py・repro）を渡さない。ケースの作業フォルダには、参照コードに欠陥を入れた
 コードと見えるテストだけがある。レビュー担当は hook なしで動くため、Write / Edit を外し、レビュー後に
 ファイルが変わっていないかを確かめる（変わっていたら無効）。
@@ -29,6 +32,7 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(ROOT, "tests"))
 import cases as CS  # noqa: E402
 import check_cases as CC  # noqa: E402
+import clean_cases as CL  # noqa: E402
 import run_docs as D  # noqa: E402
 
 REVIEWER_MD = os.path.join(ROOT, "plugins", "aq-dlc", "agents", "reviewer.md")
@@ -41,7 +45,8 @@ def arg(name, default=None):
 
 def selected():
     ids = arg("--cases")
-    return [c for c in CS.CASES if not ids or c["id"] in ids.split(",")]
+    pool = CL.CASES if arg("--set") == "clean" else CS.CASES
+    return [c for c in pool if not ids or c["id"] in ids.split(",")]
 
 
 def engine_commit():
@@ -187,7 +192,7 @@ JUDGE = """あなたは欠陥検出ベンチマークの判定役です。レビ
 
 ## このケースのコード（レビュー担当が見たもの）
 {code}
-
+{tests}
 ## レビュー担当の報告
 {review}
 
@@ -200,7 +205,7 @@ JUDGE = """あなたは欠陥検出ベンチマークの判定役です。レビ
 - style: 好み・スタイル・保守性の提案で、欠陥の主張ではない
 - ambiguous: 上のどれか判断できない（人が確かめる）
 欠陥なしのケースでは matches_defect は使わない。
-
+{test_note}
 defect_detected は、埋め込んだ欠陥があるケースで、どれかの指摘が matches_defect なら "yes"、欠陥の箇所に触れているが原因・影響が違う・曖昧なら "partial"、触れていなければ "no"。欠陥なしのケースでは "n/a"。
 
 ```json
@@ -220,16 +225,37 @@ def case_code(case_id, out):
     return "\n\n".join(parts)
 
 
+def case_tests(case_id, out):
+    """テストのファイル（クリーンケース群だけ判定役に見せる。テスト不足の指摘が正しいかを確かめるため）。"""
+    d = os.path.join(out, "src", case_id, "tests")
+    parts = []
+    for fn in sorted(os.listdir(d)):
+        if fn.endswith(".py") and fn != "__init__.py":
+            with open(os.path.join(d, fn), encoding="utf-8") as f:
+                parts.append(f"### tests/{fn}\n```python\n{f.read()}\n```")
+    return "\n## このケースのテスト（レビュー担当が見たもの）\n" + "\n\n".join(parts) + "\n"
+
+
+CLEAN_TEST_NOTE = """このケースは、受け入れ条件 AC1〜AC10 とリスク K1〜K8 ごとのテストを揃えた、欠陥のない題材として作った。
+ただし作り手の見落としはありうるので、正解を鵜呑みにせず、コードとテストで確かめる。
+- テスト不足の指摘は、上のテストに実際に不足がある（その受け入れ条件・リスクを確かめるテストがない・空洞）ときだけ test_gap。
+  テストがあるのに「ない」と言っている、または必須でない追加を必須と言っているなら false_positive。
+- コードの欠陥の指摘は、実在するときだけ real_other（その場合は reason に、成立する入力・状態を書く）。
+"""
+
+
 def judge_one(rev_path, out):
     with open(rev_path, encoding="utf-8") as f:
         rev = json.load(f)
     dest = rev_path.replace(os.sep + "reviews" + os.sep, os.sep + "judged" + os.sep)
     if os.path.exists(dest) or not rev["valid"]:
         return rev["case"], "skip"
-    c = next(x for x in CS.CASES if x["id"] == rev["case"])
+    c = next(x for x in CC.all_cases() if x["id"] == rev["case"])
+    clean = bool(c.get("clean_set"))
     truth = ("欠陥なし（振る舞いを変えない変更: " + c["title"] + "）") if not c["defect"] else (
         f"{c['title']}（分類 {c['category']}・重大度 {c['severity']}・箇所 {c['location']}・原因: {c['cause']}・影響: {c['impact']}）")
-    prompt = JUDGE.format(case_id=c["id"], truth=truth, spec=D.SPEC_MD, code=case_code(c["id"], out), review=rev["result"])
+    prompt = JUDGE.format(case_id=c["id"], truth=truth, spec=D.SPEC_MD, code=case_code(c["id"], out), review=rev["result"],
+                          tests=case_tests(c["id"], out) if clean else "", test_note=CLEAN_TEST_NOTE if clean else "")
     p = subprocess.run(["claude", "-p", prompt, "--tools", "", "--output-format", "json"], capture_output=True,
                        text=True, timeout=900, cwd=out)
     try:
@@ -255,7 +281,7 @@ def main():
         os.makedirs(os.path.join(out, d), exist_ok=True)
     if cmd == "build":
         with open(os.path.join(out, "conditions.json"), "w", encoding="utf-8") as f:
-            json.dump(dict(engine_commit(), python=sys.version.split()[0], built=time.strftime("%Y-%m-%dT%H:%M:%S"),
+            json.dump(dict(engine_commit(), case_set=arg("--set", "default"), python=sys.version.split()[0], built=time.strftime("%Y-%m-%dT%H:%M:%S"),
                            config="既定（init のまま）。counterfactual off・holdout 無効・差分カバレッジ無効・"
                                   "review.blind 有効・workflow.mode full"), f, ensure_ascii=False, indent=1)
         for c in selected():
@@ -275,8 +301,12 @@ def main():
             for cid, st in ex.map(lambda pth: judge_one(pth, out), paths):
                 print(cid, st, flush=True)
     elif cmd == "report":
-        import report as RP
-        RP.write(out)
+        if arg("--set") == "clean":
+            import clean_report as CR
+            CR.write(out)
+        else:
+            import report as RP
+            RP.write(out)
     else:
         sys.exit(__doc__)
 
