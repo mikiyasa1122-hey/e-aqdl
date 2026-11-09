@@ -1,0 +1,23 @@
+{
+ "case": "CLN-01",
+ "rep": 1,
+ "judge_cost_usd": 0.1116443,
+ "judge_raw": "欠陥なしのケースなので、各指摘を確認します。\n\n- 軽微1: `_counts` が利用者ごとの項目を消さないのは事実。ただし仕様の要求違反ではなく、改善提案にとどまる。バグや仕様違反の主張ではないので style。\n- 軽微2: `search_notes` のタグ検査が `_validate` と重複しているという保守性の提案。欠陥の主張ではないので style。\n\nどちらも欠陥の主張ではなく、レビューの判定「合格」は妥当です。\n\n```json\n{\"findings\": [\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"RateLimiter._counts が掃除されずメモリが増える点は仕様違反ではなく、レビュー担当自身も改善提案としている。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"search_notes のタグ検査が _validate と重複しているという保守性の提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"n/a\",\n \"matched_label\": null,\n \"note\": \"欠陥なしのケースで、レビュー担当は合格と判定し、指摘は保守性の提案2件のみで誤検出はない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "RateLimiter._counts が掃除されずメモリが増える点は仕様違反ではなく、レビュー担当自身も改善提案としている。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "search_notes のタグ検査が _validate と重複しているという保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は合格と判定し、指摘は保守性の提案2件のみで誤検出はない。"
+ }
+}

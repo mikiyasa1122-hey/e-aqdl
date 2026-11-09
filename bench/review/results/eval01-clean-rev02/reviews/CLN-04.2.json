@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 2,
+ "sec": 31.5,
+ "exit": 0,
+ "cost_usd": 0.1395412,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 21320,
+  "cache_read_input_tokens": 176712,
+  "output_tokens": 3657,
+  "output_tokens_details": {
+   "thinking_tokens": 1068
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21320,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1783,
+    "cache_read_input_tokens": 46431,
+    "cache_creation_input_tokens": 1319,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1319
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R3, notes/service.py:search_notes / 対応区分: 改善提案 / 内容: タグの個数・形式の検査が `_validate` と重複して手書きされている。今後、タグの規則を変えたときに片方だけ直し忘れるおそれがある。現時点では R1 と同じ規則で、動作に問題はない。 / 提案: タグ検査を `_validate_tags` のような共通の関数に切り出して共有する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1・VK4 は、題名・本文・タグの境界値、タグが文字列そのものの場合、末尾に改行のあるタグ、`create:tags` での途中失敗後に何も残らないことを確かめており妥当。\n- AC2: V2・VK1 は、組織が違う場合、他人の非公開メモ、存在しないメモがどれも NotFound になることを確かめている。閲覧数は、別々の接続・別々のスレッドで実際に同時に閲覧して数え漏れがないことを確かめており妥当。コード上も、閲覧数の更新が BEGIN IMMEDIATE のトランザクション内で行われ、数え漏れは起きない。\n- AC3: V3・VK2 は、page・per_page・sort の範囲外、`%`・`_` を普通の文字として探すこと、タグの OR 絞り込み、非公開メモを含めないことを確かめている。SQL はすべてプレースホルダーで、LIKE は ESCAPE を使っており妥当。実行時に変わる SQL の部分は、固定の列名の表（SORT_COLUMNS）と `?` の個数だけ。\n- AC4: V4・VK3・VK4 は、作成者と同じ組織の管理者の権限、非公開メモの扱い、古い version での Conflict、読み出しから書き込みの間に更新が入った場合の Conflict、トランザクション内での認可の再判定、更新・削除の失敗時の巻き戻しを、差し込み口で決まった順序で再現して確かめており妥当。\n- AC5: V5・VK6 は、管理者だけが移せること、組織をまたぐ移管の拒否、途中で失敗したときに元のままであることを確かめている。実装も1つのトランザクションで、WHERE が org_id と owner_id で絞られており妥当。\n- AC6: V6・VK7 は、api_key の伏せ方を確かめている。8文字未満はすべて伏せる、8文字以上は末尾4文字だけ残す、という実装の分岐とも一致しており妥当。\n- AC7: V7 は、枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、20スレッドを Barrier で同時に呼んで上限ちょうどの 5 件だけが通ること、`hook` による割り込みの順序を確かめている。sleep に頼らず決定論的で妥当。\n- AC8: V8・VK8 は、期限の境界、改ざん、形の崩れたリンクを確かめている。実装は fullmatch と `[0-9]` による厳密な形の検査、`compare_digest` による署名の比較、期限の時刻ちょうど以降は無効とする判定を備えており妥当。\n- AC9: V9・VK5 は、ログ・例外のメッセージ・監査の detail に本文・署名・秘密鍵・api_key が出ないことを確かめている。\n- AC10: V10 は、例外の後に接続を続けて使えることを確かめている。実装は `_rollback` が元の例外を隠さず、`in_transaction` を見て巻き戻しており妥当。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのテストは、grep と目視で確認した範囲では見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、SQLite（一時ファイルを含む）と別スレッドの実接続を使った単体テストで、リスクに見合う検証ができている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様・設計・notes/*.py の全体を読み、認可（`_visible`／`_can_modify` とトランザクション内での再判定）、SQL の組み立て、トランザクション境界、秘密情報の扱いをたどった。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、63 件が成功した。\n- `$AQ trace` で全 AC・リスクに検証が対応し、gate が合格であることを確認した。\n- `$AQ history --since 0` の先頭40行に、検証条件を弱めた変更はなかった。\n- 全履歴は読めていない。\n- `git status` で notes/・tests/ が未追跡であることを確認した。このためコードの `git diff` によるテスト改ざんの確認はできない。履歴上は検証の弱体化の形跡はなかった。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLN-01",
+ "rep": 1,
+ "sec": 30.1,
+ "exit": 0,
+ "cost_usd": 0.2380025,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 47980,
+  "cache_read_input_tokens": 96065,
+  "output_tokens": 3646,
+  "output_tokens_details": {
+   "thinking_tokens": 1078
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 47980,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1815,
+    "cache_read_input_tokens": 38217,
+    "cache_creation_input_tokens": 9763,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9763
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6454e556\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R7, AC7 / 対応区分: 改善提案 / 内容: `RateLimiter._counts` は利用者ごとの項目を消さないので、利用者が増え続けると長期稼働でメモリが増える。仕様の要求には反していない。 / 提案: 期限切れの枠を定期的に掃除する。または、利用者数の上限が前提であることを設計書に書く。\n- [軽微2] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `search_notes` の `tags` の検査は `_validate` と重複して書かれている。 / 提案: タグの検査を共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当。題名・本文・タグの境界値、タグが文字列そのものの場合、末尾に改行があるタグ、`create:tags` で障害を起こしたときのロールバックを確かめている。\n- AC2: V2 は妥当。他の組織・他人の非公開・存在しないメモがすべて NotFound になること、NotFound のときに閲覧数が増えないこと、確認後に非公開へ変わった場合を確かめている。同時の閲覧は、フックでの割り込みと別接続の4スレッド×10回（合計40）の両方で確かめている。\n- AC3: V3 とリスク K2 の検証は、コードで確認した範囲では妥当。SQL は `?` と ESCAPE で組み立てており、`sort` は許可リストで判定し、`page` が大きすぎる場合も扱っている。テストの中身までは精読していない。\n- AC4: V4 とリスク K3 の検証は妥当。作成者・管理者・他の組織・非公開の判定、古い version、読み出しと書き込みの間の割り込み、書き込みの中での権限の再確認、削除の失敗時のロールバックを確かめている。\n- AC5: V5 は `tests/test_ac5_transfer.py` で確認した。コードは、管理者かどうか・同じ組織かどうかをトランザクションの前に検査し、移管と監査記録を1つのトランザクションにまとめている。テストの内容は精読していない。\n- AC6: V6 はコードで確認した。末尾4文字を残し、8文字未満はすべて伏せている。\n- AC7: V7 は妥当。時刻を差し替えて枠の境界（159.999 と 160.0）を確かめている。20スレッドの同時呼び出しで許可が5回に収まること、検査の途中に割り込ませても直列になることも確かめている。\n- AC8: V8 とリスク K8 は、コードで正規表現の fullmatch・期限の境界（以降は無効）・`compare_digest` を確認した。\n- AC9: V9 は、コードでログと例外のメッセージにメモの本文・署名・api_key を出していないことを確認した。\n- AC10: V10 は、transaction() が例外のときに ROLLBACK して例外をそのまま伝えることをコードで確認した。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストファイルはなかった。\n- 検証条件の弱体化: `history` に、検証の紐づけ（bind）と実装の対応づけ以外の変更はなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、接続・同時実行・障害はユニットテスト（実際の SQLite と複数スレッド、フックによる障害の再現）で確かめている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行した。63 件がすべて通った。\n- `notes/` の全ファイルを読んだ。認可は `_visible` と `_can_modify` に集約され、書き込みの中で再判定している。楽観的ロックは UPDATE の `version` 条件と `rowcount` で判定している。\n- `aqdlc history --since 0` と `aqdlc trace` を見た。全 AC とリスクに検証が紐づき、gate は合格している。反証テストは無効のため「反証未実施」の状態である。\n- `tests/base.py`、`test_ac7_ratelimit.py`、`test_ac4_update_delete.py`、`test_ac2_view.py` を読んだ。`test_ac1`・`test_ac3`・`test_ac5`・`test_ac6`・`test_ac8`・`test_ac9`・`test_ac10` は精読していない。",
+ "files_changed": [],
+ "valid": true
+}

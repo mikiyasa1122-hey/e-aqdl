@@ -1,0 +1,49 @@
+{
+ "case": "CLN-02",
+ "rep": 1,
+ "sec": 27.5,
+ "exit": 0,
+ "cost_usd": 0.2055119,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 41527,
+  "cache_read_input_tokens": 94279,
+  "output_tokens": 2996,
+  "output_tokens_details": {
+   "thinking_tokens": 912
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 41527,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1654,
+    "cache_read_input_tokens": 36875,
+    "cache_creation_input_tokens": 4652,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4652
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8d27e925\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py の update_note / 対応区分: 改善提案 / 内容: 更新で title・body・tags をすべて None にして呼ぶと、内容は変わらないまま version と updated_at が上がり、監査ログも残る。仕様上は禁止されていない。 / 提案: 変更なしの呼び出しの扱い（拒否するか、そのまま許すか）を仕様に書く。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界値、tags に文字列を渡した場合、途中失敗時のロールバックを `hooks.before_write(\"create:tags\")` で再現している。妥当。\n- AC2: 同じ組織・他の組織・他人の非公開・存在しないメモがすべて NotFound になることを確認している。確認後に非公開へ変えられた場合も確認している。閲覧数はフックによる割り込みと、別接続の複数スレッドの両方で数え漏れがないことを確認している。妥当。\n- AC3: ページとソートの範囲外、`%` と `_` の扱い、タグの OR 絞り込み、非公開の除外を確認している。SQL はプレースホルダーで、LIKE に ESCAPE を付けていることをコードで確認した。妥当。\n- AC4: 作成者・管理者・他の組織・非公開の各ケース、version の古さによる Conflict、読み出しと書き込みの間の割り込み、削除途中の失敗のロールバックを確認している。更新時にトランザクション内で行を読み直して認可と検証をやり直しており、コードにも反映されている。妥当。\n- AC5: 管理者以外・組織をまたぐ移管・途中失敗時の元のまま、を確認している。妥当。\n- AC6: 8文字未満と末尾4文字の伏せ方を確認している。コードも仕様どおり。妥当。\n- AC7: 枠の境界（159.999 と 160.0）、拒否した呼び出しが枠を延ばさないこと、20スレッドの Barrier による同時呼び出し、チェック中の割り込みを確認している。sleep に頼らず決定論的。妥当。\n- AC8: 期限の境界、改ざん、形の崩れを確認している。コードは fullmatch・`[0-9]`・`hmac.compare_digest` を使っており、期限ちょうどを無効にしている。妥当。\n- AC9: ログ・例外のメッセージに本文・署名・api_key が出ないことを確認している。コードでも、ログ・例外のメッセージが ID と固定文だけであることを確認した。妥当。\n- AC10: 例外の後に同じ接続を使い続けられることを確認している。`_rollback` が ROLLBACK の失敗で元の例外を隠さないこともコードで確認した。妥当。\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなし）。`history --since 0` を見る限り、検証条件の弱体化も見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI を持たない標準ライブラリだけの Python ライブラリで、並行実行はスレッドと別接続の単体テストで確かめている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、63 件すべて OK だった。\n- `aqdlc.py history --since 0` を読み、検証条件・チェックの変更履歴を確認した。コードの変更は確認していない。\n- notes/ 配下の全ソース（db・service・ratelimit・share・errors）を仕様・設計と突き合わせて読んだ。\n  - 認可は `_visible` / `_can_modify` にまとまっている。\n  - 書き込みは BEGIN IMMEDIATE の `transaction()` で囲まれている。\n  - 楽観的ロックは UPDATE の `WHERE version` と rowcount で判定している。\n  - 移管は同じ組織の絞り込みと同じトランザクションで行われている。\n- tests/ のうち AC7・AC2 のテストを精読した。AC1・3・4・5・6・8・9・10 のテストは名前と実行結果で確認した（精読はしていない）。",
+ "files_changed": [],
+ "valid": true
+}

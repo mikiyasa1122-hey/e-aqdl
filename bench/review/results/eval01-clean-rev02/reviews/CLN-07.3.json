@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 3,
+ "sec": 26.2,
+ "exit": 0,
+ "cost_usd": 0.1203403,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19135,
+  "cache_read_input_tokens": 130243,
+  "output_tokens": 3076,
+  "output_tokens_details": {
+   "thinking_tokens": 902
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19135,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1517,
+    "cache_read_input_tokens": 41608,
+    "cache_creation_input_tokens": 3957,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3957
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `verify_link` は、先頭にゼロを付けた note_id（例: `007.…`）を `int` に直して署名を検証する。そのため `7.…` と同じ署名が有効になり、同じメモに対して文字列の異なるリンクが複数通る。仕様の形式（10進の数字だけ）の範囲内であり、許可のない権限を与えるものではない。 / 提案: 厳密にしたければ、先頭ゼロを拒否する（`str(note_id)` と元の文字列を比べる）。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 / VK4 は、入力検証（題名・本文・タグ）に加えて、`fail_at(\"create:tags\")` でタグ書き込み中に失敗を起こし、何も残らないことを確かめており妥当。\n- AC2: V2 / VK1 は、他組織・他人の非公開・存在しないメモがすべて NotFound になることを確かめている。NotFound のとき閲覧数が増えないこと、確認後に見えなくなる経路、割り込みの再現、複数スレッドからの閲覧も確かめており妥当。\n- AC3: V3 / VK2 は、一覧の範囲外入力・並び順・巨大な page、`%` と `_` をそのまま文字として探すこと、タグの OR、SQL 文字列が値として扱われることを確かめており妥当。\n- AC4: V4 / VK3 は、作成者と管理者の権限、非公開メモ、version の競合、読み出しと書き込みの間の更新による競合、書き込み内での認可の再確認、更新時の入力検証、削除の途中失敗の巻き戻しを確かめており妥当。\n- AC5: V5 / VK6 は、管理者以外・他組織への移管の拒否と、途中失敗時に元のままであることを確かめている（テストのファイルと実装を確認）。妥当。\n- AC6: V6 / VK7 は、api_key の伏せ字（末尾4文字を除く、8文字未満は全部伏せる）を確かめており妥当。実装の境界は仕様どおり。\n- AC7: V7 は、枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier を使った20スレッドの同時呼び出しで成功が5件であること、hook を使った決定論的な割り込みを確かめており妥当。sleep には頼っていない。\n- AC8: V8 / VK8 は、期限の境界、改ざん、形の崩れたリンクを確かめている。実装は fullmatch と `compare_digest` を使っており妥当。\n- AC9: V9 / VK5 は、ログ・例外メッセージ・監査の detail に本文・署名・鍵が出ないことを確かめており妥当。\n- AC10: V10 は、例外のあとも接続が使えることを確かめており妥当。実装の `transaction()` と `_rollback` は設計どおり。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのテストは見つからなかった。`history` を見ても、検証条件の弱体化はない。\n### E2E の要否\n- 不要。HTTP・UI を持たない Python ライブラリで、リスクはすべて unit テスト（並行・障害の差し込み口を使うもの）で確かめられている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md・design.md・`notes/*.py` を全部読み、認可（`_visible`・`_can_modify`）、SQL のプレースホルダーと ESCAPE、トランザクション境界、楽観的ロックの経路をたどった。\n- `aqdlc trace` と `history --since 0` を確認した。検証条件の弱体化はなく、全項目が合格だった。\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件が OK だった。",
+ "files_changed": [],
+ "valid": true
+}

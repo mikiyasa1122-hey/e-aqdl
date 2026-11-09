@@ -1,0 +1,49 @@
+{
+ "case": "CLN-10",
+ "rep": 3,
+ "sec": 30.6,
+ "exit": 0,
+ "cost_usd": 0.1175202,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17315,
+  "cache_read_input_tokens": 120742,
+  "output_tokens": 3617,
+  "output_tokens_details": {
+   "thinking_tokens": 1280
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17315,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2052,
+    "cache_read_input_tokens": 36950,
+    "cache_creation_input_tokens": 6782,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6782
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c8b1a97a\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `LINK_RE` は先頭にゼロが付いた note_id（例 `007.…`）も受け付ける。`int()` に変換してから署名を照合するため、`7.…` の正規リンクと同じ署名で `007.…` も通る。同じメモを指す別表記が有効になるだけで、権限の拡大や改ざんの通過にはならない。署名の対象も note_id と期限だけで、仕様の形の定義（10進の数字）にも反しない。 / 提案: 厳密にするなら、`str(note_id) == m.group(1)` を確認するか、正規表現でゼロ始まりを拒否する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_ac1_create.py` は、入力の境界値と、タグ挿入段階での障害注入（`hooks.before_write(\"create:tags\")`）による全件ロールバックを確かめている。妥当。\n- AC2: 同じ組織・他組織・他人の非公開・存在しないメモが、すべて NotFound になることを確かめている。確認後に非公開へ変わる場合と、閲覧が割り込む場合も確かめている。実スレッドと別接続のファイル DB で 4×10 回の閲覧を行い、閲覧数が 40 になることを確かめている。妥当。閲覧数は `views = views + 1` を `BEGIN IMMEDIATE` の中で更新しており、数え漏れは起きない。\n- AC3: 範囲外の入力、`%` と `_` のエスケープ、タグの OR 絞り込み、他人の非公開メモの除外を確かめている（63 件のテストはすべて成功）。コードは SQL をプレースホルダーで渡し、LIKE に ESCAPE を付けている。ORDER BY の列は固定辞書から選ぶ。K2 の対策として妥当。\n- AC4: 次の項目を確かめている。\n  - 作成者・管理者・他の利用者・他の組織の各権限\n  - 非公開メモは管理者にも NotFound になること\n  - 古い version での Conflict\n  - 読み出しと書き込みの間に更新が割り込んだ場合の Conflict と、先の更新が消えないこと\n  - 判定後に移管された場合の再認可\n  - 更新時の入力検証\n  - 削除途中の障害でのロールバックと、例外が呼び出し側に伝わること\n  \n  フックで決定論的に再現しており、sleep には頼っていない。妥当。\n- AC5: 管理者以外・別組織・全件移管・途中障害でのロールバックを確かめている。コードは `BEGIN IMMEDIATE` の1つのトランザクションで、同じ組織に絞った WHERE を使っている。妥当。\n- AC6: 8 文字未満の鍵をすべて伏せる境界と、末尾 4 文字以外を伏せる動作を確かめている。実装と一致している。妥当。\n- AC7: 枠の境界（159.999 で拒否、160.0 で新しい枠）、拒否された呼び出しが枠を延ばさないこと、20 スレッド同時でちょうど 5 回だけ許可されること、チェック内に割り込ませた並行の直列化を確かめている。ロックの内側で判定しており妥当。\n- AC8: 期限の境界、改ざん、形の崩れ（改行・非 ASCII など）を確かめている。`fullmatch` と `hmac.compare_digest` を使っており妥当。\n- AC9: ログと例外のメッセージに本文・署名・api_key が出ないことを確かめている。コードの出力は ID だけで、`verify_link` は元の例外を `from None` で隠している。妥当。\n- AC10: 例外の後に `in_transaction` が戻り、同じ接続を続けて使えることを確かめている。`transaction()` は `BaseException` でロールバックし、ロールバック自体の失敗で元の例外を隠さない。妥当。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストは見つからなかった。\n### E2E の要否\n- 不要。HTTP・UI がない標準ライブラリだけの層で、実際の SQLite（ファイル DB と別接続のスレッド）を使った結合テストがすでにある。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて成功した（バイトコードは生成しない設定で実行）。\n- `spec.md` と `design.md` を、`notes/*.py` の全行と `tests/base.py`・`test_ac4`・`test_ac7`・`test_ac2` と突き合わせた。\n- K1〜K8 の経路をコードでたどった（認可は `_visible` と `_can_modify` に集約、トランザクション境界、楽観的ロックは UPDATE の version 条件と rowcount、LIKE のエスケープ）。\n- `git status` を確認した。notes/ と tests/ は未追跡の新規ファイルで、既存のテストを弱めた差分はない。",
+ "files_changed": [],
+ "valid": true
+}

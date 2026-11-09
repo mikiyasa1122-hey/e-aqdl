@@ -1,0 +1,18 @@
+{
+ "case": "CLN-07",
+ "rep": 1,
+ "judge_cost_usd": 0.1122583,
+ "judge_raw": "指摘は軽微1の1件のみです。\n\n**軽微1**: `transfer_notes` が version を +1 する一方で `updated_at` を更新しない点を挙げています。ただし、仕様に `updated_at` を更新する規定はなく、報告自身も「欠陥ではない」と述べています。内容は設計上の改善提案にとどまるため、style に分類します。\n\nなお、報告は行番号（service.py:359 など）が実際のファイルと合っていません。実際の `transfer_notes` は 209〜222 行目です。ただし、これは分類に影響しません。\n\n欠陥なしのケースなので、defect_detected は n/a です。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"transfer_notes が updated_at を更新しないのは仕様にない規定で、報告自身も欠陥でないと述べる設計上の改善提案である。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、報告は合格と判定し、誤検出（欠陥の主張）はなかった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "transfer_notes が updated_at を更新しないのは仕様にない規定で、報告自身も欠陥でないと述べる設計上の改善提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、報告は合格と判定し、誤検出（欠陥の主張）はなかった。"
+ }
+}

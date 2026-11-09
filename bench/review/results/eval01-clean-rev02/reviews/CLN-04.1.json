@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 1,
+ "sec": 31.7,
+ "exit": 0,
+ "cost_usd": 0.16456169999999998,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 27867,
+  "cache_read_input_tokens": 170437,
+  "output_tokens": 3603,
+  "output_tokens_details": {
+   "thinking_tokens": 945
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27867,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1827,
+    "cache_read_input_tokens": 46583,
+    "cache_creation_input_tokens": 1285,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1285
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `verify_link` は、先頭に 0 を付けた数字（例: `007.1060.<署名>`）を受け付ける。署名は `int` に正規化した値で計算するため、同じ署名が `7.1060.<署名>` と `007.1060.<署名>` の両方で通る。仕様は「10進の数字だけ」としており、違反ではない。表記の揺れを許す形になっているだけで、権限の拡大や機密情報の露出はない。/ 提案: 正規表現を `(0|[1-9][0-9]{0,17})` にするか、再生成した文字列と `link` を比較して、正規の表記だけを通す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_ac1_create` は、題名・本文・タグの境界値、タグの重複を数えて保存は一意にすること、文字列の tags の拒否、拒否時と途中失敗時（`fail_at(\"create:tags\")`）に何も残らないこと、監査ログの同時記録を確かめている。妥当。\n- AC2: 同じ組織と別組織の閲覧、非公開、存在しないメモがすべて NotFound になること、NotFound で閲覧数が増えないことを確かめている。確認後に非公開へ変わる場合、割り込みの閲覧、別接続の 4 スレッド×10 回で 40 になることも確かめている。同時閲覧は実ファイル DB で検証しており妥当。\n- AC3: 一覧の範囲、並び順、ページ送り、巨大な page、範囲外の拒否、検索の `%`・`_`、タグの OR、SQL 文字列を値として扱うこと、不正なクエリとタグの拒否を確かめている。妥当。\n- AC4: 作成者と管理者の許可、他組織と非公開の拒否、古い version と読み書きの間の更新による Conflict を確かめている。トランザクション内での再認可、更新時の入力検証、失敗時の巻き戻し、削除の失敗が呼び出し側に伝わることも確かめている。妥当。\n- AC5: 全件の移管、管理者以外・組織違いの拒否、途中失敗で元のままになることを確かめている。妥当。\n- AC6: `test_ac6_audit` の確認内容は、api_key の伏せ方と 8 文字未満の鍵をすべて伏せることを対象としている。実装は `export_audit` で仕様どおり（末尾 4 文字以外を `*`、8 文字未満は全部 `*`）。このテストファイルの個別の中身までは読んでいない。\n- AC7: 枠の境界（159.999 は拒否、160.0 は新しい枠）、拒否が枠を延ばさないこと、20 スレッドから同時に呼んでも 5 回だけ許すこと、確認処理の途中への割り込みを確かめている。時計を差し替え、Barrier とイベントで順序を作っており、sleep 依存ではない。妥当。\n- AC8: ちょうどの期限、改ざん、鍵違い、形の崩れた多数のパターン（大文字、改行、全角数字、型違いなど）を確かめている。妥当。\n- AC9: ログ、例外メッセージ、監査詳細に本文・署名・api_key が出ないことを確かめている。妥当。\n- AC10: 各種の失敗の後に接続を使い続けられること、DB エラーを報告してロールバックすること、ROLLBACK が不可能でも元の例外を隠さないことを確かめている。妥当。\n- エンジンが検出したテストの兆候: なし。skip、`.only`、アサーションなしのテストは見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストが別接続・別スレッド・実ファイル DB で、並行処理と途中失敗を再現している。\n### 不足しているリスク\n- なし。ロック待ち 5 秒を超えた場合は、生の `sqlite3.OperationalError` が呼び出し側に出る。設計どおりで、仕様外のため指摘にはしない。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py` を通読し、認可（`_visible`、`_can_modify`、トランザクション内での再確認）、SQL のプレースホルダーと ESCAPE、楽観ロック、ROLLBACK の扱い、HMAC の比較（`compare_digest`）を確かめた。\n- `python3 -m unittest discover -s tests -t .` を実行した（`PYTHONDONTWRITEBYTECODE=1`）。63 件すべてが OK だった。\n- `aqdlc trace`: 全 AC とリスクの検証が合格だった（反証テストは無効のため、いずれも「反証未実施」）。\n- `aqdlc history --since 0`: 前半の記録で、検証条件の弱体化は見当たらなかった。後半は表示していない。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

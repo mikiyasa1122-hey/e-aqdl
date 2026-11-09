@@ -1,0 +1,49 @@
+{
+ "case": "CLN-05",
+ "rep": 1,
+ "sec": 31.3,
+ "exit": 0,
+ "cost_usd": 0.1661312,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 28409,
+  "cache_read_input_tokens": 171752,
+  "output_tokens": 3530,
+  "output_tokens_details": {
+   "thinking_tokens": 1224
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 28409,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1521,
+    "cache_read_input_tokens": 47214,
+    "cache_creation_input_tokens": 1196,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1196
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fba595\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, notes/share.py:11 / 対応区分: 改善提案 / 内容: LINK_RE は先頭ゼロ付きの数字（例 `007.1060.<署名>`）を通す。int 化してから署名を検証するので、note 7 の正規のリンクと同じ署名で別の文字列も有効になる。仕様の「10進の数字だけ」は満たしており、安全上の害はない。 / 提案: 正規の表現（先頭ゼロなし）に限る、または検証時に再構成した文字列と照合する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。入力の境界値、タグの重複除去、tags が文字列の場合、途中の失敗でのロールバック（hook で再現）を確かめている。\n- AC2: 妥当。他の組織・他人の非公開・存在しないメモが NotFound になることを確かめている。閲覧数は別接続・別スレッドで数え漏れがないことを確かめている。\n- AC3: 妥当。page・per_page・sort の範囲外、%・_ のエスケープ、タグの OR 絞り込み、他人の非公開メモが含まれないことを確かめている。SQL はプレースホルダーで、`ORDER BY` はホワイトリストの辞書から選んでいる。\n- AC4: 妥当。権限（Forbidden／NotFound の使い分け）、古い version の Conflict、読み書きの間に別の更新が入った場合の Conflict、書き込みの中での権限の再確認、更新時の入力検証、削除の途中失敗のロールバックと例外の伝播を確かめている。\n- AC5: 妥当。管理者だけ、同じ組織のときだけ、途中失敗で元のままを確かめている。コードは WHERE で org_id を絞り、1つのトランザクションで行っている。\n- AC6: 妥当。末尾4文字以外を伏せることと、8文字未満の鍵を全部伏せることを確かめている。\n- AC7: 妥当。時計を差し替えて枠の境界（159.999 で拒否、160.0 で通る）を確かめている。同時実行は Barrier と、hook によるロック内の割り込みの再現で確かめており、sleep には頼っていない。\n- AC8: 妥当。期限ちょうど、改ざん、署名鍵の違い、形の崩れ（改行・大文字・全角数字・None など）を確かめている。\n- AC9: 機密を出す経路をコードで確認した。ログは ID だけ、例外メッセージに本文・署名・api_key は入らない。テストの内容そのものは読んでいない。\n- AC10: 実装の `_rollback` と `transaction` で、例外後に接続が使える状態に戻ることを確認した。テスト3件（test_ac10_recovery.py）は通ったが、中身は読んでいない。\n- エンジンが検出したテストの兆候はなし。skip・.only・アサーションなしは見つからなかった。history でも検証条件の弱体化は見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のない、標準ライブラリだけの Python ライブラリで、unittest による結合的なテスト（実 SQLite、別接続・別スレッド）で十分にリスクを確かめられる。\n### 不足しているリスク\n- なし。ただし RateLimiter は service には組み込まれておらず、単体の部品として提供されている。仕様・設計ともに単体の部品としているので、指摘にはしない。\n### 確認したこと\n- 仕様・設計・全ソース（notes/*.py）を読み、認可の経路、SQL の組み立て、トランザクション境界を確認した。\n- `python3 -m unittest discover -s tests -t .`（バイトコードを書かない設定）は 63 件すべて合格。\n- `$AQ trace` で、R1〜R10 と K1〜K8 のすべてに検証があることを確認した。`$AQ history` では検証条件の弱体化は見つからなかった。\n- 反証テストは無効のため、条件を外して失敗するかは未確認。\n- `git status` で、コードを変更していないことを確認した。",
+ "files_changed": [],
+ "valid": true
+}
