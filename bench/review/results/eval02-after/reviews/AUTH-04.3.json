@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 3,
+ "sec": 30.1,
+ "exit": 0,
+ "cost_usd": 0.128796,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20257,
+  "cache_read_input_tokens": 115420,
+  "output_tokens": 3621,
+  "output_tokens_details": {
+   "thinking_tokens": 819
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20257,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2300,
+    "cache_read_input_tokens": 36876,
+    "cache_creation_input_tokens": 3613,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3613
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K1, K6 (notes/service.py transfer_notes 約168〜175行) / 対応区分: 修正必須 / 内容: 移管の宛先 to_user の組織を確かめていない。確かめているのは管理者の role と from_user の org_id だけである。 / 成立条件: 管理者が、別の組織の to_user（または users に存在しない利用者）を宛先にして呼ぶ。 / 影響: 組織内のメモが他の組織の利用者の所有になり、メモが組織の外へ渡る。R5「移す元・移す先・管理者がすべて同じ組織のときだけ」に違反する。 / 根拠: コード上、to_user[\"org_id\"] との比較は存在しない。UPDATE は owner_id だけを書き換える。notes.org_id は変わらず、owner_id は他の組織の利用者になる。 / 提案: トランザクションの前に `to_user[\"org_id\"] != admin[\"org_id\"]` なら Forbidden を投げる。DB 上の利用者の実在と組織も確かめるとよい。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 (tests/test_notes.py) / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系の1本ずつである。受け入れ条件・リスクの異常系と境界値を確かめるものがない。足りない検証は次のとおり。 (a) 他の組織・他人の非公開メモが NotFound になること（R2・R3・R4。K1）。 (b) 閲覧数の同時加算（K3）。 (c) 古い version での Conflict と、読み出しから書き込みの間の割り込み（hooks.before_write を使う）。 (d) 作成・削除・移管の途中失敗でロールバックされること（K4・AC10）。 (e) 検索の % と _ のエスケープとタグ OR（K2）。 (f) 一覧の page・per_page・sort の範囲外。 (g) タグ・題名・本文の上限・境界値。 (h) 移管の他の組織への拒否（K6）。 (i) api_key の伏せ字（AC6・K7。現状は action と actor しか見ていない）。 (j) RateLimiter の境界（ちょうど window 秒）とスレッド同時（AC7）。 (k) 共有リンクの期限ちょうど・形の崩れ（AC8・K8）。 (l) ログ・例外に機密情報が出ないこと（AC9）。 / 根拠: どれも仕様の受け入れ条件・リスクで必須とされている。現状では条件を外しても失敗しない。重大1の欠陥もテストをすり抜けている。 / 提案: 上の項目ごとに決定論的なテストを追加する。並行処理は hooks と RateLimiter.hook で再現する。sleep には頼らない。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1 (notes/service.py update_note) / 対応区分: 修正必須 / 内容: R4「更新でも R1 の入力検証を行う（タグを含む）」と、同じ組織の管理者による更新に関して、権限判定が古い読み出しに基づいている。UPDATE の WHERE が `id = ? AND version = ?` だけで、org_id・private・権限を条件に含めていない。 / 成立条件: _visible と _can_modify の確認の後で、BEGIN IMMEDIATE の前に、他の更新が入って権限状態が変わる（例: transfer_notes による所有者の変更）。 / 影響: 所有者の変更は version を +1 するため、通常は version の不一致で Conflict になる。この経路は version に守られているので、実害は限定的だと見ている。 ただし delete_note には version がなく、確認後に所有者が移管された場合も、古い権限判定のまま削除する。 / 根拠: delete_note は確認（約157〜160行）とトランザクション内の DELETE が別で、トランザクション内で再確認していない。get_note は再確認している点と一貫しない。 / 提案: delete_note のトランザクション内で行を読み直し、_visible と _can_modify を再確認してから削除する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。上限・タグ・失敗時に何も残らないことを確かめておらず不十分。\n- AC2: 正常な閲覧だけ。他の組織・非公開の NotFound と同時の閲覧数を確かめておらず不十分。\n- AC3: 一覧の1ページ目と単純な検索だけ。範囲外・%と_・タグ・他人の非公開を確かめておらず不十分。\n- AC4: 所有者の更新と削除の正常系だけ。Conflict・Forbidden・管理者・ロールバックがなく不十分。\n- AC5: 件数の確認と非管理者の拒否だけ。他の組織・途中失敗がなく不十分（重大1がすり抜けている）。\n- AC6: api_key の伏せ字を確かめるテストがなく不十分。\n- AC7: 枠が切り替わることだけ。ちょうど window 秒の境界と同時の呼び出しがなく不十分。\n- AC8: 往復と改ざんだけ。期限の境界・形の崩れがなく不十分。\n- AC9・AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip・弱体化は見つからなかった。\n### E2E の要否\n- 不要（ライブラリで UI・HTTP がない。ただし並行処理・ロールバックの結合的なテストは重大2のとおり必要）。\n### 不足しているリスク\n- K3: 同時の閲覧・更新・RateLimiter が未検証。\n- K4: 途中の失敗のロールバックが未検証。\n- K5・K7: 機密情報の露出が未検証。\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を読み、SQL の LIKE の ESCAPE 句とプレースホルダー、検索条件の org・private 絞り込みがコード上は適切であることを確認した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が成功した。\n- `aqdlc history --since 0` を見て、テストの弱体化・改ざんは見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

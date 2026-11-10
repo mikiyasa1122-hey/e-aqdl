@@ -1,0 +1,49 @@
+{
+ "case": "CLN-10",
+ "rep": 2,
+ "sec": 27.5,
+ "exit": 0,
+ "cost_usd": 0.1294666,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 19950,
+  "cache_read_input_tokens": 166066,
+  "output_tokens": 3304,
+  "output_tokens_details": {
+   "thinking_tokens": 604
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19950,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1808,
+    "cache_read_input_tokens": 44279,
+    "cache_creation_input_tokens": 2088,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2088
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c8b1a97a\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py` の LINK_RE は先頭が 0 の数字（例: `007.…`）を通す。署名は `int` に直した値で検証するので、`7` と同じ署名で有効になる。別の文字列表現で同じリンクが成立するが、同じ note_id・同じ期限の範囲内で、権限は広がらない。 / 提案: 正規化した形（先頭の 0 なし）と一致するかを確認するか、仕様に「先頭の 0 を許す」と明記する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は、題名・本文・タグの境界値と、タグ挿入の途中で例外を起こしたときにメモ・タグ・監査ログが何も残らないことを確認しており妥当。ソースで検証順序を確認した。\n- AC2: V2 は、同じ組織・非公開・他の組織・存在しないメモの見え方と閲覧数を確認している。差し込み口で割り込んだ閲覧が数え漏れにならないことも確認している。別々の接続の4スレッドが10回ずつ閲覧し、閲覧数が40になる実スレッドのテストもある。妥当。\n- AC3: V3 は、一覧の範囲外と sort の検査、% と _ のエスケープ、タグの OR、SQL インジェクション（K2）を確認している。ソースでは、値はすべてプレースホルダーで渡している。sort は辞書の固定値だけを使い、利用者の入力は SQL に入らない。妥当。\n- AC4: V4 は、認可の各分岐（作成者・管理者・他の組織・非公開）と、古い version の競合を確認している。読み出しから書き込みの間に更新が入った場合の Conflict と、最新の行を使うことも確認している。判定の後に移管された場合の再判定、検証の失敗、削除の途中失敗のロールバックも確認している。差し込み口で決定論的に再現しており妥当。\n- AC5: V5・VK6 は、管理者だけ・同じ組織だけ・途中失敗で元のままであることを確認している。実装は同じ組織の条件と1つのトランザクションを使っていて妥当。\n- AC6: V6・VK7 は、末尾4文字以外を伏せること、8文字未満（7文字・8文字・空）の境界、管理者だけ、自分の組織だけを確認しており妥当。\n- AC7: V7 は、枠の境界（ちょうど window 秒）、拒否の呼び出しが枠を延ばさないこと、20スレッドの Barrier による同時呼び出しで上限どおり5回だけ通ることを確認している。ロック内に割り込ませる決定論的なテストもある。実装の `threading.Lock` を外せば失敗する形で妥当。\n- AC8: V8・VK8 は、期限の境界、改ざん、形の崩れたリンクを確認している。実装は fullmatch と `hmac.compare_digest` を使っていて妥当。\n- AC9: V9・VK5 は、ログと例外メッセージに本文・署名・api_key が出ないことを確認している。ソースでは ID だけをログに出している。\n- AC10: V10 は、例外の後に接続を使い続けられることを確認している。`_rollback` は ROLLBACK の失敗で元の例外を隠さない。\n- エンジンが検出したテストの兆候はなし。skip・only・アサーションなしのテストはない。\n- 検証条件の弱体化は見つからなかった。`history` はテスト・実装の対応付け（bind・impl-map）だけで、検証の削除や弱体化はない。\n### E2E の要否\n- 不要（HTTP・UI のないライブラリで、実 SQLite（メモリ・一時ファイル）を使った実スレッドの統合的な単体テストでリスクに見合う）。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `spec.md`・`design.md` と `notes/*.py` の全ソースを読み、認可・SQL・トランザクション・並行処理の経路を追った。\n- `python3 -m unittest discover -s tests -t .` を実行し、63件すべて成功（1.1秒）。\n- `$AQ history --since 0` と `$AQ trace` を実行した。全受け入れ条件・リスクが unit に対応付けられ、gate は合格。反証テストは無効（passed_but_unchallenged）。\n- テストの `tests/base.py`・`test_ac2`・`test_ac4`・`test_ac6`・`test_ac7` の内容を読み、アサーションが十分に強いことを確認した。\n- コードは変更していない。`gate` も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

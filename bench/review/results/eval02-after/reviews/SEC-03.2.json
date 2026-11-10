@@ -1,0 +1,49 @@
+{
+ "case": "SEC-03",
+ "rep": 2,
+ "sec": 29.9,
+ "exit": 0,
+ "cost_usd": 0.1063116,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13887,
+  "cache_read_input_tokens": 122876,
+  "output_tokens": 3846,
+  "output_tokens_details": {
+   "thinking_tokens": 764
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13887,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2532,
+    "cache_read_input_tokens": 37303,
+    "cache_creation_input_tokens": 3447,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3447
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5, K8（notes/share.py:20） / 対応区分: 修正必須 / 内容: `make_link` が `log.info(\"share link created note=%s expires=%s token=%s\", ...)` で共有リンクの署名（token）をログに出している。R9「ログに共有リンクの署名を出さない」と、設計書「ログには ID だけを出す」に違反する。 / 成立条件: `make_link` を呼ぶたびに起きる。INFO を拾うログ設定であれば必ず出る。 / 影響: ログを読める人が有効な署名付きリンクを再構成でき、期限まで任意のメモへのアクセス権になる。 / 根拠: notes/share.py:20。上流でマスクする処理はなく、tests にログを確かめるテストもない。 / 提案: ログから token を外し、note_id と expires だけにする。\n- [重大2] 区分: テスト / 対象: AC9, R9, K5 / 対応区分: 証拠不足 / 内容: ログ・例外メッセージ・監査出力に本文・署名・api_key が出ないことを確かめるテストがない（`assertLogs` などの検証がゼロ）。重大1の漏えいも、このテストがないため gate を通っている。 / 根拠: AC9 は必須の受け入れ条件で、K5 は重要なリスク。tests/test_notes.py に該当テストはない。 / 提案: `assertLogs` で create・get・make_link・verify_link の全ログと、各例外の `str()` に、本文・署名・api_key が含まれないことを確かめるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC8, AC10, K1, K2, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: テストが12件の正常系中心で、仕様の受け入れ条件を確かめるものが大きく不足している。不足しているのは次の検証。\n  - 認可・漏えい（K1）: 他組織・他人の非公開メモが NotFound になること（get・list・search）。管理者でも他人の非公開メモは NotFound になること。他の人の更新・削除が Forbidden になること。\n  - R5・K6: 組織をまたぐ移管が Forbidden になること。移管の途中で失敗したときに元のままになること。\n  - 競合・同時実行（K3）: 閲覧数の同時加算と、version 違いの Conflict。`hooks.before_write` と `RateLimiter.hook` を使った決定論的な並行テストがない。\n  - R7: 枠の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出し。\n  - R8: 期限ちょうどの境界、期限切れ、形の崩れたリンク。\n  - R1: 失敗時のロールバックと全入力の境界値。AC6 のマスクの検証は、`rows[0][\"actor_key\"]` が 8 文字未満の鍵を含めて伏せられているかを見ておらず、AC6 を確かめていない。\n  - K2・R3: `%` と `_` を含む検索語、ページングの範囲外。\n  - AC10: 例外の後に同じ接続で次の操作ができること。 / 根拠: 上記はいずれも仕様で必須の条件で、`service.py` の `hooks` と `RateLimiter.hook` はそのための差し込み口。現状の gate の合格は、これらの欠陥がないことの証拠にならない。実装の欠陥は確定していない（未確認）。 / 提案: 上記を unittest で追加する。並行は `threading.Barrier` やフックで順序を固定し、sleep に頼らない。外した条件が失敗として検出されることも確かめる。\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py:update_note・delete_note） / 対応区分: 改善提案 / 内容: 認可と可視性の確認がトランザクションの外にある。確認の後、BEGIN IMMEDIATE の前に管理者権限や所有者が変わる競合の窓が残る。`UPDATE` は `WHERE id = ? AND version = ?` だけで、delete の `DELETE` は version を条件にしていない。 / 提案: トランザクション内で行を再取得して認可を再確認する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。タグ・本文・題名の境界とロールバックが未検証で不十分。\n- AC2: 閲覧数も、非公開・他組織の NotFound も未検証で不十分。\n- AC3: test_list_first_page と test_search だけ。ワイルドカード・範囲外・タグ OR・他人の非公開除外が未検証で不十分。\n- AC4: 作成者の更新・削除の正常系だけ。Forbidden・Conflict・NotFound が未検証で不十分。\n- AC5: 正常系の件数と管理者以外の拒否だけ。組織またぎとロールバックが未検証で不十分。\n- AC6: 監査の action と actor しか見ておらず、api_key のマスクが未検証で不十分。\n- AC7: 逐次の限界だけ。ちょうど window 秒の境界と同時の呼び出しが未検証で不十分。\n- AC8: 往復と改ざん1例だけ。期限の境界・期限切れ・形の崩れが未検証で不十分。\n- AC9: 検証なし。実際にバグが入っている（重大1）。\n- AC10: 検証なしで不十分。\n- エンジンが検出したテストの兆候はなし。テストの改ざん・弱体化は history で確認できなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest の結合テスト（SQLite・スレッド）で足りる。\n### 不足しているリスク\n- K1, K2, K3, K4, K5, K6, K7, K8 の検証が不足している（重大3）。\n- 実装を読んだ範囲で、SQL のプレースホルダー、LIKE の ESCAPE とエスケープ文字、期限・枠の境界は仕様どおりで、欠陥は見つからなかった。ただし実行して確認していない。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を通読した。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12 件が OK になった。\n- `aqdlc history --since 0` で、検証条件の弱体化（検証の削除・緩和）がないことを確認した。\n- `make_link` のログ出力に token が含まれることは、コードの読み取りで確定した。実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

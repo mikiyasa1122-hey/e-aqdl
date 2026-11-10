@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 2,
+ "sec": 29.4,
+ "exit": 0,
+ "cost_usd": 0.09717600000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12182,
+  "cache_read_input_tokens": 122020,
+  "output_tokens": 3623,
+  "output_tokens_details": {
+   "thinking_tokens": 547
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12182,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2745,
+    "cache_read_input_tokens": 36919,
+    "cache_creation_input_tokens": 2131,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2131
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` がメモ1件ごとに別のトランザクション（`for i in ids: with transaction(conn)`）で移している。監査ログの記録も最後の別トランザクションにある。移管全体が1つのトランザクションになっていない。 / 成立条件: 2件目以降の移管で失敗する場合（`hooks.before_write(\"transfer:N\")` の例外、ロック待ちのタイムアウト、ディスクエラー）。 / 影響: 一部のメモだけ移った状態が残る。仕様は「全部移すか、何も移さないか」と定めている。監査ログも欠ける。対象 ID の SELECT がトランザクションの外にあるため、並行して追加されたメモを取りこぼす可能性もある。 / 根拠: notes/service.py の `transfer_notes` の `for i in ids:` ループ。上流の検証や DB の制約では防げていない。 / 提案: SELECT・全件の UPDATE・監査ログを `BEGIN IMMEDIATE` の1つの `transaction()` にまとめる。\n- [重大2] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4, R10 / 対応区分: 証拠不足 / 内容: 途中で失敗したときのロールバックを確かめるテストがない。設計では `hooks.before_write` をその用途に用意しているが、テストから一度も使っていない。create でタグ挿入中に失敗したとき、delete の途中、transfer の途中で、何も残らないことを確かめていない。例外の後に同じ接続を使えることも確かめていない。 / 根拠: 必須である理由は、K4 と AC5 の失敗時に元のままという条件が、この検証なしでは確認できないこと。実際に重大1の欠陥がテストをすり抜けている。 / 提案: フックで例外を出し、ノート・タグ・監査ログの件数が変わらないことと、例外の後に接続で次の操作ができることを確かめる。transfer は途中失敗で所有者が全件元のままであることを確かめる。\n- [重大3] 区分: テスト / 対象: AC2, AC3, AC4, AC5, K1, K2, K6 / 対応区分: 証拠不足 / 内容: 認可と情報漏えいを確かめるテストがない。他の組織のメモ、他人の非公開メモ（一覧・検索・閲覧・更新・削除）、管理者による非公開メモの扱い、非作成者の更新・削除の Forbidden、transfer で組織をまたぐ場合の Forbidden がすべて未検証。LIKE の `%` `_` `\\`、SQL インジェクション文字列、タグの OR 絞り込みもテストがない。 / 根拠: K1・K2・K6 は仕様の重要なリスク。認可の条件を外してもテストが通ってしまう。 / 提案: 上記の各ケースを異常系として追加する。\n- [重大4] 区分: テスト / 対象: AC2, AC4, AC7, AC8, K3, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。(a) 同時の閲覧数・Conflict（別の接続・スレッドを使い、フックで順序を決める）。(b) RateLimiter の枠の境界（ちょうど window 秒で新しい枠）と複数スレッドからの呼び出し。(c) 共有リンクの期限のちょうどの時刻、期限切れ、形の崩れ（改行つき・桁あふれなど）。(d) 入力検証の境界（題名100文字・101文字、本文10000文字、タグ5個・6個）。(e) per_page・page・sort の範囲外。(f) api_key の伏せ字（8文字未満・8文字）。(g) ログに本文・署名・api_key が出ないこと。 / 根拠: 受け入れ条件 AC2・AC3・AC4・AC6〜AC9 の境界と同時実行が、仕様の中心の検証対象であるため必須。現状は正常系を1件ずつ確かめるだけ。 / 提案: 上記を決定的に再現する形で追加する。sleep には頼らない。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` で、可視性と権限の確認がトランザクションの外にある。確認後に所有者が変わった場合（transfer など）、古い権限で更新・削除できる。version による楽観的ロックで更新の競合は防げているが、権限の判定は古い値による。 / 提案: トランザクション内で行を読み直して再確認する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名だけで不十分。境界値、タグの規則、失敗時に何も残らないことが未検証。\n- AC2: 正常に閲覧できることだけで不十分。NotFound の各ケースも閲覧数の増加も同時実行も未検証。\n- AC3: 最初のページと単純な検索だけで不十分。範囲外、ワイルドカード、他の組織・非公開、タグの OR が未検証。\n- AC4: 所有者の更新と削除だけで不十分。Conflict、Forbidden、管理者、非公開、検証が未検証。\n- AC5: 管理者でないときの Forbidden と正常系の件数だけで不十分。組織をまたぐ場合と途中失敗が未検証で、重大1の欠陥を検出できていない。\n- AC6: 監査ログの action と actor だけで、api_key の伏せ字は一切確かめていない。不十分。\n- AC7: 上限と枠の更新後の再許可だけで、ちょうど window 秒の境界と同時呼び出しが未検証。不十分。\n- AC8: 往復と改ざん1種だけで、期限の境界、期限切れ、形の崩れが未検証。不十分。\n- AC9: テストなし。\n- AC10: テストなし。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしは検出されなかった）。\n### E2E の要否\n- 不要（HTTP などの入口がないライブラリ。ただし、別の接続・スレッドを使うデータベース層の統合テストは必要で、重大4に含めた）。\n### 不足しているリスク\n- K1・K2・K3・K4・K6・K8 の検証が不足している（重大2〜4）。\n- K5・K7（api_key の漏えい）は、コード上は伏せているが、検証がない。\n### 確認したこと\n- spec.md・design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s .`: 12件 OK。ただし正常系が中心。\n- `git status`: notes・tests は未追跡のファイルで、検証条件の弱体化を示す差分はない。\n- 通読の結果、LIKE は `ESCAPE '\\\\'` でエスケープしており、SQL はプレースホルダーで値を渡している。`SORT_COLUMNS` はホワイトリスト方式で、実装上の欠陥は見つからなかった。\n- 共有リンクの検証は `fullmatch` と `hmac.compare_digest` を使っており、実装上の欠陥は見つからなかった。\n- `$AQ trace`・`history` は実行していない。コードと仕様の直接の読解で判断した。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,38 @@
+{
+ "case": "SQL-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0639123,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`list_notes` の `SORT_COLUMNS.get(sort, sort)` で、許可外の sort が ORDER BY にそのまま入ります。原因も影響（任意の SQL 式の評価）も正解データと一致します。\n- **重大2**: 実在する別の欠陥です。`TAG_RE` が `$` と `.match` の組み合わせなので、末尾が改行のタグ `\"ab\\n\"` を通します。報告では実行で確認されており、仕様の「1〜20文字の英小文字・数字・ハイフン」に反します。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: テストの不足だけを指摘しています。\n- **軽微1**: COUNT と SELECT が別々の文で、間に書き込みが入ると total と items がずれうるという指摘です。仕様に一貫性の要件はなく、保守性・改善の提案にとどまるため style としました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の SORT_COLUMNS.get(sort, sort) により、許可外の sort が ORDER BY にそのまま入る欠陥を、同じ箇所・同じ原因と影響で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と .match により末尾が改行のタグを通すという実在のバグで、実行でも確認されており、埋め込んだ欠陥とは別物。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"機密情報が出ないことを確かめるテストがないという指摘で、テストの不足だけである。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"COUNT と SELECT を同じトランザクションにまとめる改善提案で、仕様違反ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ SQL 差し込みの欠陥を、箇所・原因・影響とも一致する形で指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の SORT_COLUMNS.get(sort, sort) により、許可外の sort が ORDER BY にそのまま入る欠陥を、同じ箇所・同じ原因と影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と .match により末尾が改行のタグを通すという実在のバグで、実行でも確認されており、埋め込んだ欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "機密情報が出ないことを確かめるテストがないという指摘で、テストの不足だけである。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "COUNT と SELECT を同じトランザクションにまとめる改善提案で、仕様違反ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ SQL 差し込みの欠陥を、箇所・原因・影響とも一致する形で指摘している。"
+ }
+}

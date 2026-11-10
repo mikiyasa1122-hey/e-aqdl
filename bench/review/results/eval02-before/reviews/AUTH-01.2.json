@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-01",
+ "rep": 2,
+ "sec": 27.7,
+ "exit": 0,
+ "cost_usd": 0.0966718,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12359,
+  "cache_read_input_tokens": 120198,
+  "output_tokens": 3520,
+  "output_tokens_details": {
+   "thinking_tokens": 596
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12359,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2414,
+    "cache_read_input_tokens": 36406,
+    "cache_creation_input_tokens": 2361,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2361
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 55ea07b9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R4, K1, AC2, AC4 / 対応区分: 修正必須 / 内容: `_visible`（notes/service.py の `_visible`）が `org_id` を確認していない。他の組織の公開メモを `get_note` で本文ごと閲覧でき、閲覧数も増やせる。他の組織のメモに対する `update_note` と `delete_note` は、存在しないメモの NotFound と違う Forbidden を返すため、存在も漏れる。 / 成立条件: 別の組織の利用者が、公開メモの ID を指定して呼ぶ。 / 影響: 仕様の「他の組織のメモは NotFound、存在を明かさない」に反する。組織をまたいだ情報漏えいで、K1 が未対策になっている。 / 確認した保証: `get_note`、`update_note`、`delete_note` の呼び出し元に、組織を確認する処理は他にない。実行して確かめた。org1 のメモを org2 の利用者が `get_note` すると本文が返った。`delete_note` は Forbidden、存在しない ID は NotFound だった。 / 根拠: notes/service.py の `_visible` は `row is not None and (not row[\"private\"] or row[\"owner_id\"] == user[\"id\"])` だけで判定している。 / 提案: `_visible` に `row[\"org_id\"] == user[\"org_id\"]` を加える。`get_note` の2回目の判定も同じ関数を通るので、これで揃う。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10、K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は正常系中心の12件だけで、仕様のリスクを確かめるテストがほとんどない。具体的には次のものがない。他の組織・非公開メモの NotFound、閲覧数の並行カウント、LIKE の `%` と `_`、SQL インジェクション入力、タグの OR 絞り込み、list の範囲外の拒否、update/delete の Conflict と権限拒否、transfer の組織またぎと途中失敗の巻き戻し、`service.hooks.before_write` を使った途中失敗でのロールバック（R1、R4、R10）、api_key の伏せ字の境界（8文字未満、8文字）、RateLimiter の枠の境界と並行実行、共有リンクの期限ちょうど・形の崩れ・期限切れ、ログへの機密情報の非出力（R9）。 / 根拠: 重大1のような欠陥を現在のテストは検出できず、12件すべて通った。設計書がテスト用に用意した差し込み口（`hooks.before_write`、`RateLimiter.hook`）を、テストが1つも使っていない。 / 提案: 上記の各リスクについて、異常系と境界値のテストを追加する。他の組織の読み取りは、`_visible` の org 条件を外すと失敗する形にする。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の権限確認は、トランザクションの外で読んだ `row` を使っている。version の条件があるので更新の取りこぼしは起きないが、移管などで所有者が変わった直後に、古い所有者の権限で更新が通る余地がある。 / 提案: 権限確認を `transaction` の内側で行う。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常な作成だけを確かめている。本文・タグの境界、tags が文字列のとき、ロールバックのテストがなく不十分。\n- AC2: 同じ組織の閲覧しかテストしていない。他の組織・非公開・並行の閲覧数をテストしておらず、実装にも欠陥がある（重大1）。\n- AC3: 最初のページの件数と単純な検索だけで不十分。`%` と `_`、SQL インジェクション、タグ、範囲外の拒否、非公開の除外が未検証。\n- AC4: 作成者による更新と削除の正常系だけ。Conflict、Forbidden、管理者、非公開、更新時のタグ検査が未検証。\n- AC5: 件数と、管理者でないときの拒否だけ。他の組織への移管と途中失敗が未検証。\n- AC6: 監査ログ出力の形だけで、api_key の伏せ字を確かめていない。不十分。\n- AC7: 枠の再開だけで、ちょうど window 秒の境界と並行実行が未検証。\n- AC8: 往復と改ざん1種類だけで、期限の境界、形の崩れ、期限切れが未検証。\n- AC9: テストなし。\n- AC10: 例外の後で接続を再利用できることのテストなし。\n- エンジンが検出したテストの兆候はなし。skip・弱いアサーションの改ざんもなかった。\n### E2E の要否\n- 不要（HTTP なしのライブラリで、単体テストで足りる）。ただし、並行処理と途中の失敗は、差し込み口を使った決定論的な単体テストで確かめる必要がある。\n### 不足しているリスク\n- K1: 組織をまたぐ漏えいの実装欠陥（重大1）と、その検証の欠落。\n- K2: SQL インジェクションの検証なし。コードはプレースホルダーを使っている。\n- K3: 並行の閲覧・更新・RateLimiter の検証なし。\n- K4: 途中の失敗による不整合の検証なし。\n- K5, K7: api_key の伏せ字とログの機密情報の検証なし。\n- K6: 移管で組織の外にメモが渡るケースの検証なし。\n- K8: 期限切れ・改ざん・形の崩れたリンクの検証が一部だけ。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、12件すべて成功した。\n- 一時の Python スクリプトで、他の組織の利用者が公開メモの本文を `get_note` で取得できることを確認した。そのとき `delete_note` は Forbidden、存在しない ID は NotFound になった。\n- notes/ 配下の全ソース（db.py、service.py、ratelimit.py、share.py、errors.py）と tests/test_notes.py を通読した。\n- `$AQ trace` と `$AQ history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

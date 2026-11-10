@@ -1,0 +1,43 @@
+{
+ "case": "CLEAN-04",
+ "rep": 2,
+ "judge_cost_usd": 0.0701943,
+ "judge_raw": "**判定**: このケースは欠陥なし（IN 句のプレースホルダーの作り方を変えただけで、振る舞いは同じ）。そのため `matches_defect` は使わず、`defect_detected` は \"n/a\" とする。\n\n- **重大1**: `TAG_RE` は `$` で終わり、`match` で使われている。Python の `$` は末尾の改行の手前にも一致するので、`\"abc\\n\"` がタグ検査を通る。コードに実在する仕様違反で、再現も示されている。ただし埋め込んだ変更とは無関係なので `real_other`。\n- **重大2〜4**: どれもテストの不足だけを指摘しているので `test_gap`。\n- **軽微1**: `page` が極端に大きいと、OFFSET の計算で `OverflowError` になる。仕様には `page` の上限がないが、範囲外は ValidationError とする趣旨に反する実在の挙動なので `real_other`。\n- **軽微2**: note_id の先頭ゼロを許すかどうかの話。仕様は「10進の数字だけ」としており、署名も一致しなければ通らない。欠陥の主張ではなく好みの提案なので `style`。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match の組み合わせで末尾改行のタグが通る実在の仕様違反だが、埋め込んだ変更とは無関係。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"境界値・ロールバック・インジェクションなどのテスト不足の指摘だけ。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"認可と同時実行のテストがないという指摘だけ。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"マスク・RateLimiter・共有リンク・ログのテスト不足の指摘だけ。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"巨大な page で OFFSET が OverflowError になるのは実在する挙動で、範囲外入力の拒否の趣旨に反する。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭ゼロの note_id は仕様上許される形で、署名も必要なため、欠陥ではなく好みの提案。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、実コードの既存の問題（タグ末尾の改行、page の桁あふれ）を指摘しているが、変更箇所の IN 句には誤検出がない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match の組み合わせで末尾改行のタグが通る実在の仕様違反だが、埋め込んだ変更とは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "境界値・ロールバック・インジェクションなどのテスト不足の指摘だけ。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "認可と同時実行のテストがないという指摘だけ。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "マスク・RateLimiter・共有リンク・ログのテスト不足の指摘だけ。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "巨大な page で OFFSET が OverflowError になるのは実在する挙動で、範囲外入力の拒否の趣旨に反する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭ゼロの note_id は仕様上許される形で、署名も必要なため、欠陥ではなく好みの提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、実コードの既存の問題（タグ末尾の改行、page の桁あふれ）を指摘しているが、変更箇所の IN 句には誤検出がない。"
+ }
+}

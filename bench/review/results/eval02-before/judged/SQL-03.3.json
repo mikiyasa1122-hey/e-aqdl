@@ -1,0 +1,33 @@
+{
+ "case": "SQL-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0630003,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`list_notes` の `SORT_COLUMNS.get(sort, sort)` が、許可しない値を ORDER BY にそのまま入れています。原因・箇所・影響（任意の SQL 式の差し込み）が正解データと一致します。\n- **重大2**: 埋め込んだ欠陥ではありませんが、実在する欠陥です。`TAG_RE.match` と `$` の組み合わせでは、末尾の改行付きタグ `\"abc\\n\"` が通ります。これは仕様の「英小文字・数字・ハイフンの1〜20文字」に反します。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: テストの不足だけを指摘しています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の SORT_COLUMNS.get(sort, sort) で、許可外の sort を ORDER BY にそのまま埋め込む点を、原因・影響とも正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで末尾の改行付きタグが通るのは実在するバグで、仕様に反する。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"伏せ字や RateLimiter の境界・並行のテスト不足だけを指摘している。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ SQL 差し込みの欠陥を、箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の SORT_COLUMNS.get(sort, sort) で、許可外の sort を ORDER BY にそのまま埋め込む点を、原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで末尾の改行付きタグが通るのは実在するバグで、仕様に反する。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "伏せ字や RateLimiter の境界・並行のテスト不足だけを指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ SQL 差し込みの欠陥を、箇所・原因・影響とも正確に捉えている。"
+ }
+}

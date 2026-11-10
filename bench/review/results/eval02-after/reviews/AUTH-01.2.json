@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-01",
+ "rep": 2,
+ "sec": 30.8,
+ "exit": 0,
+ "cost_usd": 0.10790960000000001,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13659,
+  "cache_read_input_tokens": 123776,
+  "output_tokens": 4088,
+  "output_tokens_details": {
+   "thinking_tokens": 551
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13659,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2661,
+    "cache_read_input_tokens": 38143,
+    "cache_creation_input_tokens": 2393,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2393
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 55ea07b9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R3, R4, K1, AC2, AC4 / 対応区分: 修正必須 / 内容: `_visible`（notes/service.py:73-75）が org_id を確認しない。docstring には「組織が同じで」とあるが、コードは private と owner_id しか見ていない。このため get_note・update_note・delete_note で、他の組織の公開メモを閲覧・更新の経路に乗せられる。 / 成立条件: 別の組織の利用者が、公開メモの note_id を指定して呼ぶ。 / 影響: 他の組織の本文を読める（機密の漏えい）。get_note では閲覧数も増える。update_note・delete_note では NotFound ではなく Forbidden が返るため、メモの存在が分かる。仕様の「他の組織は NotFound」に違反する。 / 確認した保証: 上流の org チェックも DB の制約もない。呼び出し元は user の dict をそのまま渡す。既存テストは全員が同じ組織（org 10）で、他の組織のケースがない。 / 根拠: 再現した。org1 の利用者がメモを作り、org2 の利用者が get_note を呼ぶと本文 \"secret\" が返った。同じ利用者が update_note を呼ぶと Forbidden が返った（NotFound ではない）。 / 提案: `_visible` を `row is not None and row[\"org_id\"] == user[\"org_id\"] and (not row[\"private\"] or row[\"owner_id\"] == user[\"id\"])` に変える。get_note の再確認も同じ関数を通るので、これで足りる。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 / 対応区分: 修正必須 / 内容: TAG_RE が `^[a-z0-9-]{1,20}$` で `re.match` を使っている（service.py:14, 64, 150）。`$` は末尾の改行の直前にも一致するので、\"ok\\n\" のようなタグが通る。仕様のタグは「英小文字・数字・ハイフンの1〜20文字」で、改行は許されない。 / 成立条件: create_note、update_note、search_notes の tags に、末尾が改行のタグを渡す。 / 影響: 不正なタグが保存される。保存されたタグでは、絞り込みの比較が意図とずれる。 / 根拠: 再現した。create_note に tags=[\"ok\\n\"] を渡すと ValidationError にならず作成できた。 / 提案: `TAG_RE.fullmatch(t)` を使う（3か所）。share.py は fullmatch を使っており問題ない。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが12件だけで、ほぼ正常系の1本ずつ。次の検証がない。(a) 他の組織・他人の非公開メモが NotFound になること（K1）。重大1のバグも、これがないため見逃された。(b) 閲覧数の同時加算（AC2）、更新の Conflict と競合（AC4）、RateLimiter の枠の境界と複数スレッドの同時呼び出し（AC7）。(c) hooks.before_write を使った、途中で失敗したときのロールバック（AC1, AC4, AC5, AC10）。(d) 検索の % と _ のエスケープと SQL インジェクション（K2）。(e) api_key の伏せ字（8文字未満・境界）（AC6）。(f) 共有リンクの期限ちょうど・形の崩れ（AC8）。(g) ログ・例外に本文・署名・api_key が出ないこと（AC9）。(h) 入力の境界値（題名100文字・101文字、タグ5個・6個、page・per_page の範囲外）。 / 根拠: 設計書が並行実行と途中の失敗を再現する差し込み口（hooks・RateLimiter.hook）を用意しているのに、テストで使われていない。仕様の受け入れ条件が、境界・異常系・同時実行を明示的に要求している。 / 提案: 上の (a)〜(h) の検証を追加する。特に、組織をまたいだ get_note・update_note・delete_note・list・search・transfer の拒否、hooks を使った失敗時の巻き戻し、スレッドによる閲覧数・RateLimiter の同時呼び出しは、sleep に頼らず決定論的に書く。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名の拒否と正常な作成だけで、境界値・タグの規則・失敗時の巻き戻しがない。\n- AC2: 不十分。見え方の検証も、閲覧数の加算・同時加算もない（重大1・重大3）。\n- AC3: 不十分。一覧の1ページ目と単純な検索だけ。範囲外・% と _・タグの OR・他人の非公開メモの除外がない。\n- AC4: 不十分。所有者の更新・削除の正常系だけ。Conflict・Forbidden・管理者・非公開メモがない。\n- AC5: 不十分。正常系と、管理者以外の拒否だけ。他の組織・途中の失敗がない。\n- AC6: 不十分。伏せ字を確かめていない（rows[0] の action と actor だけを見ている）。\n- AC7: 不十分。枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出しがない。ちょうど window 秒の境界は、実装を読むと `now - start >= window` で仕様どおり。\n- AC8: 不十分。往復と改ざんだけ。期限ちょうど・期限切れ・形の崩れがない。実装は読んで仕様どおりと判断したが、検証されていない。\n- AC9: なし。\n- AC10: なし。transaction() は例外で ROLLBACK するが、検証がない。\n- エンジンが検出したテストの兆候: なし。テストの弱体化や skip は見つからなかった。\n### E2E の要否\n- 不要（HTTP 層のないライブラリ。unittest で service を直接呼ぶ検証が適切）。ただし、同時実行は別の接続・別のスレッドを使う統合テストにすること。\n### 不足しているリスク\n- K1: 組織をまたぐ漏えいが実際に起きている（重大1）。list_notes・search_notes は SQL で org_id を絞っており問題ない。\n- K2: SQL はプレースホルダーと ESCAPE が使われており、コード上は問題ない。ただし検証がない。\n- K3・K4・K5・K7: 実装は読んで問題なさそうだが、検証がない（重大3）。\n- K6: transfer_notes は元・先・管理者の組織を確認し、トランザクションで巻き戻る。コード上は問題ないが検証がない。\n- K8: 実装は読んで問題なさそうだが、検証がない。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功（ただし上記のとおり検証が薄い）。\n- 一時の in-memory DB で再現した。他の組織の利用者が get_note で本文を読めた。update_note は NotFound ではなく Forbidden になった。タグ \"ok\\n\" は検査を通って作成できた。\n- notes/ の全ファイルを読み、設計書と対応を確認した。\n- git は管理外（未追跡）で、検証条件の履歴の比較は行っていない。\n```",
+ "files_changed": [],
+ "valid": true
+}

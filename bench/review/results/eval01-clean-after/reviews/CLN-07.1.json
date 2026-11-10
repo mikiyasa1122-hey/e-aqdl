@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 1,
+ "sec": 28.2,
+ "exit": 0,
+ "cost_usd": 0.15026820000000002,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 26189,
+  "cache_read_input_tokens": 116062,
+  "output_tokens": 3389,
+  "output_tokens_details": {
+   "thinking_tokens": 1186
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 26189,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1963,
+    "cache_read_input_tokens": 37306,
+    "cache_creation_input_tokens": 9234,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9234
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, notes/share.py:`verify_link` / 対応区分: 改善提案 / 内容: 署名は int 化した note_id で計算するため、`007.<期限>.<署名>` のような先頭ゼロ付きのリンクが、`7.<期限>.<署名>` と同じ署名で有効になる。仕様の形（10進の数字）は満たしており、認可の穴にはならない。 / 提案: 厳密にするなら、元の文字列と `str(int(..))` が一致することも確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。題名・本文・タグの境界、重複タグ、`tags` に文字列を渡した場合を拒否する検査がある。`fail_at(\"create:tags\")` で途中失敗を起こし、メモ・タグ・監査ログが何も残らないことを確認する。\n- AC2: 妥当。他の組織・他人の非公開・存在しない ID がすべて NotFound になる。NotFound では閲覧数が増えない。確認後に非公開へ変更された場合も NotFound になる。同じ DB ファイルを別接続・別スレッド4本で10回ずつ閲覧し、合計40になることを確認する。フックで割り込ませる決定論的なテストもある。\n- AC3: 実装を読んで妥当と判断した。SQL はすべてプレースホルダーで、LIKE には ESCAPE を付けており、`\\` `%` `_` をエスケープしている。題名と本文の両方に同じ pattern を渡している。page・per_page・sort の範囲外と bool は拒否される。タグは OR で絞り込み、R1 の規則で検査する（`fullmatch` により末尾の改行も拒否）。`tests/test_ac3_list_search.py` は通ったが、中身までは読んでいない。\n- AC4: 妥当。作成者・管理者・他の組織・非公開の各パターンを検査している。古い version と、読み出しから書き込みの間に別の更新が入った場合は Conflict になる。トランザクション内で認可と検証をやり直しており、判定後に移管されたケースもテストしている。削除の途中失敗は元に戻り、例外も呼び出し側に伝わる。\n- AC5: 実装を確認した。管理者・同じ組織の3者の検査があり、全部移すか何も移さないかをトランザクションで保証している。`tests/test_ac5_transfer.py` は通ったが、中身までは読んでいない。\n- AC6: 実装を確認した。8文字未満は全部伏せ、それ以上は末尾4文字だけを残す。テストは通ったが、中身までは読んでいない。\n- AC7: 妥当。枠の境界は 159.999 で拒否、160.0 で許可を確認する。拒否した呼び出しが枠を延ばさないことも確認する。20スレッドを Barrier で同時に呼び、許可が5件になる。ロック内のフックで割り込ませる決定論的なテストもあり、sleep には頼っていない。\n- AC8: 実装を確認した。`fullmatch` による形の検査、期限の `>=` 判定、`hmac.compare_digest` を使っている。テストは通ったが、中身までは読んでいない。\n- AC9: 実装を確認した。ログ・例外のメッセージには ID と件数だけを出しており、本文・署名・api_key は出ていない。テストは通ったが、中身までは読んでいない。\n- AC10: `transaction()` が例外時に ROLLBACK し、`_rollback` が元の例外を隠さない。テストは通ったが、中身までは読んでいない。\n- エンジンが検出したテストの兆候はなし。`history` に検証条件を弱めた形跡はなかった。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、SQLite の実 DB（メモリとファイル）を使った単体・結合テストがリスクに見合っている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md、design.md、notes/*.py の全ソースを通読した。認可（`_visible`・`_can_modify`）、トランザクション境界、LIKE のエスケープ、プレースホルダーの使用、ロックの範囲を確認した。\n- `python3 -m unittest discover -s tests -t .` を実行し、63件がすべて成功した（実行は一時的な .pyc 出力なしで行った）。\n- `aqdlc history --since 0` を確認した。出力を `head` で切ったため先頭30行しか見ておらず、要求・受け入れ条件・検証の追加の記録だけを見た。それ以降の記録は未確認。",
+ "files_changed": [],
+ "valid": true
+}

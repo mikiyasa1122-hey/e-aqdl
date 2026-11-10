@@ -1,0 +1,49 @@
+{
+ "case": "VAL-04",
+ "rep": 1,
+ "sec": 32.0,
+ "exit": 0,
+ "cost_usd": 0.12477579999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18697,
+  "cache_read_input_tokens": 113718,
+  "output_tokens": 3860,
+  "output_tokens_details": {
+   "thinking_tokens": 698
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18697,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2799,
+    "cache_read_input_tokens": 36356,
+    "cache_creation_input_tokens": 2342,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2342
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7be71891\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, R1, `notes/service.py` の `update_note`（約142〜146行目） / 対応区分: 修正必須 / 内容: 更新時にタグを検査していない。`_validate(new_title, new_body, [])` に空リストを渡しているため、`new_tags` は検査されない。 / 成立条件: 作成者または管理者が `tags=` を渡して更新する。6個以上、`\"BAD!\"` のような不正文字、20文字超、文字列でない要素のどれでも起きる。 / 影響: R4「更新でも R1 の入力検証を行う（タグを含む）」に違反する。不正なタグが保存され、検索でのタグ絞り込みとデータ整合性が崩れる。 / 根拠: 一時的に実行して確認した。`update_note(c,u,n,1,tags=[\"BAD!\"]*9)` は `2` を返し、`get_note` のタグは `['BAD!']` だった。上流で検査している箇所はなく、既存テストにも防ぐものがない。 / 提案: `new_tags` が None でなければ `_validate` にそのタグを渡す。検査はトランザクションの前に行う。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC10, K1, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 異常系と競合の検証がない。`tests/test_notes.py` の12件は正常系が中心である。他の組織・他人の非公開メモの NotFound は1件もテストされていない。Forbidden は `transfer_requires_admin` の1件だけで、組織またぎの移管、非管理者による更新・削除は確かめていない。version 不一致の Conflict もない。閲覧数の同時加算もない。`hooks.before_write` による途中失敗でのロールバック（作成・削除・移管）もない。例外後に接続を使い続けられることもない。更新テストは、タグ検査の欠落（重大1）を検出できていない。 / 根拠: K1（漏えい）と K3・K4（更新の消失・不整合）は、この仕様の主要なリスクである。設計も `hooks.before_write` をテスト用に用意している。認可の条件や WHERE 条件を外しても、現在のテストは通る。 / 提案: 次の決定論的テストを追加する。別組織・他人の非公開・存在しないメモの NotFound。管理者の更新・削除と、他人の非公開メモに対する管理者の NotFound。古い version の Conflict と、`before_write(\"update\")` 内で別接続が更新した場合の Conflict。別接続・別スレッドによる views の加算。`create:tags`、`delete:note`、`transfer:N` での例外後に何も残らないこと、その後も接続が使えること。組織またぎの移管の Forbidden と、移管の全件失敗時に元のまま残ること。\n- [重大3] 区分: テスト / 対象: AC3, AC6, AC7, AC8, AC9, K2, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 境界値と機密情報の検証がない。LIKE の `%` と `_` を文字として探すこと、SQL 文字列を検索語やタグに渡すこと、page・per_page・sort の範囲外がどれも未検証である。tags のタグ絞り込み（OR）と、タグが検索でも検査されることも未検証である。api_key の伏せ字は、末尾4文字と8文字未満の境界を見ていない（テストは `rows[0][\"action\"]` と actor しか見ていない）。RateLimiter は、ちょうど window 秒での枠の切り替えと、同時の呼び出しがない。共有リンクは、期限ちょうど、形の崩れ、改行を含むものの拒否がない。ログ・例外メッセージに本文・署名・鍵が出ないことも見ていない。 / 根拠: これらは仕様の受け入れ条件に明記された境界で、K2・K5・K7・K8 に直結する。実装は読んだ範囲では正しそうだが、検証がなく、条件を外しても検出できない。 / 提案: 上記の境界値テストを追加する。RateLimiter は `hook` で並行呼び出しを再現し、スレッドを複数立てて上限超過がないことを確かめる。ログは `assertLogs` で本文・署名・鍵が含まれないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4, `update_note` / 対応区分: 改善提案 / 内容: NotFound・Forbidden の判定を、`BEGIN IMMEDIATE` の外で読んだ行で行っている。判定の後に所有者が移管されると、古い権限判定のまま書き込める。version の条件で大半は防げる（移管で version が増えるため）。 / 提案: 権限判定をトランザクションの中で行うか、設計書にこの前提を記載する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名と正常系だけである。本文・タグの上限、空白だけの題名、途中失敗で何も残らないことは未検証。\n- AC2: 不十分。同じ組織の閲覧しか確かめていない。K1 の NotFound と閲覧数の同時加算はない。\n- AC3: 不十分。一覧の1ページ目と単純な検索だけ。範囲外の入力、`%`・`_`、タグの絞り込み、SQL インジェクションはない。\n- AC4: 不十分。所有者による正常系の更新・削除だけ。Conflict・Forbidden・タグ検証がなく、実装にバグ（重大1）がある。\n- AC5: 不十分。正常系と非管理者の Forbidden だけ。組織またぎと途中失敗の巻き戻しがない。\n- AC6: 不十分。伏せ字の内容を確認していない。\n- AC7: 不十分。上限と枠の切り替えは確認しているが、ちょうど window 秒の境界と同時の呼び出しがない。\n- AC8: 不十分。往復と改ざんの1件だけ。期限ちょうど・期限切れ・形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・`.only` などは見つからなかった）。`$AQ history` でのテスト弱体化は確認していない。ただし、テストファイルは新規で未追跡のため、弱体化された形跡は見ていない。\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、別接続・別スレッドを使った単体・結合テストで足りる。\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8 は、実装は妥当に見えるが、決定論的な検証がない（重大2・3）。\n- R4 のタグ検証の欠落は、実装の欠陥である（重大1）。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK だった。\n- 一時スクリプトで、`update_note` が不正タグを保存することを再現した（実装は変更していない）。\n- `$AQ trace`、`$AQ history`、`$AQ gate` は実行していない。gate のログも読んでいない。",
+ "files_changed": [],
+ "valid": true
+}

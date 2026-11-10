@@ -1,0 +1,49 @@
+{
+ "case": "CLN-05",
+ "rep": 2,
+ "sec": 29.4,
+ "exit": 0,
+ "cost_usd": 0.13769320000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22572,
+  "cache_read_input_tokens": 131792,
+  "output_tokens": 3421,
+  "output_tokens_details": {
+   "thinking_tokens": 1000
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22572,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1777,
+    "cache_read_input_tokens": 42521,
+    "cache_creation_input_tokens": 6466,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6466
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fba595\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `verify_link` は、先頭にゼロが付いた note_id・期限（例 `007.123.<署名>`）を `int()` で正規化してから署名を検証する。このため `7.123.<署名>` と同じ署名で、文字列の違うリンクが複数通る。仕様の形（10進の数字だけ）は満たしており、署名の偽造にはならず、期限・note_id も変わらないので実害は小さい。 / 提案: 正規形（先頭ゼロなし）だけを受け付けるか、署名を文字列のまま計算して検証する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。入力検証（題名・本文・タグ）と、タグ挿入の途中で失敗させたときに何も残らないことを、hook で確かめている。\n- AC2: 妥当。見えないメモがすべて NotFound になること、確認後に非公開へ変わったメモの扱い、閲覧数が増えないケースを確かめている。別々の接続・別スレッドで同時に閲覧し、閲覧数が 40 になることも確かめている。\n- AC3: 妥当。一覧・検索の入力拒否、`%`・`_` のエスケープ、タグの OR、他の組織・他人の非公開メモが含まれないこと、SQL がプレースホルダーであることをコードで確認した。\n- AC4: 妥当。権限、非公開、古い version での Conflict、読み出しと書き込みの間に他の更新が入った場合の Conflict、書き込み内での権限再確認、更新時の検証、削除途中の失敗の巻き戻しを確かめている。\n- AC5: 妥当。管理者だけが実行でき、元・先・管理者が同じ組織のときだけ移せる。途中で失敗したら元のままになることを確かめている。\n- AC6: 妥当。伏せ字の規則（8文字未満はすべて伏せる、8文字以上は末尾4文字を残す）はコードで確認した。\n- AC7: 妥当。枠の境界（159.999 秒は拒否、160 秒ちょうどで新しい枠）を確かめている。20 スレッドの同時呼び出しで 5 回だけ許されること、判定中の割り込みが直列化されることも、sleep に頼らず Barrier と Event で確かめている。\n- AC8: 妥当。期限の境界、改ざん、形の崩れたリンクを確かめている。ただし先頭ゼロの正規化（軽微1）に対するテストはない。\n- AC9: 妥当。例外・ログに本文、署名、api_key が出ないことを、コード（メッセージには ID・タグ・固定文言だけ）で確認した。\n- AC10: 妥当。例外の後も接続を使い続けられること、`_rollback` が元の例外を隠さないことをコードで確認した。\n- エンジンが検出したテストの兆候はなかった。skip・`.only`・アサーションなしのテストはない。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite（一時ファイル DB）と複数スレッドを使った並行テストまで単体テストに含まれている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、63 件が OK だった。\n- `notes/*.py`（service・db・ratelimit・share・errors）を全文読んだ。認可は `_visible` / `_can_modify` に集約され、書き込みトランザクション内で読み直している。更新は `WHERE version` と rowcount で判定している。LIKE は ESCAPE を使い、SQL はプレースホルダーで組み立てている。\n- `$AQ trace` で、要求から受け入れ条件・リスクへの対応がすべて「合格」であることを確認した。\n- `$AQ history` は先頭 41 件までしか読めなかった。ブロッキングパイプで途中が切れ、`BrokenPipeError` になった。その範囲では検証条件の弱体化は見つからず、全履歴は未確認。\n- `git status` で `notes/` と `tests/` は未追跡と分かった。差分によるテスト改ざんの確認はできないが、テストの内容は読んで弱体化がないことを確認した。",
+ "files_changed": [],
+ "valid": true
+}

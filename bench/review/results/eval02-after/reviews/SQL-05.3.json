@@ -1,0 +1,49 @@
+{
+ "case": "SQL-05",
+ "rep": 3,
+ "sec": 40.2,
+ "exit": 0,
+ "cost_usd": 0.11775259999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13665,
+  "cache_read_input_tokens": 121966,
+  "output_tokens": 5088,
+  "output_tokens_details": {
+   "thinking_tokens": 892
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13665,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3724,
+    "cache_read_input_tokens": 36815,
+    "cache_creation_input_tokens": 3721,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3721
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3d65b6ee\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `notes/service.py` の `_like_escape`（約113行）が `%` と `_` だけをエスケープし、エスケープ文字の `\\` 自体を二重化していない。検索語に `\\` が含まれると、`ESCAPE '\\'` 句の下で検索語が壊れる。 / 成立条件: 検索語に `\\` を含める（例: `a\\`、`\\`）。 / 影響: 題名が `a\\b` のメモを `a\\` で検索しても 0 件になる。`\\` の直後の `%` は、検索語の `%` ではなく LIKE のワイルドカードになる。例えば `a\\` は `a\\%%` となり、`a%` を含むメモに一致する。仕様の「% と _ も普通の文字として部分一致」を満たさない。 / 根拠: 次の再現で確認した（コードは変更していない）。題名 `a\\b` のメモを作成し、`search_notes(conn, user, \"a\\\\\")` と `search_notes(conn, user, \"\\\\\")` を実行すると、どちらも `[]` が返った。確認した保証: 上流で `\\` を弾く検証はなく、`q` の検査は文字列・空白だけ・100文字超かどうかだけ。プレースホルダー自体は使われており、SQL の文字列への埋め込みはない。 / 提案: 先に `q.replace(\"\\\\\", \"\\\\\\\\\")` を行ってから `%` と `_` をエスケープする。`\\` を含む検索語のテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは 12 件の正常系の煙テストだけで、必須の検証が欠けている。具体的には次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること（K1, AC2）。(b) 更新・削除の Forbidden と、version 不一致・並行更新の Conflict（AC4）。(c) 閲覧数が並行して正確に増えること（K3, AC2）。(d) `hooks.before_write` による途中失敗でロールバックされ、何も残らないこと（K4, AC1, AC5, AC10）。(e) 移管での組織またぎの Forbidden と、全部移すか何もしないか（K6, AC5）。(f) api_key の伏せ字が末尾4文字・8文字未満になること（K7, AC6）。(g) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドでの上限（AC7）。(h) 共有リンクの期限の境界・形の崩れ（AC8, K8）。(i) タグ・題名・本文・page・per_page の境界値（AC1, AC3）。(j) `%` `_` `\\` を含む検索（K2, AC3）。(k) 例外メッセージ・ログに機密情報が出ないこと（AC9, K5）。 / 根拠: これらは仕様でリスクとして明示されている。設計書も `hooks.before_write` と `RateLimiter.hook` を、並行実行と途中失敗を再現するために用意したと書いている。しかし `tests/test_notes.py` はこれらの差し込み口を一度も使っていない。`test_export_audit` は action と actor しか見ておらず、api_key の伏せ字を確かめていない。`test_transfer_requires_admin` も組織またぎを確かめていない。`aqdlc history` では、全受け入れ条件・リスクの検証 V/VK が同じ \"unit\" チェックに紐付いている。これでは AC・リスクが検証されたとは言えない。上の [重大1] の欠陥もこの状態で gate を通っている。 / 提案: 上の (a)〜(k) を、決定論的に（sleep を使わず、フックとスレッドの Barrier で）検証する unittest を追加する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1, K3 / 対応区分: 修正必須 / 内容: `delete_note` は、認可（`_visible` と `_can_modify`）を `transaction()` の外で行っている。`DELETE` の条件も `WHERE id = ?` だけで、所有者の再確認や version の確認がない。 / 成立条件: 作成者である一般利用者 A が削除を呼び、認可の通過後・BEGIN IMMEDIATE の前に、管理者が `transfer_notes` で A のメモを B に移す。 / 影響: A は、もう自分のものではないメモを削除できる。仕様の「できるのは作成者と同じ組織の管理者だけ」に反する。`update_note` は version の条件で Conflict になるが、`delete_note` にはその防御がない。同様に `update_note` の認可も transaction の外にある。ただし、そちらは version 条件が transfer の version+1 を検出するため実害は出にくい。 / 根拠: `notes/service.py` の `delete_note` で、`_row` による取得と認可が `with transaction(conn)` より前にある。`DELETE FROM notes WHERE id = ?` は、transaction 内で認可を再評価していない。確認した保証: DB の制約・呼び出し元に、これを防ぐものは見当たらなかった。再現は未実行で、コード上の経路から導いた。 / 提案: transaction（BEGIN IMMEDIATE）の内側で行を取り直して `_visible` と `_can_modify` を再評価してから削除する。または `DELETE ... WHERE id = ? AND owner_id = ?`（管理者は org_id で絞る）にして、rowcount が 0 なら NotFound か Conflict にする。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `transfer_notes` は `updated_at` を更新しない（version だけ上げる）。また、`update_note` の `_validate` は、title が str 以外のときの型エラーを分けて返さない。 / 提案: 移管時に `updated_at` を更新するか、仕様として更新しないと明記する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系の作成と空の題名の拒否だけを確認しており、不十分。タグ・本文の境界、tags に文字列そのものを渡す場合、トランザクションの途中失敗で何も残らないことを確認していない。\n- AC2: V2 は作成者本人の閲覧だけを確認しており、不十分。他の組織・他人の非公開メモが NotFound になることと、並行閲覧で閲覧数が正確に増えることを確認していない。\n- AC3: V3 の確認は一覧の件数と日本語の検索 1 件だけで、不十分。範囲外の入力・sort・タグの OR・`%` `_` `\\` の検索を確認していない。`\\` の検索は実際に壊れている（[重大1]）。\n- AC4: V4 は作成者による更新と削除の正常系だけで、不十分。Forbidden・Conflict・並行更新・管理者の扱い・非公開メモ・削除の途中失敗を確認していない。認可の競合の欠陥は [重大3]。\n- AC5: V5 は成功と管理者以外の拒否だけで、不十分。組織またぎと、途中失敗で元のままになることを確認していない。\n- AC6: V6 は action と actor だけを確認しており、api_key の伏せ字は検証されていない。不十分。\n- AC7: V7 は limit 超過と 61 秒後のリセットを確認している。ちょうど window 秒の境界と、複数スレッドからの同時呼び出し（`hook` を使う）は確認しておらず、不十分。\n- AC8: V8 は往復と改ざん（note_id の差し替え）だけで、不十分。期限の境界（ちょうど期限）・期限切れ・形の崩れを確認していない。\n- AC9: 検証がない。ログ・例外メッセージへの機密情報の出力は確認されていない。\n- AC10: 検証がない。例外の後に接続を使い続けられることは確認されていない。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのファイルは見つからなかった。\n- 検証条件の弱体化・改ざんは、`history` では bind の追加のみで確認していない。\n\n### E2E の要否\n- 不要。HTTP や UI はなく、ライブラリの単体・並行の検証で足りる。ただし、`hooks` を使った決定論的な並行・失敗のテストは必須（[重大2]）。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを防ぐ、否定側のテストがない。\n- K2: `\\` を含む検索語の LIKE エスケープが壊れている（[重大1]）。\n- K3: 閲覧数・更新・RateLimiter の並行テストがない。`delete` の認可競合は [重大3]。\n- K4: ロールバックのテストがない。\n- K5: 機密情報の出力のテストがない。\n- K6: 組織またぎの移管のテストがない。\n- K7: api_key の伏せ字のテストがない。\n- K8: 期限の境界・形の崩れのテストがない。\n- 実装コードの確認では、次の点を問題なしと判断した。\n  - `RateLimiter` はロック下で判定している。\n  - `verify_link` は fullmatch・期限・`compare_digest` を使っている。\n  - `export_audit` の伏せ字は仕様どおり。\n  - SQL はプレースホルダーを使っている。\n  - `transaction()` はロールバックして例外を伝える。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が OK だった。\n- 一時のインメモリ DB で `search_notes(..., \"a\\\\\")` と `search_notes(..., \"\\\\\")` を実行した。どちらも `[]` が返り、[重大1] が実際に起きることを確認した。\n- `aqdlc history --since 0` で、検証の紐付けが同じ \"unit\" チェックだけであることを確認した。\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

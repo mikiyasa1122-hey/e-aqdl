@@ -1,0 +1,28 @@
+{
+ "case": "CLEAN-05",
+ "rep": 2,
+ "judge_cost_usd": 0.0633263,
+ "judge_raw": "このケースは欠陥なしなので、`matches_defect` は使いません。\n\n**重大1**: `TAG_RE` を `.match` で使うと、Python の `$` が末尾の改行の直前にも一致します。そのため `\"ab\\n\"` は通り、仕様の「英小文字・数字・ハイフンの1〜20文字」に反します。service.py:14, 64, 151 に実在するバグで、`fullmatch` で直せます。埋め込んだ欠陥ではありませんが、コードの実在する欠陥として `real_other` です。\n\n**重大2**: コードの欠陥の指摘ではなく、テストの不足だけを述べているので `test_gap` です。\n\n**軽微1**: `list_notes` に 2^63 を超える page を渡すと、`(page-1)*per_page` が SQLite の整数範囲を超えます。ValidationError ではなく OverflowError になり、仕様の「範囲外は ValidationError」に反します。実在する欠陥なので `real_other` です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match で使うため末尾改行のタグが通り、仕様のタグ規則に反する実在のバグである。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"巨大な page で OverflowError になり、範囲外は ValidationError という仕様に反する実在の欠陥である。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビュー担当は api_key を伏せる処理の分離には触れず、既存の別バグ2件とテスト不足を指摘した。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE を match で使うため末尾改行のタグが通り、仕様のタグ規則に反する実在のバグである。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "巨大な page で OverflowError になり、範囲外は ValidationError という仕様に反する実在の欠陥である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は api_key を伏せる処理の分離には触れず、既存の別バグ2件とテスト不足を指摘した。"
+ }
+}

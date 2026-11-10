@@ -1,0 +1,18 @@
+{
+ "case": "CLN-05",
+ "rep": 3,
+ "judge_cost_usd": 0.1114203,
+ "judge_raw": "レビューの指摘は軽微1の1件で、`search_notes` のタグ検査が `_validate` と重複しているという保守性の提案です。レビュー自身が「動作は仕様どおりで、今は問題ない」と認めています。コードを確認すると、検査内容は R1 の規則（5個まで・`TAG_RE.fullmatch`・文字列かどうか）と一致しており、欠陥の主張ではありません。このケースは欠陥なしなので、`matches_defect` は使えず、分類は style です。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"search_notes のタグ検査が _validate と重複しているという保守性の提案で、動作は仕様どおりであり欠陥の主張ではない。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビューは合格とし、保守性の提案を1件出しただけで誤検出はなかった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "search_notes のタグ検査が _validate と重複しているという保守性の提案で、動作は仕様どおりであり欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビューは合格とし、保守性の提案を1件出しただけで誤検出はなかった。"
+ }
+}

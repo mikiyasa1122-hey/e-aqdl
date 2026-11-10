@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 1,
+ "sec": 37.9,
+ "exit": 0,
+ "cost_usd": 0.143536,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20709,
+  "cache_read_input_tokens": 117140,
+  "output_tokens": 4897,
+  "output_tokens_details": {
+   "thinking_tokens": 1058
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20709,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3061,
+    "cache_read_input_tokens": 38152,
+    "cache_creation_input_tokens": 2789,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2789
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 形の崩れたリンクが Forbidden にならず `None` が返る。 / 成立条件: `LINK_RE.fullmatch` に合わない文字列（例 \"garbage\"、署名が64桁でない、数字以外を含む）を `verify_link` に渡す。 / 影響: 仕様は「形の崩れたリンクは Forbidden」としている。呼び出し側が戻り値を `if note_id:` のように扱うと判定を誤る。`None` を見落とすと検証を通ったかのように扱われかねない。 / 根拠: notes/share.py の `verify_link` で、不一致時に `raise ValueError` した直後の `except ValueError: return None` に入る。実行 `share.verify_link(\"k\",\"garbage\",now=1)` が `None` を返すことを確認した。上流で防ぐ検証はなく、既存テストにもこの経路はない。 / 提案: `except ValueError` の中身を `raise Forbidden(\"不正なリンク\")` に変える。形の崩れた入力の各種（空文字・桁違い・大文字16進・改行付き・数字以外）が Forbidden になるテストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査に `^...$` と `match` を使っているため、末尾に改行を付けたタグ（\"abc\\n\"）が通る。 / 成立条件: `create_note`・`update_note`・`search_notes` の tags に、末尾が改行の文字列を含める。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。 / 根拠: notes/service.py の `TAG_RE` と `_validate`（64行目）および `search_notes`（151行目）。実行 `create_note(..., [\"abc\\n\"])` がエラーにならず note_id 1 を返すことを確認した。 / 提案: `TAG_RE.fullmatch(t)` を使う。末尾改行のタグを拒否するテストを追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC7, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 次の検証がまったくない。 / ・他の組織・他人の非公開メモが、get・list・search・update・delete で NotFound / Forbidden になること。 / ・管理者がいても非公開メモは扱えないこと。 / ・閲覧数の同時加算。 / ・LIKE の `%` `_` `\\` を普通の文字として扱うこと。 / ・SQL インジェクション文字列を渡しても結果が変わらないこと。 / ・version の競合（古い version、読み出しと書き込みの間の更新）。 / ・移管の組織外への拒否と、途中で失敗したときの巻き戻し。 / ・create・delete の途中失敗の巻き戻し。 / ・RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。 / ・R4 の削除失敗時の例外の伝播。 / 根拠: tests/test_notes.py は12件すべてが正常系か1件の拒否だけで、仕様のリスクと受け入れ条件の大半を確かめていない。設計は `hooks.before_write` と `RateLimiter.hook` を並行・障害の再現用に用意しているが、使うテストが0件。 / 提案: 上記を、hooks と別々の接続・スレッドで決定論的に再現するテストとして追加する。認可の条件や ESCAPE を外すと失敗することを確かめる。\n- [重大4] 区分: テスト / 対象: AC6, AC8, AC9, AC10, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。 / ・api_key のマスク（8文字未満はすべて伏せ、8文字以上は末尾4文字だけ残す、境界は8文字）。既存の `test_export_audit` は api_key を一切見ていない。 / ・共有リンクの期限ちょうど（now == expires）の拒否と、期限切れの拒否。 / ・署名改ざん（既存テストは note_id の改ざんのみ）。 / ・ログ・例外メッセージに本文・署名・api_key が出ないこと。 / ・例外の後に同じ接続を使い続けられること。 / 根拠: AC6・AC8・AC9・AC10 は、仕様で境界や機密の非露出を明示している。 / 提案: 境界値（7・8文字の鍵、期限の1秒前・ちょうど・1秒後）、ログのキャプチャ（assertLogs）、失敗後の再操作のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4, R5 / 対応区分: 改善提案 / 内容: `update_note`・`delete_note` は、可視性と権限の確認をトランザクションの外で行っている。移管と同時に起きると、古い owner を元に判断する余地がある。version 条件がある更新は Conflict で守られるが、delete は守られない。 / 提案: 権限確認の読み出しを `transaction()` の中に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系と空題名だけのため不十分。本文の長さ・タグの上限・タグの形式・失敗時に何も残らないこと（巻き戻し）を確かめていない。実装にも重大2の不備がある。\n- AC2: 作成者本人が get するテストだけのため不十分。他組織・非公開・存在しない場合の NotFound と、同時の閲覧数加算を確かめていない。\n- AC3: 一覧の1ページ目と単純な検索だけのため不十分。範囲外の入力、sort、`%` `_`、タグの OR、他人の非公開メモの除外を確かめていない。\n- AC4: 作成者の更新・削除の正常系だけのため不十分。Conflict、Forbidden、管理者、非公開、更新時の検証、削除失敗時の伝播を確かめていない。\n- AC5: 件数の確認と非管理者の拒否だけのため不十分。組織をまたぐ拒否と、途中で失敗したときに元のままであることを確かめていない。\n- AC6: マスクをまったく確かめていないため不十分。\n- AC7: 枠の再開のテストはあるが、ちょうど window 秒の境界と同時の呼び出しがないため不十分。\n- AC8: 往復の確認と note_id の改ざんだけのため不十分。期限の境界・署名の改ざん・形の崩れを確かめていない。実装にも重大1の不備がある。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは検出されなかった）。テストの弱体化（改ざん）の証拠も、コードの確認では見つからなかった。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、別々の接続・スレッドを使うユニット・結合テストで十分）。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8: 上記のとおり、検証がほぼない。\n- R9: メッセージ内容の検証がない。コードを読んだ範囲では本文・署名・api_key の出力は見つからなかった。\n\n### 確認したこと\n- spec.md・design.md を読み、notes/*.py と tests/test_notes.py を通して確認した。\n- `python3 -m unittest discover -s tests -t .` の結果は 12 件すべて成功。\n- `create_note(..., [\"abc\\n\"])` が成功する（note_id 1 を返す）ことを実行して確認した。\n- `verify_link(\"k\",\"garbage\",now=1)` が `None` を返すことを実行して確認した。\n- SQL はすべてプレースホルダーで、LIKE は ESCAPE 付き（`%` `_` `\\` をエスケープ）。title と body の両方に同じ pattern が渡っている。ORDER BY は固定の辞書から選んでいる。この範囲で注入の経路は見つからなかった。\n- `$AQ trace`・`$AQ history`、`git diff` による改ざんの確認は実行していない。この点は未確認。",
+ "files_changed": [],
+ "valid": true
+}

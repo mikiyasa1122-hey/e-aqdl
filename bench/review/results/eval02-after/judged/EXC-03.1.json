@@ -1,0 +1,38 @@
+{
+ "case": "EXC-03",
+ "rep": 1,
+ "judge_cost_usd": 0.0650503,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- 重大1は、埋め込み欠陥そのものです。`verify_link` で形の崩れたリンクに対して `None` を返しており、Forbidden にしていません。原因も影響も一致しています。\n- 重大2は、実在する別の欠陥です。`TAG_RE` は `$` と `match` を使っているため、末尾が改行のタグが通ります。仕様に反します。\n- 重大3は、テスト不足だけの指摘です。\n- 重大4は、テスト不足だけの指摘です。\n- 軽微1は、実在しうる別の欠陥です。権限確認をトランザクションの外で行うため、`delete_note` は移管と同時に起きたときに古い owner で判断します。ただし改善提案の扱いで、仕様違反の根拠は弱いです。保守性の提案としても読めるため、ambiguous とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link が形の崩れたリンクで None を返し Forbidden にしない、という埋め込み欠陥そのものを、原因・影響とも一致して指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match により末尾改行のタグが通る。仕様違反の実在する別の欠陥である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"境界値・ログ・例外後の接続などの検証不足だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"ambiguous\", \"reason\": \"権限確認をトランザクション外で行う点を挙げた改善提案で、delete の競合は実在しうるが仕様違反かどうか判断が分かれる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が share.py の verify_link で None を返す欠陥を正しく特定した。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link が形の崩れたリンクで None を返し Forbidden にしない、という埋め込み欠陥そのものを、原因・影響とも一致して指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match により末尾改行のタグが通る。仕様違反の実在する別の欠陥である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "境界値・ログ・例外後の接続などの検証不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "ambiguous",
+    "reason": "権限確認をトランザクション外で行う点を挙げた改善提案で、delete の競合は実在しうるが仕様違反かどうか判断が分かれる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が share.py の verify_link で None を返す欠陥を正しく特定した。"
+ }
+}

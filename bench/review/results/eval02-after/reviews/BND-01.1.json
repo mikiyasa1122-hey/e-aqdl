@@ -1,0 +1,49 @@
+{
+ "case": "BND-01",
+ "rep": 1,
+ "sec": 29.3,
+ "exit": 0,
+ "cost_usd": 0.1314978,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20613,
+  "cache_read_input_tokens": 117298,
+  "output_tokens": 3730,
+  "output_tokens_details": {
+   "thinking_tokens": 647
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20613,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2334,
+    "cache_read_input_tokens": 38553,
+    "cache_creation_input_tokens": 2292,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2292
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 71ec4f30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:266 / 対応区分: 修正必須 / 内容: list_notes が per_page=51 を受け付ける。条件が `1 <= per_page <= PER_PAGE_MAX + 1` になっていて、仕様の1〜50を1だけ超える。 / 成立条件: per_page=51 で呼ぶ。 / 影響: 範囲外の値で ValidationError にならず、51件が返る。エラーメッセージの「1〜50」とも食い違う。 / 根拠: 実行で `list_notes(conn,u,per_page=51)['per_page']` が 51 を返した。上流に別の検証はない。 / 提案: `+ 1` を外す。per_page=50 は通り、51 は ValidationError になる境界テストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4, notes/service.py:158 / 対応区分: 修正必須 / 内容: TAG_RE が `^[a-z0-9-]{1,20}$` を `match` で使っている。`$` は末尾の改行の手前にも一致するので、「ab\\n」のようなタグを通す。 / 成立条件: 作成・更新・検索のタグに末尾が改行の文字列を渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。実際に `create_note(..., ['ab\\n'])` が成功し、`get_note` が `['ab\\n']` を返した。21文字目が改行の場合も通る。 / 根拠: service.py:158 と 208。検索側の 295 も同じ正規表現。share.py は fullmatch を使っているので、設計の決まりとも不揃い。 / 提案: `TAG_RE.fullmatch` を使うか、`\\Z` で終わらせる。「ab\\n」で ValidationError になるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件だけで、正常系を中心にしている。次の検証がない。(a) 閲覧数の同時加算。(b) 他組織・他人の非公開メモの NotFound、管理者の Forbidden。(c) version の古い更新の Conflict と、読み出しから書き込みの間の競合（hooks.before_write）。(d) 途中失敗時のロールバック（作成・削除・移管）と、その後の接続の再利用。(e) % と _ のエスケープ、タグの OR、SQL インジェクション。(f) 別組織への移管の拒否。(g) RateLimiter の枠の境界と、複数スレッドからの同時呼び出し。(h) 共有リンクの期限ちょうど・形の崩れ。(i) ログ・例外に機密情報が出ないこと。 / 根拠: 仕様が AC に挙げている境界・同時・異常系と、設計書が差し込み口（hooks.before_write、RateLimiter.hook）を用意した目的が、どれも検証されていない。重大1・2の欠陥も、境界のテストがないために通っている。 / 提案: 上の各項目について、決定論的なテストを追加する。差し込み口と clock の差し替えを使い、sleep には頼らない。\n- [重大4] 区分: テスト / 対象: AC9, AC10, R9, K5 / 対応区分: 証拠不足 / 内容: エラーメッセージとログに本文・署名・api_key が出ないことを確かめるテストがない。例外が起きた後に接続を使い続けられること（R10）を確かめるテストもない。 / 根拠: AC9 と AC10 を直接確かめる検証が存在しない。V9 と V10 は unit に紐付いているだけで、中身が対応していない。 / 提案: assertLogs と例外メッセージの検査を追加する。フック経由で失敗させた後、同じ接続で操作できることを確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_empty_title_rejected と test_create_and_get だけで、タグ・本文・題名の境界とロールバックがなく不十分。実際にタグの欠陥が通っている。\n- AC2: 閲覧数の増加も見え方の規則も検証がなく不十分。\n- AC3: test_list_first_page と test_search だけで、範囲外・ワイルドカード・OR・インジェクションがなく不十分。実際に per_page=51 が通っている。\n- AC4: 正常な更新・削除のみで、Conflict・Forbidden・競合がなく不十分。\n- AC5: test_transfer と test_transfer_requires_admin のみ。組織をまたぐ移管と、失敗時の巻き戻しがなく不十分。\n- AC6: test_export_audit があり妥当そうだが、8文字未満と8文字ちょうどの境界は未確認。\n- AC7: test_limit のみ。枠の境界と並行の検証がなく不十分。\n- AC8: test_roundtrip と test_tampered のみ。期限の境界と形の崩れがなく不十分。\n- AC9・AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。history を見ると、検証条件の弱体化は確認できなかった（bind のみ）。\n\n### E2E の要否\n- 不要。ライブラリで HTTP も UI もない。ただし、並行処理を決定論的に確かめる統合テストは必要。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K6、K8 は、上のとおり検証が不足している。\n- update_note の権限・可視性の確認は、トランザクションの外で行っている。version の条件でデータは守られるが、確認後に変わる権限の競合は未検証（軽い懸念で、指摘にはしない）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件 OK。\n- python3 -I で per_page=51 の受理と、タグ「ab\\n」の保存を再現した。\n- notes/ の全ソースと spec.md・design.md を読み、SQL のプレースホルダーと ESCAPE 句、LIKE のエスケープ（\\ % _）を確認した。LIKE まわりの実装自体は妥当。\n- `aqdlc history` で検証条件の弱体化がないことを確認した。",
+ "files_changed": [],
+ "valid": true
+}

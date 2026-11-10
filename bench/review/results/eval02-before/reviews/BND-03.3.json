@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 3,
+ "sec": 32.4,
+ "exit": 0,
+ "cost_usd": 0.1275752,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19084,
+  "cache_read_input_tokens": 113932,
+  "output_tokens": 3983,
+  "output_tokens_details": {
+   "thinking_tokens": 831
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19084,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2613,
+    "cache_read_input_tokens": 36513,
+    "cache_creation_input_tokens": 2572,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2572
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, notes/ratelimit.py:21 / 対応区分: 修正必須 / 内容: 枠の切り替え判定が `now - start > self.window` になっており、枠の開始からちょうど window 秒たった時点で新しい枠にならない（仕様は「ちょうど window 秒たったら新しい枠」）。 / 成立条件: limit に達した後、clock が start + window ちょうどのときに hit する。 / 影響: 境界で不当に RateLimited になる。AC7 の「枠の境界」に未達。 / 根拠: 実行して確認した。RateLimiter(1,10,clock) で t=0 に hit し、t=10 で hit すると RateLimited になった（期待は許可）。 / 提案: `>=` に直す。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py:16 / 対応区分: 修正必須 / 内容: TAG_RE が `^...$` を `re.match` で使っているため、末尾に改行が付いたタグ（例 \"abc\\n\"）が通る。 / 成立条件: create_note・update_note・search_notes に、末尾が \"\\n\" のタグを渡す。 / 影響: 「英小文字・数字・ハイフン」の規則に反するタグが保存される。 / 根拠: `TAG_RE.match('abc\\n')` が True を返すことを実行して確認した。share.py は同じ問題を避けるため fullmatch を使っており、方針も不統一。 / 提案: `fullmatch` に切り替えるか、`\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは 12 件の正常系中心で、受け入れ条件の大半を確かめていない。次の検証が丸ごと無い: 他組織・他人の非公開メモが NotFound になること（K1）、閲覧数の同時加算（K3）、update の version 競合と読み出しから書き込みの間の競合（hooks.before_write を使う）、delete・transfer・create の途中失敗でロールバックされること（K4、K6）、他組織への移管が Forbidden になること、非公開メモを管理者が扱うときの NotFound、一覧の範囲外（page・per_page・sort）の拒否、`%` と `_` と SQL インジェクション文字列の検索（K2）、タグの検証（個数・形式・重複）、api_key の伏せ字（8 文字未満・末尾 4 文字）（K5、K7）、RateLimiter の境界とスレッド並行、共有リンクの期限境界・形の崩れ・署名改ざん、ログや例外に本文・署名・鍵が出ないこと（AC9）、例外の後に接続を使い続けられること（AC10）。 / 根拠: 設計書は並行・途中失敗を hooks で再現するとしているが、tests/test_notes.py は hooks を一度も使っていない。そのため重大1・2のような欠陥も検出できていない。 / 提案: 上記の各リスクについて、決定論的なテスト（hook を使う、別接続・別スレッドを使う）を追加する。\n- [重大4] 区分: 実装 / 対象: R4, K3, AC4, notes/service.py:update_note / 対応区分: 修正必須 / 内容: 認可（_visible・_can_modify）を transaction の外で読んだ行で判定している。transaction の中では version しか見ていない。 / 成立条件: 管理者が読み出した後に、その note が別の利用者へ移管される。あるいは削除された後に再作成される。呼び出し側は移管前の version を持っているので、移管で version は進むが、version を新しく取り直した古い権限の呼び出しが通る経路がある。 / 影響: 所有者・組織が変わった直後の権限で更新が通る可能性がある。 / 根拠: コードの経路から見て TOCTOU になっている。ただし実際の再現は未確認で、成立するのは「権限判定のあと、書き込みの前に所有者が変わり、かつ version が一致する」場合に限る。transfer は version を進めるため、この経路は狭い。 / 提案: transaction 内で行を再読み込みして _visible・_can_modify を再判定してから UPDATE する（delete_note も同様）。\n### 軽微\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:11 / 対応区分: 改善提案 / 内容: note_id・期限が先頭ゼロ付き（例 \"007\"）でも受理される。署名は int 化した値で計算するため、同じリンクが複数の文字列表現で通る。 / 提案: `0|[1-9][0-9]*` に限定する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常な作成と空題名の拒否だけで不十分。タグ・本文・長さの境界と、失敗時に何も残らないことが未検証。\n- AC2: 閲覧の正常系だけで不十分。他組織・非公開の NotFound と、閲覧数の同時加算が未検証。\n- AC3: 一覧は1ページ目、検索は単純な一致だけで不十分。範囲外・`%`・`_`・タグの OR・インジェクションが未検証。\n- AC4: 作成者による更新・削除だけで不十分。Conflict・Forbidden・管理者・競合が未検証。\n- AC5: 管理者による移管と管理者以外の拒否だけで不十分。他組織・途中失敗のロールバックが未検証。\n- AC6: 監査出力の action と actor だけを確認し、api_key の伏せ字は未検証。\n- AC7: 上限超過と新しい枠だけ確認し、境界（ちょうど window 秒）と並行を確認していない。境界は実装も違反している。\n- AC8: 往復と改ざん1件だけで不十分。期限の境界・形の崩れが未検証。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- 検出されたテストの兆候: なし。tests/test_notes.py に skip・.only はない。ただし hooks の未使用と、アサーションの浅さが問題。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリなので、E2E は要らない。ただし、並行・ロールバックを確かめる統合テストは必要（重大3）。\n\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8: 上記のとおり検証が無い。\n- R9: ログへの本文・署名・鍵の出力を確かめるテストが無い。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。\n- 実行: `TAG_RE.match('abc\\n')` は True になった。RateLimiter を t=0 に hit、t=10 に hit（limit=1、window=10）すると RateLimited になった（期待は許可）。\n- gate のログ（unittest 12 件 OK）を確認した。ただし、このテストは重大1・2の欠陥を検出できていない。\n- git status では notes/ と tests/ は未追跡で、検証条件を弱めた変更履歴は見ていない（`history` は未実行）。",
+ "files_changed": [],
+ "valid": true
+}

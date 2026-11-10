@@ -1,0 +1,49 @@
+{
+ "case": "CLN-08",
+ "rep": 3,
+ "sec": 30.3,
+ "exit": 0,
+ "cost_usd": 0.1427891,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23807,
+  "cache_read_input_tokens": 132251,
+  "output_tokens": 3432,
+  "output_tokens_details": {
+   "thinking_tokens": 1302
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23807,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1527,
+    "cache_read_input_tokens": 43120,
+    "cache_creation_input_tokens": 7118,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7118
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e0a1ceab\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, notes/share.py:115,137 / 対応区分: 改善提案 / 内容: LINK_RE は先頭ゼロ付きの数字（例 `007.…`）を許す。署名は `int` 化した値で計算するため、`7.…` の正規リンクの `7` を `007` に書き換えても署名が通り、同じメモを指す別表記のリンクが有効になる。仕様の形式（10進の数字だけ）には反せず、漏えいや権限の拡大にもならない。 / 提案: 先頭ゼロを許さない正規表現にするか、再度書き出した文字列と元の文字列が一致するかを確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create.py が、題名・本文・タグの境界値、tags が文字列のときの拒否、途中の失敗（hook \"create:tags\"）で何も残らないことを確認しており妥当。\n- AC2: 同じ組織・他の組織・他人の非公開・存在しないメモを確認している。確認した後に非公開へ変わる競合、割り込みの閲覧、別接続の4スレッドによる閲覧数40件の数え漏れなしも確認しており妥当。実装は BEGIN IMMEDIATE の中で `views = views + 1` を実行している。\n- AC3: 範囲外の page・per_page・sort の拒否、`%` と `_` のエスケープ、タグの OR 絞り込み、他人の非公開メモが含まれないこと、プレースホルダーの使用（K2）を確認している。テスト本体は通読していないが、実装は設計どおりで妥当。\n- AC4: 作成者と管理者の更新・削除、Forbidden と NotFound の使い分け、古い version、読み出しから書き込みの間の割り込み、書き込み内での権限の再確認、更新時の入力検証、削除途中の失敗のロールバックと例外の伝達を確認しており妥当。hook による決定論的な競合の再現で、sleep には頼っていない。\n- AC5: 管理者以外・別組織・失敗時のロールバックのテストがある。実装も WHERE で org_id を絞り、1つのトランザクションで更新しており妥当。\n- AC6: `*` による伏せ字の長さと、8文字未満の鍵をすべて伏せる境界をコードで確認した。テストは通読していない。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、Barrier による20スレッドで成功が5件だけであること、ロック内の割り込みの直列化を確認しており妥当。\n- AC8: 期限の境界と形の崩れたリンクの扱いをコードで確認した。fullmatch を使い、hmac.compare_digest で比較している。テストは41行で、通読はしていない。\n- AC9 / AC10: ログとエラーメッセージに本文・署名・鍵が出ないことをコードで確認した。ROLLBACK 自体の失敗も元の例外を隠さない。テストは通読していない。\n- エンジンが検出したテストの兆候: なし。\n- 検証条件の弱体化: `history` に弱めた形跡はない。\n### E2E の要否\n- 不要。標準ライブラリだけの Python ライブラリで、HTTP や UI はない。実際の SQLite ファイルと複数スレッドによる単体テストで、リスクに見合う検証ができている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md、design.md、notes/ の全ファイル、tests/base.py、test_ac2、test_ac4、test_ac7 を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、63件がすべて成功した。\n- `$AQ trace` で全要求・受け入れ条件・リスクに検証が対応していることを確認した。\n- `$AQ history --since 0` を確認した（先頭40行）。",
+ "files_changed": [],
+ "valid": true
+}

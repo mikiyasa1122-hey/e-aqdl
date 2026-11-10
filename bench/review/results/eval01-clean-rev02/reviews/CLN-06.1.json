@@ -1,0 +1,49 @@
+{
+ "case": "CLN-06",
+ "rep": 1,
+ "sec": 31.2,
+ "exit": 0,
+ "cost_usd": 0.15839340000000002,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 26684,
+  "cache_read_input_tokens": 161474,
+  "output_tokens": 3549,
+  "output_tokens_details": {
+   "thinking_tokens": 1161
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 26684,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1747,
+    "cache_read_input_tokens": 45127,
+    "cache_creation_input_tokens": 1558,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1558
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8e643ace\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py:124` の正規表現は先頭ゼロ付きの数字（例 `007.1060.<署名>`）を通す。署名は `int` に直した値で計算するので、同じ署名のまま見た目の違うリンクが複数できる。期限・改ざん・形の崩れの拒否には影響しない。 / 提案: 先頭ゼロを禁じる（`0|[1-9][0-9]*`）か、検証後に正規形と照合する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。tests/test_ac1_create.py と VK4 は、入力の境界・タグの規則に加え、`hooks.before_write(\"create:tags\")` で途中失敗を起こし、メモ・タグ・監査ログが何も残らないことを確かめている。コードの `notes/service.py:249-256` と一致する。\n- AC2: 妥当。他の組織・他人の非公開・存在しないメモがすべて NotFound になり、その場合は閲覧数が増えないことを確かめている。`hooks` で確認後に非公開へ変わるケースも再現している。閲覧数は、同一接続への割り込みと、別スレッド・別接続の 4 スレッド×10 回（合計 40）で確かめている。sleep には頼っていない。\n- AC3: 妥当。範囲、並び順、ページ境界、極端に大きい page、`%` と `_` をそのまま文字として扱うこと、タグの OR 検索、SQL 文字列を入力した場合（K2）、不正な検索語とタグを確かめている。SQL は `?` プレースホルダーで、LIKE には ESCAPE が付いている。\n- AC4: 妥当。作成者・同一組織の管理者・他者・非公開、古い version、読み出しと書き込みの間に更新が入る場合、書き込み内での認可の再確認、更新時の検証、失敗時のロールバック、削除の失敗が呼び出し側に伝わることを確かめている。コードは、トランザクション内で行を読み直し、`WHERE version=?` と `rowcount` で判定している。\n- AC5: 妥当。管理者以外の拒否、組織をまたぐ移管の拒否、途中失敗で何も移らないこと（K6）を確かめている。\n- AC6: 妥当。管理者のみ・自組織のみ・末尾 4 文字以外を伏せること・8 文字未満をすべて伏せることを確かめている。\n- AC7: 妥当。枠の境界（159.999 は拒否、160.0 は通る）、拒否が枠を延長しないこと、20 スレッドの同時呼び出しで成功がちょうど 5 件になること、`hook` でチェック内に割り込ませても直列化されることを確かめている。\n- AC8: 妥当。往復、期限ちょうど以降の拒否、署名・note_id・期限の改ざん、別の鍵、形の崩れ（改行、大文字、Unicode 数字、None、bytes など）を確かめている。軽微1の先頭ゼロは網羅の外。\n- AC9: 妥当。ログ・例外メッセージ・監査の detail に本文・署名・api_key が出ないことを確かめている。コード上もメッセージには ID と規則名しか入っていない。\n- AC10: 妥当。例外後に接続を使い続けられることを確かめている。`transaction()` は ROLLBACK し、元の例外をそのまま伝える。\n- エンジンが検出したテストの兆候: なし。skip・弱いアサーションは確認できなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を実際に使う結合レベルの unittest と、スレッド・別接続を使った並行テストで主要なリスクを確かめている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md、design.md、notes/*.py の全ソースを読み、認可（`_visible`・`_can_modify`）、SQL のプレースホルダー、トランザクション境界、楽観的ロック、RateLimiter のロック、共有リンクの検証順序を追った。\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .` を実行した。63 件すべて成功（OK）。\n- `history --since 0` を確認した。検証の弱体化や削除はなく、bind は追加のみだった。\n- テストでの `skip` や `.only` はなかった。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "RACE-02",
+ "rep": 1,
+ "sec": 29.4,
+ "exit": 0,
+ "cost_usd": 0.1256805,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19754,
+  "cache_read_input_tokens": 113785,
+  "output_tokens": 3527,
+  "output_tokens_details": {
+   "thinking_tokens": 663
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19754,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2498,
+    "cache_read_input_tokens": 36417,
+    "cache_creation_input_tokens": 3338,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3338
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d865c6b5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3（notes/service.py の get_note, 約 L99-110）/ 対応区分: 修正必須 / 内容: 閲覧数の加算が数え漏れする。`views` をトランザクションの外で読み（`views = row[\"views\"]`）、あとで `UPDATE notes SET views = ?` に `views + 1` の値を書き込んでいる。 / 成立条件: 別々の接続・スレッドが同じメモを同時に閲覧し、2つの読み出しが互いの書き込みより前に行われたとき。どちらも同じ古い値 N を読み、どちらも N+1 を書く。 / 影響: 2回閲覧されても閲覧数は1しか増えない。仕様の「同時に閲覧されても数え漏れがないこと」に違反する。 / 確認した保証: BEGIN IMMEDIATE は書き込みを直列にするだけで、トランザクション外で読んだ値は守らない。UPDATE 文は `views = ?` で、アトミックな加算ではない。設計が用意した `hooks.before_write(\"view\")` は、まさにこの競合の再現用の差し込み口だが、読み出しの後・トランザクションの前に置かれている。 / 根拠: notes/service.py の get_note で、`views = row[\"views\"]` を読み、`hooks.before_write(\"view\")` を呼んだあとに `UPDATE ... SET views = ?, (views + 1, ...)` を実行している。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` に変え、必要なら `RETURNING` か、同じトランザクション内の SELECT で値を返す。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 仕様が必須とした異常系・境界値・並行系の検証がほぼない。tests/test_notes.py は12件の正常系中心のテストだけで、これらの受け入れ条件・リスクに紐づけられた検証(V2〜V10, VK1〜VK8)の実体になっていない。以下が確かめられていない。 / 根拠: 検証が欠けている主な項目は次のとおり。(1) 並行の閲覧数（AC2/K3）。重大1の欠陥を見逃している。(2) 他組織・他人の非公開メモが NotFound になること、管理者が非公開メモを扱えないこと（K1）。(3) `%`・`_`・SQL 文字列を入れた検索（K2）。(4) 入力の境界値（題名100/101文字、タグ5/6個、page・per_page・sort の範囲外）。(5) version の競合（Conflict）と更新・削除の Forbidden。(6) 途中失敗でのロールバック（K4, AC1, AC5, AC10）。`hooks.before_write` が使われていない。(7) 移管で他組織の相手を指定した場合（K6）。(8) api_key の伏せ字（AC6/K7）。現状の export_audit テストは key を一切検査していない。(9) RateLimiter の枠の境界ちょうどと同時呼び出し（AC7）。(10) 共有リンクの期限ちょうど・形の崩れ（AC8/K8）。(11) ログに機密が出ないこと（AC9/K5）。いずれも仕様が受け入れ条件・リスクとして明示している。 / 提案: 上記を、決定論的な形（hooks とスレッドの Barrier、clock 注入、ファイルDB の別接続）で追加する。認可・version・tag の条件を外すと失敗する形にする。\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py の update_note）/ 対応区分: 改善提案 / 内容: 更新の可視性・権限の判定がトランザクションの外の読み出しに基づく。version の条件で更新の競合は防げるが、`_can_modify` の根拠となる owner の変更（移管）は UPDATE の条件に入っていない。 / 提案: 権限の判定をトランザクション内で再読み込みして行う。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常作成しか確かめておらず不十分。境界値、タグ規則、途中失敗でも何も残らないことの検証がない。実装は読んだ範囲では仕様どおり。\n- AC2: 不十分。見え方の検証も並行の閲覧数の検証もなく、実装にも欠陥がある（重大1）。\n- AC3: test_list_first_page と test_search があるが、組織・非公開の除外、LIKE 特殊文字、範囲外の入力、タグ OR の検証がなく不十分。\n- AC4: 所有者による更新・削除の正常系だけ。Conflict と Forbidden の検証がなく不十分。\n- AC5: 件数と管理者以外の拒否だけ。組織をまたぐ場合の拒否と失敗時のロールバックがなく不十分。\n- AC6: 伏せ字を検査していない。不十分（空洞）。\n- AC7: 上限超過と枠の経過後の復帰だけ。ちょうど window 秒の境界と同時呼び出しがなく不十分。\n- AC8: 往復と改ざんだけ。期限ちょうど・期限切れ・形の崩れがなく不十分。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなく、改ざん・弱体化の履歴も確認できなかった（history は bind のみ）。ただしテスト自体が薄い。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリ。必要なのは SQLite のファイルDBでの別接続・別スレッドによる並行の統合テストで、E2E ではない）。\n### 不足しているリスク\n- K3: 並行する閲覧数・更新の検証がない（実装にも欠陥がある）。\n- K1・K2・K4・K5・K6・K7・K8: それぞれを確かめるテストがない。\n### 確認したこと\n- spec.md・design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が成功した。\n- `aqdlc.py history --since 0` で検証条件の弱体化がないことを確認した。\n- ソースは変更していない。\n- 並行の閲覧数は、コードの経路から欠陥と判断した。実際の並行実行による再現はしていない。",
+ "files_changed": [],
+ "valid": true
+}

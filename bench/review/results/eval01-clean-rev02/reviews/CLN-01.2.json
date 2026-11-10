@@ -1,0 +1,49 @@
+{
+ "case": "CLN-01",
+ "rep": 2,
+ "sec": 27.9,
+ "exit": 0,
+ "cost_usd": 0.1381547,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 21665,
+  "cache_read_input_tokens": 177947,
+  "output_tokens": 3368,
+  "output_tokens_details": {
+   "thinking_tokens": 637
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21665,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1670,
+    "cache_read_input_tokens": 46953,
+    "cache_creation_input_tokens": 1134,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1134
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6454e556\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py:11` の LINK_RE は note_id と期限を 1〜18 桁に制限している。仕様は「10進の数字だけ」としか書いておらず、19 桁以上の数字は形の崩れとして Forbidden になる。結果は安全側（拒否）で、受け入れ条件には影響しない。 / 提案: 桁数の上限を仕様か設計に明記する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は R1 の検査規則と、タグ挿入前の失敗注入（`create:tags`）で失敗時に何も残らないことを確かめている。検査規則は、実装を読んで規則どおりであることを確認した。失敗注入の経路は `service.py` の create_note で確認した。妥当。\n- AC2: test_ac2_view は見え方（他組織・他人の非公開・存在しない）がすべて NotFound になることを確かめている。閲覧数の同時増加は、別スレッド・別接続で実ファイル DB を使って確かめている。`service.py` の get_note は BEGIN IMMEDIATE の中で `views = views + 1` を実行するため、数え漏れは構造上起きない。妥当。\n- AC3: 範囲、並び順、ページング、巨大な page、検索の `%` と `_`、タグの OR、SQL 文字列の入力、不正な q・タグが検証されている。SQL はプレースホルダーと ESCAPE で組み立てており、`service.py` で確認した。妥当。\n- AC4: 認可は 4 通り（作成者・同組織の管理者・他人・他組織）と非公開メモ（NotFound）を確かめている。古い version は Conflict になる。読み出しと書き込みの間の更新は Conflict になる。トランザクション内での権限の再確認、更新時の検査（タグ含む）、削除の途中失敗のロールバックも確かめている。妥当。\n- AC5: 管理者だけが移せること、同じ組織の中だけであること、途中失敗で何も移らないことを確かめている。妥当。\n- AC6: 管理者だけが読めること、自組織だけであること、末尾4文字以外を伏せること、8文字未満の鍵を全部伏せることを確かめている。妥当。\n- AC7: 枠の境界（159.999 は拒否、160.0 は通る）、拒否された呼び出しが枠を延ばさないこと、20 スレッド同時の呼び出しで許可数がちょうど 5 になることを確かめている。ロック内のフックによる交互実行も確かめている。待ちは Barrier とイベントで行っており、sleep には頼っていない。妥当。\n- AC8: 往復、形式、期限の境界、改ざん、形の崩れを確かめている。`share.py` の実装は fullmatch と compare_digest を使っており、仕様に合っている。妥当。\n- AC9: 本文・署名・api_key がログや例外に出ないことを確かめている。`service.py` と `share.py` のログと例外は ID だけを出しており、コードとも一致する。妥当。\n- AC10: 例外の後に接続を続けて使えることを確かめている。transaction は ROLLBACK 後に元の例外を伝える。妥当。\n- エンジンが検出したテストの兆候: なし。skip、`.only`、アサーションなしのテストは見つからなかった。履歴を確認した範囲では、検証条件が弱められた形跡はない。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実ファイルを使った複数スレッド・複数接続のテストが AC2 にある。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件がすべて通った（OK）。\n- `notes/` の全ファイルと主要なテストを読み、仕様・設計と照合した。認可は `_visible` と `_can_modify` にまとまっている。SQL は値をすべてプレースホルダーで渡している。更新と削除は同じトランザクション内で読み直して判定している。\n- `trace` で R1〜R10 と AC・K のすべてに検証が結び付いていることを確認した。`history` で検証条件を弱める変更がないことを確認した。\n- 反証テスト（Counterfactual Gate）は無効で、通常の gate が通ったことは欠陥検出力の証明ではない。ただし、実装を読んだ限り重大な穴は見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

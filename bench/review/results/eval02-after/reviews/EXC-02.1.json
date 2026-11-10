@@ -1,0 +1,49 @@
+{
+ "case": "EXC-02",
+ "rep": 1,
+ "sec": 33.3,
+ "exit": 0,
+ "cost_usd": 0.13568380000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20575,
+  "cache_read_input_tokens": 117178,
+  "output_tokens": 4165,
+  "output_tokens_details": {
+   "thinking_tokens": 617
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20575,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2811,
+    "cache_read_input_tokens": 38199,
+    "cache_creation_input_tokens": 2608,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2608
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 763c4b09\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4, R10, notes/service.py:187-194 delete_note / 対応区分: 修正必須 / 内容: delete_note が `except Exception` で例外を握りつぶし、log.warning だけ出して正常終了する。仕様 R4 は「失敗したら例外を呼び出し側に伝える（握りつぶさない）」と定めている / 成立条件: DELETE・監査の INSERT・COMMIT のどれかが失敗したとき（ロック待ちのタイムアウト、制約違反、hooks.before_write での障害など） / 影響: 削除は巻き戻されて残るのに、呼び出し側には成功に見える。利用者は削除済みだと誤認する（データ整合性の問題）。ログには例外メッセージ e も出る / 確認した保証: transaction() は ROLLBACK して再送出するが、その外側の except で消えている。呼び出し元にこれを防ぐ処理はなく、テストもない / 根拠: service.py:193-194 / 提案: try/except を外すか、log して `raise` する\n- [重大2] 区分: 実装 / 対象: R1, R4, R3, AC1, AC4, AC3, notes/service.py:14, 64 / 対応区分: 修正必須 / 内容: TAG_RE が `^...$` と `match` の組み合わせで、末尾の改行を許す。`\"abc\\n\"` が有効なタグとして通る（実行して True を確認した）。仕様のタグは英小文字・数字・ハイフンだけ / 成立条件: 作成・更新・検索のタグに末尾 `\\n` を付ける / 影響: 規則外のタグが保存される。検索の絞り込みでも検査をすり抜ける / 根拠: service.py:14, 64, 150 / 提案: `fullmatch` を使うか、`\\Z` で終わらせる。share.py では fullmatch を使っており、同じ方針に揃えられる\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7, AC9, AC10, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: テストは正常系の12件だけで、仕様の主要な受け入れ条件を確かめていない。確認できないのは次のとおり。(a)他組織・他人の非公開メモへの NotFound と、一覧・検索への混入がないこと (b)Forbidden（member による他人メモの更新・削除、組織またぎの移管） (c)version 不一致による Conflict と、読み出し〜書き込みの間に更新が入ったときの Conflict（hooks.before_write で再現できる） (d)同時閲覧で閲覧数が数え漏れしないこと (e)作成・削除・移管の途中失敗でロールバックされること (f)% と _ とバックスラッシュを含む検索語、および SQL インジェクション文字列 (g)入力の境界値（題名100/101文字、タグ5/6個、per_page 0/51/50、page 0、sort 不正、タグの形式） (h)api_key のマスクの内容（8文字未満・末尾4文字）。test_export_audit は action と actor しか見ておらず、マスクを確かめていない (i)RateLimiter のちょうど window 秒の境界と、複数スレッドの同時呼び出し (j)共有リンクの期限ちょうど・期限切れ・形の崩れ (k)ログに機密情報が出ないこと (l)例外の後も接続を使い続けられること / 根拠: tests/test_notes.py の全体。重大1の握りつぶしも、重大2のタグ末尾改行も、現状のテストは検出できない / 提案: 上の各項目について、異常系・境界値のテストを追加する。並行と途中失敗は、hooks.before_write と RateLimiter.hook を使って決定論的に再現する。sleep には頼らない\n- [重大4] 区分: テスト / 対象: R8, AC8, K8, R7, AC7 / 対応区分: 証拠不足 / 内容: 共有リンクの期限境界（now == expires で Forbidden、expires-1 で有効）、期限切れ、形の崩れ（改行付き、符号付き、署名の長さ違い、大文字の16進、数字以外）、署名だけの改ざんを確かめるテストがない。RateLimiter の「ちょうど window 秒で新しい枠になる」境界と、スレッド同時呼び出し（hook を使った再現）のテストもない。test_tampered は note_id を変えるケースだけ / 根拠: 受け入れ条件 AC7・AC8 が境界と同時実行を明示している。実装は読んで正しそうに見える（share.py:32-39, ratelimit.py:19-27）が、証拠がない / 提案: 境界値・形の崩れ・同時実行のテストを追加する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで不十分。長さ・タグの規則、トランザクションの全部または何もなし、タグの末尾改行（重大2）が未検証\n- AC2: 検証なし。他組織・他人の非公開が NotFound になることと、閲覧数の加算・同時閲覧が未検証。実装（service.py:101-114）は読んで妥当に見える\n- AC3: 一覧の1ページ目と単純な検索だけ。範囲外の入力、ワイルドカード、インジェクション、タグ OR、非公開の除外が未検証。実装は ESCAPE 句とプレースホルダーで妥当に見える（service.py:134-154）\n- AC4: 所有者の更新と削除の正常系だけ。Conflict、Forbidden、削除失敗の伝播が未検証。削除の握りつぶしは実装の欠陥（重大1）\n- AC5: 正常系と「管理者以外は拒否」だけ。組織またぎの拒否と、途中失敗で元のままになることが未検証\n- AC6: 不十分。マスクの値を確かめていない\n- AC7: 不十分。基本の上限と窓の経過だけ。ちょうど60秒の境界、同時実行が未検証\n- AC8: 不十分。往復と note_id の改ざんだけ。期限の境界と形の崩れが未検証\n- AC9: 検証なし\n- AC10: 検証なし\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなしはない）。ただしテストが少なく、重要なリスクを確かめていない\n### E2E の要否\n- 不要（ライブラリで、HTTP 層・UI がない。ただし上記の単体・統合テストは必要）\n### 不足しているリスク\n- K1・K2・K3・K4・K6・K8: 上記（重大3・4）のとおり、検証が不足している\n- K5・K7: 検証がない。実装は api_key を伏せている（service.py:220-221）。ログに本文・署名は出ていないが、delete の警告ログに例外メッセージが入る\n### 確認したこと\n- spec.md・design.md、notes/*.py、tests/test_notes.py を読んだ\n- `python3 -m unittest discover -s tests -t .` → 12 件 OK\n- `TAG_RE.match('abc\\n')` が True になることを実行して確認した\n- 実装報告（impl.md）は読んでいない。`aqdlc.py trace` と `history` は実行していない\n```\n\n軽微な指摘が1件あるため、その内容を以下に補足します。\n\n- [軽微1] 区分: 実装 / 対象: R8, share.py:10 / 対応区分: 改善提案 / 内容: 先頭ゼロ付きの note_id・期限（例: `01.…`）も、整数に変換した値で署名が一致すれば通る。仕様の範囲内だが、リンクの表現が一意でない / 提案: 先頭ゼロを許さない正規表現にする",
+ "files_changed": [],
+ "valid": true
+}

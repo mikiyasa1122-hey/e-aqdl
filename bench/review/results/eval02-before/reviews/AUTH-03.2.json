@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-03",
+ "rep": 2,
+ "sec": 30.7,
+ "exit": 0,
+ "cost_usd": 0.11005119999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14196,
+  "cache_read_input_tokens": 121212,
+  "output_tokens": 4113,
+  "output_tokens_details": {
+   "thinking_tokens": 631
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14196,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2558,
+    "cache_read_input_tokens": 36994,
+    "cache_creation_input_tokens": 3609,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3609
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "Both defects were reproduced.\n\n## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 73cf7484\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `notes/service.py` の `_can_modify` が `or not row[\"private\"]` を含むため、同じ組織の公開メモなら作成者でも管理者でもない利用者が更新・削除できる。 / 成立条件: 同じ組織の member（作成者でない）が、公開メモに対して update_note か delete_note を呼ぶ。`_visible` は通るので、`_can_modify` が True になる。 / 影響: 仕様は「作成者と同じ組織の管理者だけ。それ以外は Forbidden」。実際は他人のメモを書き換え・削除でき、データの完全性が壊れる。 / 根拠: service.py の `_can_modify`（update_note と delete_note から呼ばれる）。再現として、alice のメモを bob（member）で `update_note(..., title=\"hijack\")` すると version 2 が返り、成功した。上流の検証や既存テストでは防げていない。 / 提案: `_can_modify` を `row[\"owner_id\"] == user[\"id\"] or (user[\"role\"] == \"admin\" and row[\"org_id\"] == user[\"org_id\"])` にする。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, K2 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。Python の `$` は末尾の改行の直前にも一致するため、`\"ab\\n\"` のようなタグが検査を通る。 / 成立条件: 作成・更新・検索のタグに、末尾が改行の文字列を渡す。 / 影響: 仕様は「英小文字・数字・ハイフンの1〜20文字」で、改行入りのタグが保存されたり検索に使われたりする。 / 根拠: `create_note(..., [\"ab\\n\"])` が受理されることを実行で確認した。使用箇所は `_validate` と `search_notes`。share.py は `fullmatch` で対策済みなので、ここだけ不整合になっている。 / 提案: `TAG_RE.fullmatch` を使うか、`\\Z` で固定する。\n- [重大3] 区分: テスト / 対象: AC1, AC3, AC4, AC5, AC8, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 12 件のテストは正常系が中心で、受け入れ条件の異常系・境界値の検証がない。具体的に欠けているのは次のとおり。(a) 他組織・他人の非公開メモが NotFound になること（K1）。(b) 更新・削除の Forbidden（これがあれば重大1を検出できた）。(c) 古い version での Conflict と、競合する更新の再現。(d) LIKE の `%` `_` のエスケープと SQL インジェクション文字列（K2）。(e) per_page や sort の範囲外。(f) タグ上限・形式の不正。(g) 途中失敗時のロールバック（hooks.before_write）。(h) 閲覧数の同時加算。(i) 移管の組織またぎの拒否と途中失敗。(j) 期限ちょうどの境界。 / 根拠: AC と K1〜K8 は、検証条件を外したら失敗するテストがあることを要する。tests/test_notes.py を通読して確認した。 / 提案: 上記の異常系・境界値のテストを追加する。並行実行と障害の再現には、設計の hooks.before_write と RateLimiter.hook を使う。\n- [重大4] 区分: テスト / 対象: AC6, AC7, AC9, AC10, K5, K7 / 対応区分: 証拠不足 / 内容: (AC6, K7) `test_export_audit` が action と actor だけを確認しており、api_key のマスクを検証していない。 (AC7) 枠の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出しのテストがない。 (AC9, K5) ログや例外に本文・署名・鍵が出ないことのテストがない。 (AC10) 例外の後に同じ接続を使い続けられることのテストがない。 / 根拠: 各 AC の規則を直接確かめるテストがなく、V6, V7, V9, V10 の紐付けが空洞になっている。 / 提案: 8 文字未満・8 文字以上の鍵のマスク、境界の秒、スレッドを使った同時呼び出し、ログの捕捉、失敗後の再利用のテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名のテストが 1 件あるだけで不十分。長さ・タグの規則・ロールバックの検証がなく、タグの改行の欠陥も見逃している。\n- AC2: 閲覧数が 1 増えること、他組織・非公開で NotFound になること、同時閲覧のどれも検証していないため不十分。\n- AC3: 一覧と検索の正常系だけで不十分。範囲外の入力・エスケープ・インジェクション・他人の非公開メモの除外・タグ OR がない。\n- AC4: 所有者の更新・削除の正常系だけで不十分。Forbidden・Conflict・NotFound がなく、重大1の欠陥を見逃している。\n- AC5: 移管の正常系と非管理者の拒否だけで不十分。組織またぎと途中失敗の巻き戻しがない。\n- AC6: マスクを確認していないため不十分。\n- AC7: 枠のリセットだけで不十分。境界と同時実行がない。\n- AC8: 往復と改ざんの 2 件だけで不十分。期限ちょうど、期限切れ、形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。`history` に弱体化の形跡はない（bind のみ）。\n### E2E の要否\n- 不要。HTTP のないライブラリで、SQLite のインメモリを使った単体・統合テストで足りる。\n### 不足しているリスク\n- K1: 漏えい経路のテストがない。\n- K2: インジェクション文字列とエスケープのテストがない。\n- K3: 同時の更新・閲覧・呼び出しのテストがない。\n- K4: 途中失敗のロールバックのテストがない。\n- K5, K7: api_key のマスクを確かめていない。\n- K6: 組織またぎの移管のテストがない。\n- K8: 期限ちょうど・形の崩れのテストがない。\n### 確認したこと\n- 仕様・設計・全ソース・テストを通読した。\n- `python3 -m unittest discover -s tests -t .` の結果は 12 件が成功した。ただし内容は正常系が中心。\n- 再現スクリプトで、非作成者の member が公開メモを更新できること（version 2 が返った）と、末尾が改行のタグが受理されることを確認した。\n- `aqdlc history --since 0` を確認した。検証条件の弱体化はなく、実装担当による bind のみだった。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

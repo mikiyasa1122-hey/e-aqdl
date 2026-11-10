@@ -1,0 +1,33 @@
+{
+ "case": "BND-04",
+ "rep": 2,
+ "judge_cost_usd": 0.0632463,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- 重大1は埋め込んだ欠陥そのものです。share.py の verify_link で `now > expires` と比較しているため、期限ちょうどのリンクが有効になります。\n- 重大2は実在する別の欠陥です。TAG_RE を `.match` で使っているので、`$` が末尾の改行を許し、\"abc\\n\" が通ります。仕様の「英小文字・数字・ハイフンの1〜20文字」に反します。\n- 重大3はテストの不足だけを指摘しています。\n- 重大4はコードの欠陥を示しておらず、証拠不足、つまりテストがないという指摘です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"share.py verify_link の `now > expires` により期限ちょうどのリンクが有効になる点を、同じ箇所・同じ原因で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を `.match` で使うため末尾改行付きのタグが通り、仕様のタグ規則に反する実在の欠陥である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを列挙しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"移管の実装に欠陥は挙げず、検証（テスト）がないことだけを指摘している。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（期限の比較が > で、期限ちょうどが有効）を箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "share.py verify_link の `now > expires` により期限ちょうどのリンクが有効になる点を、同じ箇所・同じ原因で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を `.match` で使うため末尾改行付きのタグが通り、仕様のタグ規則に反する実在の欠陥である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを列挙しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "移管の実装に欠陥は挙げず、検証（テスト）がないことだけを指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（期限の比較が > で、期限ちょうどが有効）を箇所・原因・影響とも正しく指摘している。"
+ }
+}

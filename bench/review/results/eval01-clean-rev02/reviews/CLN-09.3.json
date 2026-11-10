@@ -1,0 +1,49 @@
+{
+ "case": "CLN-09",
+ "rep": 3,
+ "sec": 29.4,
+ "exit": 0,
+ "cost_usd": 0.1386929,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22741,
+  "cache_read_input_tokens": 132129,
+  "output_tokens": 3450,
+  "output_tokens_details": {
+   "thinking_tokens": 953
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22741,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2085,
+    "cache_read_input_tokens": 43075,
+    "cache_creation_input_tokens": 6080,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6080
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 542df200\n### 指摘\n- なし\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。題名・本文・タグの境界値、タグが文字列そのものの場合、末尾に改行のあるタグ、途中の失敗（`hooks.before_write(\"create:tags\")`）での巻き戻しを確かめている。コードは `service.py:237-249` で、検証してから 1 つのトランザクションで書く。\n- AC2: 妥当。他組織・他人の非公開・存在しないメモがすべて NotFound になることを確かめている。NotFound では閲覧数が増えない。確認の後に非公開へ変わる場合も NotFound になる。閲覧の割り込みと、別接続・別スレッドからの同時閲覧（4 スレッド × 10 回 = 40）も確かめている。`BEGIN IMMEDIATE` と `views = views + 1` で数え漏れは起きない。\n- AC3: 妥当。範囲外の page・per_page・sort は ValidationError になる。`%` と `_` は ESCAPE で通常の文字として扱われ、SQL は `?` で値を渡している。ORDER BY は固定の辞書から選び、利用者の入力を SQL に埋め込んでいない。タグは OR で絞り込み、R1 の規則で検査される。非公開メモの除外もコードで確認した。\n- AC4: 妥当。作成者・同じ組織の管理者・他者・他組織・非公開の各場合で、Forbidden と NotFound の使い分けを確かめている。古い version は Conflict になる。読み出しと書き込みの間に他の更新が入る場合、および判定後に移管される場合は、トランザクション内で行を読み直して判定しており、そのテストもある。更新時の検証、失敗時に何も残らないこと、削除の途中失敗での巻き戻しと例外の伝播も確かめている。\n- AC5: 妥当。コードの管理者・同一組織のチェックと、`transfer:{i}` の差し込み口による途中失敗の巻き戻しを確認した。`tests/test_ac5_transfer.py` は 45 行で、中身は精読していない。\n- AC6: 妥当。伏せ字の規則（末尾 4 文字以外を伏せる。8 文字未満は全部伏せる）は `service.py:376` のとおり実装されている。`tests/test_ac6_audit.py` は 28 行で、中身は精読していない。\n- AC7: 妥当。制限、枠の境界（159.999 秒は拒否、160.0 秒で新しい枠）、拒否された呼び出しが枠を延ばさないこと、20 スレッドが同時に呼んでも 5 回しか通らないことを確かめている。`hook` で呼び出しをかみ合わせる決定論的なテストもあり、sleep に頼っていない。\n- AC8: 妥当。`share.py` は `fullmatch` で形を検査し、期限はちょうどの時刻以降を無効にし、署名は `compare_digest` で比較する。`tests/test_ac8_share.py` は 41 行で、中身は精読していない。\n- AC9: 妥当。ログと例外メッセージには ID・件数・値の `repr`（タグ）だけを出しており、本文・署名・api_key は出していない。`tests/test_ac9_secrets.py` は 59 行で、中身は精読していない。\n- AC10: 妥当。`transaction()` は例外時に ROLLBACK して元の例外をそのまま伝える。`_rollback` は ROLLBACK 自体の失敗で元の例外を隠さない。`tests/test_ac10_recovery.py` は 53 行で、中身は精読していない。\n- K1〜K8: 上の各 AC の検証でカバーされている。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストはない。\n- トレースの全行が「合格」だが、反証テストは無効のため `passed_but_unchallenged`。検証条件の弱体化は、`history` の先頭 40 行までの範囲では見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実ファイルと複数スレッドを使う単体テストが並行処理の経路をすでに通している。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/` の全ソース（db・service・ratelimit・share・errors）を精読して、仕様と設計に照らして確認した。\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件が通り、OK だった（`PYTHONDONTWRITEBYTECODE=1`）。\n- `$AQ trace` と `$AQ history --since 0`（先頭 40 行）を確認した。\n- テストは `test_ac2_view.py`、`test_ac4_update_delete.py`、`test_ac7_ratelimit.py` を精読した。それ以外のテストは中身を精読していない。",
+ "files_changed": [],
+ "valid": true
+}

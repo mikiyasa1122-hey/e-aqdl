@@ -1,0 +1,49 @@
+{
+ "case": "CLN-08",
+ "rep": 2,
+ "sec": 29.8,
+ "exit": 0,
+ "cost_usd": 0.12010399999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18467,
+  "cache_read_input_tokens": 122700,
+  "output_tokens": 3395,
+  "output_tokens_details": {
+   "thinking_tokens": 1283
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18467,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1741,
+    "cache_read_input_tokens": 38339,
+    "cache_creation_input_tokens": 6559,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6559
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e0a1ceab\n### 指摘\n- なし\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。`service.py` の `_validate` は題名・本文・タグ数・タグの形式を検査しており、`create_note` は 1 つのトランザクションで書く。`fail_at(\"create:tags\")` で途中の失敗を再現するテストがあり、失敗後に何も残らないことを確かめている。\n- AC2: 妥当。他組織・他人の非公開・存在しないメモがすべて NotFound になることを subTest で確かめている。確認後に非公開へ変えられた場合も NotFound で、閲覧数は増えない。閲覧数は hook で割り込ませたテストと、実ファイル DB の 4 スレッド×10 回（合計 40）のテストで確かめている。\n- AC3: 概ね妥当。`list_notes` の SQL はプレースホルダーを使い、`ORDER BY` は固定表から選ぶ。LIKE は ESCAPE 付きで、`%` と `_` を普通の文字として扱う。タグは R1 と同じ規則で検査し、OR で絞り込む。入力拒否とインジェクションのテストは `test_ac3_list_search.py` にあるが、全文は読んでいない。\n- AC4: 妥当。更新は UPDATE の WHERE に version を入れ、`BEGIN IMMEDIATE` の中で認可と検証をやり直す。管理者・作成者・他組織・非公開の場合分け、競合、削除の途中失敗がテストで確かめられている。\n- AC5: 妥当。管理者であること、3 者が同じ組織であること、途中失敗で全件が元に戻ることを確かめている。\n- AC6: 妥当。マスクの実装は 8 文字未満をすべて伏せ、8 文字以上は末尾 4 文字だけを残す。\n- AC7: 妥当。時計を差し替えて枠の境界（159.999 と 160.0）と、拒否された呼び出しが枠を延ばさないことを確かめている。同時実行は、バリアで 20 スレッドが同時に呼んで成功が 5 件になるテストと、hook でチェック中に割り込ませるテストの 2 つがある。後者は 0.5 秒の待ちを使うが、競合の有無は成立条件で決まる作りになっている。\n- AC8: 妥当。`LINK_RE` は `fullmatch` で、数字は ASCII のみ。期限は `now >= expires` で判定し、署名は `compare_digest` で比べる。期限の境界・改ざん・形の崩れをテストしている。\n- AC9: 妥当。ログ・例外メッセージ・監査の detail に、本文・署名・api_key・secret が出ないことをテストで確かめている。実装を読んでも、これらを出力する経路は見つからなかった。\n- AC10: 妥当。`transaction()` は例外時に ROLLBACK して元の例外を伝え、`_rollback` の失敗で元の例外を隠さない。\n- K1〜K8: 対応する検証が `trace` に紐づいており、実装との整合を確認した。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのファイルは確認されなかった。`history` は bind の追加のみで、検証条件が弱められた形跡はない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、実ファイル DB を使う複数スレッドのテストがすでにある。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- 仕様・設計を読み、`notes/*.py` 全体を行単位で確認した。\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて OK（キャッシュ書き込み抑止のため `PYTHONDONTWRITEBYTECODE=1` を付けた）。\n- `$AQ history --since 0` を確認した。bind の追加のみで、弱体化はなかった。\n- `tests/base.py`、`test_ac2_view.py`、`test_ac7_ratelimit.py`、`test_ac9_secrets.py` を読んだ。他のテストファイルは中身を精査していない。\n- `$AQ gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SQL-06",
+ "rep": 2,
+ "sec": 38.8,
+ "exit": 0,
+ "cost_usd": 0.1450656,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20756,
+  "cache_read_input_tokens": 117056,
+  "output_tokens": 5032,
+  "output_tokens_details": {
+   "thinking_tokens": 1068
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20756,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3137,
+    "cache_read_input_tokens": 38111,
+    "cache_creation_input_tokens": 2877,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2877
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7b81bfe0\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `search_notes` の LIKE に `ESCAPE` 句がなく、`%` と `_` を普通の文字として探せない。 / 成立条件: 検索語に `%`・`_`・`\\` を含めるとき。SQLite の LIKE には既定のエスケープ文字がない。 / 影響: `_like_escape` が `%` を `\\%` に変えるが、`ESCAPE` がないので `\\` はただの文字になり、`%` はワイルドカードのまま。本文「50% off」のメモを「50%」で検索しても 0 件になる。「%」だけで検索しても 0 件になる（本来は「%」を含むメモだけが一致するはず）。設計書の「LIKE は ESCAPE」にも反する。 / 根拠: notes/service.py:141-143 の `title LIKE ? OR body LIKE ?` に ESCAPE がない。一時 DB で実行して確認した。`search_notes(c,u,\"50%\")` は `[]`、`search_notes(c,u,\"%\")` も `[]` だった。確認した保証: 上流の検証や DB 側の対策はなく、既存テストも `%`・`_` を使っていない。 / 提案: `title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'` にする（title と body の両方）。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査 `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾が改行のタグ（`\"abc\\n\"`）を通してしまう。Python の `$` は末尾の改行の前にも一致する。 / 成立条件: 作成・更新・検索で、タグ文字列の末尾に `\\n` が付いているとき。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。実際に `create_note(..., [\"abc\\n\"])` が成功し、メモ ID 3 が返った。 / 根拠: notes/service.py:14, 64, 150（`.match` を使用）。share.py は同じ理由で `fullmatch` を使っているのに、service.py は使っていない。 / 提案: `TAG_RE.fullmatch(t)` にする（または `\\Z` を使う）。\n- [重大3] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4, R10 / 対応区分: 証拠不足 / 内容: 途中失敗でのロールバックを確かめるテストがない。作成途中（`before_write(\"create:tags\")`）、削除途中、移管途中の失敗で何も残らないこと、例外の後に接続を使い続けられることを確かめるテストが、一つもない。 / 根拠: 仕様が「何も残さない」「全部か何もしないか」と求めており、設計も `hooks.before_write` をこの目的の差し込み口としている。tests/test_notes.py にはこの経路のテストがない。 / 提案: `hooks.before_write` から例外を投げ、create・delete・transfer の後にメモ・タグ・監査・所有者が元のままであることと、同じ接続でその後の操作が成功することを確認する。\n- [重大4] 区分: テスト / 対象: AC2, AC4, AC7, K1, K3 / 対応区分: 証拠不足 / 内容: 認可・同時実行・境界値を確かめるテストがない。具体的には次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること、Forbidden になること、管理者が非公開メモを扱えないこと。(b) 閲覧数の同時加算。(c) 更新の Conflict（古い version、読み出しから書き込みの間に他の更新が入るケース）。(d) RateLimiter のちょうど window 秒の境界と、複数スレッドからの同時呼び出し。(e) 共有リンクの期限ちょうど、形の崩れ、期限切れ。(f) 監査ログの api_key の伏せ字（8文字未満を含む）。(g) 一覧の範囲外入力。(h) 移管で組織をまたぐ場合の拒否。 / 根拠: 受け入れ条件 AC2・AC4・AC7・AC8・AC6・AC3・AC5 が、これらを明示的に求めている。現状の12件は正常系が中心で、`test_export_audit` は `action` と `actor` だけを確認し `actor_key` を見ていない。 / 提案: 設計の差し込み口（`hooks`・`RateLimiter.hook`）と別々の接続・スレッドを使い、順序に依存しない形で上記を確認するテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の `version` が整数かを検査していない（`True` や文字列が通る）。ただし最新でなければ Conflict になるため、実害は小さい。 / 提案: 整数でなければ ValidationError にする。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と作成・取得の正常系だけを確認しており不十分。タグ・文字数の境界、ロールバックの確認がない。実装にも改行付きタグを通す欠陥がある（重大2・3）。\n- AC2: 閲覧の正常系だけで不十分。NotFound の各経路と閲覧数の同時加算を確かめていない。実装（`_visible` と、トランザクション内での再確認）は妥当に見える（重大4）。\n- AC3: 検索は「予算」の通常語だけで、`%`・`_` のテストがない。実際に LIKE の ESCAPE 欠落という欠陥を見逃している。一覧は範囲外入力のテストもない（重大1・4）。\n- AC4: 所有者による更新と削除の正常系だけで不十分。Conflict・Forbidden・管理者・非公開・削除途中の失敗のテストがない（重大3・4）。\n- AC5: 管理者だけの拒否と件数の確認だけで不十分。組織をまたぐ拒否と途中失敗での元のままの確認がない。\n- AC6: `actor_key` を一切確認しておらず、空洞に近い。実装は仕様どおりに見える（重大4）。\n- AC7: 上限超過と枠の再開（61秒後）だけで不十分。ちょうど window 秒の境界と同時呼び出しがない。実装自体は、ロック内で処理しており妥当に見える。\n- AC8: 往復と改ざんだけで不十分。期限ちょうど、期限切れ、形の崩れがない。実装は `fullmatch` と `>=` で妥当に見える。\n- AC9: 確認するテストがない。実装は本文・署名・api_key をログに出していないことをコードで確認した。\n- AC10: 確認するテストがない（重大3）。\n- エンジンが検出したテストの兆候: なし。skip・`.only` もなく、テストや検証条件の弱体化も見当たらない（git 履歴はまだ未コミット）。\n### E2E の要否\n- 不要。HTTP や画面のないライブラリで、SQLite を使った単体・結合テストで足りる。ただし、同時実行は別スレッド・別接続で確かめる必要がある。\n### 不足しているリスク\n- K1: 非公開・他組織メモの漏えいを防ぐ経路のテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行のテストがない。\n- K4: 途中の失敗でロールバックされることを確かめるテストがない。\n- K5, K7: 監査ログの api_key の伏せ字を確かめるテストがない。\n- K8: 期限ちょうど・形の崩れの確認がない。\n- K2: LIKE のエスケープが効いていない（重大1）。\n### 確認したこと\n- `python3 -B -m unittest discover -s tests` を実行し、12件が成功した。\n- 一時的なインメモリ DB で再現した。`search_notes(c,u,\"50%\")` と `search_notes(c,u,\"%\")` はどちらも `[]` を返した。`create_note(..., [\"abc\\n\"])` は成功し ID を返した。\n- notes/ 配下の全ファイル（db・service・ratelimit・share・errors）を読んだ。SQL はプレースホルダーで値を渡している。`ORDER BY` は固定の辞書から選んでおり、インジェクションの経路はない。\n- `$AQ gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

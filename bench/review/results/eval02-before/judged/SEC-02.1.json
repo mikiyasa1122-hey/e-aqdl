@@ -1,0 +1,28 @@
+{
+ "case": "SEC-02",
+ "rep": 1,
+ "judge_cost_usd": 0.0639543,
+ "judge_raw": "重大1は、埋め込まれた欠陥と箇所・原因・影響がすべて一致します。重大2は、`.match` と `$` の組み合わせで末尾に改行が付いたタグが通るという実在のバグです。重大3はテストの不足だけを指摘しています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずに actor_key へそのまま返す点を、箇所（service.py 216-217）・原因・全文漏えいの影響まで正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と `.match` により末尾が改行のタグが通るのは実在する仕様違反で、埋め込み欠陥とは別物。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（api_key 未マスク）を正確に捉え、実行での確認も示している。重大4は取り下げられ、訂正版の最終結果には含まれないため分類から除外した。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずに actor_key へそのまま返す点を、箇所（service.py 216-217）・原因・全文漏えいの影響まで正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と `.match` により末尾が改行のタグが通るのは実在する仕様違反で、埋め込み欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（api_key 未マスク）を正確に捉え、実行での確認も示している。重大4は取り下げられ、訂正版の最終結果には含まれないため分類から除外した。"
+ }
+}

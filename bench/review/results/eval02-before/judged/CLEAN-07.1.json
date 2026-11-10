@@ -1,0 +1,28 @@
+{
+ "case": "CLEAN-07",
+ "rep": 1,
+ "judge_cost_usd": 0.0693343,
+ "judge_raw": "**分類の概要**\n\n- 重大1は、`$` が末尾の改行の直前にも一致するという Python の仕様を正しく突いています。`re.match` と `$` の組み合わせで `\"abc\\n\"` が検査を通るのは、仕様 R1・R3 に反する実在の欠陥です。ただし、このケースで意図した変更（回数の制限の内部の名前を変える）とは無関係なので、`matches_defect` ではなく `real_other` にします。\n- 重大2は、テストの不足だけを指摘しています。コードの欠陥の主張ではないので `test_gap` です。\n- 軽微1は誤りです。トランザクションの外で読んだ `row` が古くなる場合を考えます。\n  - その間に別の更新が入ると、DB の version が進みます。\n  - すると `WHERE version = ?` が一致せず、Conflict になります。\n  - 移管（`transfer_notes`）も version を増やすので、同じく Conflict になります。\n  - したがって、古い title や body で上書きされる経路は成立しません。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と re.match により末尾が改行のタグが検査を通る。仕様 R1・R3 に反する実在の欠陥で、再現も示されているが、意図した変更とは無関係。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストが薄く、受け入れ条件を確かめる検証が足りないという、テストの不足だけの指摘。\"},\n  {\"label\": \"軽微1\", \"class\": \"false_positive\", \"reason\": \"別の更新が入ると version が進んで WHERE の version 条件で Conflict になるため、古い title・body で上書きされる経路は成立しない。\"}\n ],\n \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケース。重大1は意図した変更とは別の実在の欠陥で、real_other として数える。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と re.match により末尾が改行のタグが検査を通る。仕様 R1・R3 に反する実在の欠陥で、再現も示されているが、意図した変更とは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストが薄く、受け入れ条件を確かめる検証が足りないという、テストの不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "false_positive",
+    "reason": "別の更新が入ると version が進んで WHERE の version 条件で Conflict になるため、古い title・body で上書きされる経路は成立しない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケース。重大1は意図した変更とは別の実在の欠陥で、real_other として数える。"
+ }
+}

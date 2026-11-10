@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 2,
+ "sec": 28.5,
+ "exit": 0,
+ "cost_usd": 0.1378346,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22672,
+  "cache_read_input_tokens": 130206,
+  "output_tokens": 3411,
+  "output_tokens_details": {
+   "thinking_tokens": 1155
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22672,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1818,
+    "cache_read_input_tokens": 41606,
+    "cache_creation_input_tokens": 7496,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7496
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `LINK_RE` は先頭ゼロ付きの数字を通す。`007.<期限>.<署名>` の署名は note_id を `int` にして計算するため、`7.<期限>.<署名>` と同じ署名で検証が通る。同じ note_id を指す別表記のリンクが有効になる。署名の偽造や期限の延長にはならない。仕様の「10進の数字だけ」は満たしている。 / 提案: 正規表現を `(0|[1-9][0-9]{0,17})` にするか、`make_link` の出力と文字列で一致するかを確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 / VK4 は妥当。`tests/test_ac1_create.py` で入力の拒否（題名・本文・タグ）と、タグ書き込み中の失敗（`create:tags`）による全巻き戻しを確かめている。\n- AC2: V2 / VK1 は妥当。他組織・他人の非公開・存在しないメモがすべて NotFound になること、NotFound のとき閲覧数が増えないこと、確認後に非公開へ変わった場合を確かめている。閲覧の割り込みと、別接続・別スレッド4本×10回で40になることも確かめており、数え漏れの検証として有効。\n- AC3: V3 / VK2 は妥当。実装は SQL に値を埋め込まず、LIKE に ESCAPE を使っている。範囲外の入力の拒否と、`%`・`_` を普通の文字として扱うことが確認対象。テストは全体で 63 件が合格した。\n- AC4: V4 / VK3 は妥当。作成者・管理者・他人・他組織・非公開の組み合わせ、古い version、読み出しと書き込みの間の更新、書き込み直前の移管、タグを含む検証、失敗時の巻き戻しを確かめている。\n- AC5: V5 / VK6 は妥当。管理者以外・組織をまたぐ移管の拒否と、途中失敗で元のままになることを確かめている。\n- AC6: V6 / VK7 は妥当。実装は 8 文字未満をすべて伏せ、8 文字以上は末尾 4 文字だけ残している。\n- AC7: V7 は妥当。時刻を差し込める clock で境界（159.999 と 160.0）を決定論的に確かめている。20 スレッド同時の呼び出しと、判定の途中の割り込みを hook で再現するテストもある。\n- AC8: V8 / VK8 は概ね妥当。ただし先頭ゼロの別表記は確認されていない（軽微1）。\n- AC9: V9 / VK5 は妥当。ログ・例外メッセージ・監査の出力に、本文・署名・api_key・秘密鍵が出ないことを確かめている。\n- AC10: V10 は妥当。`transaction()` と `_rollback` の実装は、例外後に接続を使い続けられる形になっている。\n- エンジン検出のテストの兆候はなし。skip・`.only`・アサーションなしのファイルは見つからなかった。\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、SQLite（一時ファイルのDB・別スレッドの別接続）を使った単体テストでリスクを確かめられている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/` 全 5 ファイルと `tests/` の主要ファイルを精読した。\n- `$AQ trace` で、R1〜R10 に対応する検証が付いていることを確認した。`$AQ history --since 0` の先頭部分では、要求・受け入れ条件・検証の追加だけで、検証の弱体化は見当たらなかった（先頭 40 行のみ確認）。\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件が OK だった。\n- 認可（`_visible` / `_can_modify`）、楽観的ロック、トランザクション境界、LIKE の ESCAPE、HMAC 比較（`compare_digest`）、RateLimiter のロックをコード上でたどり、重大な欠陥は見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

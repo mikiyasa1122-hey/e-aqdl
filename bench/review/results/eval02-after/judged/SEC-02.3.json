@@ -1,0 +1,23 @@
+{
+ "case": "SEC-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0643543,
+ "judge_raw": "重大1は、`export_audit` が `api_key` を伏せずに `actor_key` へそのまま返している点を指摘しています。これは埋め込んだ欠陥と同じ箇所で、原因（そのまま返している）も影響（管理者の出力に鍵が全部出る）も一致します。\n\n重大2は、コードの欠陥ではなく、テストが足りないことだけを指摘しています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せず actor_key に全文を返す点を、同じ箇所・同じ原因と影響で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"受け入れ条件に対するテストの不足・弱さだけの指摘で、コードの欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\",\n \"matched_label\": \"重大1\",\n \"note\": \"重大1が埋め込んだ欠陥（監査ログで api_key を伏せない）を正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せず actor_key に全文を返す点を、同じ箇所・同じ原因と影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "受け入れ条件に対するテストの不足・弱さだけの指摘で、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥（監査ログで api_key を伏せない）を正確に捉えている。"
+ }
+}

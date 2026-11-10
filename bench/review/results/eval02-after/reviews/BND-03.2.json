@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 2,
+ "sec": 31.9,
+ "exit": 0,
+ "cost_usd": 0.10293930000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12347,
+  "cache_read_input_tokens": 122053,
+  "output_tokens": 4133,
+  "output_tokens_details": {
+   "thinking_tokens": 704
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12347,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3024,
+    "cache_read_input_tokens": 36874,
+    "cache_creation_input_tokens": 2349,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2349
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7 / 対応区分: 修正必須 / 内容: 枠の境界の判定が仕様と違う。仕様は「枠の開始からちょうど window 秒たったら新しい枠」だが、`notes/ratelimit.py` の `if now - start > self.window` では、ちょうど window 秒の時点がまだ古い枠として扱われる。 / 成立条件: 枠の開始から経過時間がちょうど window 秒のときに、上限に達していた場合。 / 影響: 本来は許可すべき呼び出しが RateLimited になる。AC7 の「枠の境界」を満たさない。 / 根拠: `notes/ratelimit.py` の hit()。再現として、limit=1、window=10、偽の時計で t=0 に hit し、t=10 で hit すると RateLimited になった（実行して確認）。既存テストは t=61 でしか確かめておらず、この欠陥を検出しない。 / 提案: 条件を `>=` に直し、ちょうど window 秒の時点と window 秒より1つ手前の時点の両方をテストする。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: テストは12件の正常系中心で、仕様の重要な規則を確かめる検証がない。足りないのは次の検証。(a) 他の組織・他人の非公開メモが R2・R3・R4・R5 で NotFound・Forbidden になること。(b) `%`・`_`・`\\` を含む検索語の部分一致、タグの OR 絞り込み、page・per_page・sort の範囲外の拒否。(c) 古い version の更新と、`hooks.before_write` で割り込んだ更新が Conflict になること。(d) 閲覧数が複数スレッド・複数接続で正確に増えること。(e) create・delete・transfer の途中で失敗したときのロールバックと、その後も接続を使えること。(f) api_key の伏せ字（8文字未満・ちょうど8文字を含む）。(g) RateLimiter を複数スレッドから同時に呼んで limit を超えないこと。(h) 共有リンクの期限ちょうど・期限切れ・形の崩れ（改行を含むものを含む）。(i) ログや例外に本文・署名・api_key が出ないこと。 / 根拠: 仕様の受け入れ条件がこれらの規則・境界値・同時実行を明記している。tests/test_notes.py は R7・R8 を1〜2ケースずつ、R5・R6 を1ケースずつ確かめるだけで、K1・K2・K3・K4・K8 に対応する検証がない。[重大1] のバグも見逃している。設計書が用意した `hooks` の差し込み口が一度も使われていない。 / 提案: 上記 (a)〜(i) を、ラベルごとにテストとして追加する。同時実行のテストは sleep ではなく、hook と Barrier で決定論的に再現する。\n- [重大3] 区分: テスト / 対象: AC1, R1 / 対応区分: 証拠不足 / 内容: 作成の入力検証の境界値（題名 100文字・101文字・空白だけ、本文 10000文字・10001文字、タグ 5個・6個・重複、不正なタグ、tags に文字列そのものを渡す場合）と、失敗時に何も残らないこと（`before_write(\"create:tags\")` で例外を出して notes・audit に行が残らないこと）を確かめるテストがない。 / 根拠: AC1 が明示している。既存テストは空の題名の拒否だけ。 / 提案: 境界値の表形式のテストと、hook で途中失敗させてロールバックを確かめるテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `delete_note` は、トランザクションの外で存在を確認した後に DELETE する。他の接続が先に削除していた場合も、DELETE は0件のまま監査ログに \"delete\" を記録し、NotFound を返さない。 / 提案: DELETE の rowcount を確認し、0件なら NotFound にしてロールバックする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名の拒否と1ケースの作成だけで、境界値・タグの規則・途中失敗の検証がない（[重大3]）。実装はコード上、仕様に沿っている。\n- AC2: 不十分。自分のメモの閲覧だけ。他の組織・他人の非公開メモ・存在しないメモの NotFound と、同時の閲覧数の検証がない。コード上の実装（UPDATE views = views + 1 を BEGIN IMMEDIATE の中で行う）は妥当。\n- AC3: 不十分。ページングと検索は正常系の1つだけ。`%`・`_` を含む検索語、タグの OR、範囲外の入力の検証がない。コード上は ESCAPE とプレースホルダーを使っており、`ORDER BY` はホワイトリストの値だけが入るため、実装は妥当に見える。\n- AC4: 不十分。所有者による更新と削除だけ。Forbidden・Conflict・管理者の権限・他の組織・競合の検証がない。\n- AC5: 不十分。正常系と「管理者でない場合」の拒否だけ。他の組織との間の移管と、途中失敗で元のままになることの検証がない。\n- AC6: 不十分。actor 名の確認だけで、api_key の伏せ字そのものを一度も確かめていない。\n- AC7: 不十分で、実装にも欠陥がある（[重大1]）。同時の呼び出しの検証もない。\n- AC8: 不十分。往復と改ざん（note_id の書き換え）だけ。期限ちょうど・期限切れ・形の崩れ・改行の検証がない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしのテストファイルは見つからなかった）。検証条件の改ざん・弱体化は確認していない（テストはもともと薄く、履歴は未確認）。\n\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリで、単体・統合テストで足りる。ただし並行実行のテストは必要）。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: SQL インジェクションと LIKE のエスケープを確かめる検証がない。\n- K3: 同時の更新・閲覧・呼び出しで更新や数が失われないことを確かめる検証がない。\n- K4: 途中の失敗による不整合を確かめる検証がない。\n- K5・K7: 監査ログと出力の機密情報の伏せ方を確かめる検証がない。\n- K6: 他の組織への移管と一部だけ移ることを確かめる検証がない。\n- K8: 期限・改ざん・形の崩れたリンクを確かめる検証がない。\n\n### 確認したこと\n- 仕様書・設計書・`notes/*.py`・`tests/test_notes.py` を全文読んだ。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて通った。\n- RateLimiter を偽の時計で動かし、ちょうど window 秒の時点で RateLimited になることを再現した（[重大1]）。\n- SQL の確認: `search_notes` は LIKE のワイルドカードとエスケープ文字を `_like_escape` で処理し、タイトルと本文の両方に同じ pattern を渡し、ESCAPE 句を付け、プレースホルダーを使っている。`list_notes` の ORDER BY はホワイトリストの値だけが入る。SQL の組み立てに欠陥は見つからなかった。\n- gate は実行していない。依存関係のインストールもしていない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "VAL-02",
+ "rep": 1,
+ "sec": 29.3,
+ "exit": 0,
+ "cost_usd": 0.1226101,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18843,
+  "cache_read_input_tokens": 115321,
+  "output_tokens": 3569,
+  "output_tokens_details": {
+   "thinking_tokens": 625
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18843,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2565,
+    "cache_read_input_tokens": 36796,
+    "cache_creation_input_tokens": 2279,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2279
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f2b7a217\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, R4, AC4 / 対応区分: 修正必須 / 内容: 作成と更新でタグの個数上限（5個まで、重複も数える）を検査していない。`_validate`（notes/service.py:50-56）はタグ1個ごとの形式しか見ない。個数の検査は `search_notes` にだけある（service.py:127）。 / 成立条件: `create_note` または `update_note` に6個以上のタグを渡す。重複を含めて数えるため、`[\"a\",\"a\",\"a\",\"a\",\"a\",\"a\"]` も該当する。 / 影響: 仕様に反するメモが保存される。AC1 は「R1 の規則どおりに拒否」を求めていて、AC4 は更新でも R1 の検証を求めている。 / 確認した保証: 上流に検証はなく、DB にも制約はなく、既存テストも防いでいない。実行して確かめた。`create_note(conn, u, \"t\", \"b\", [\"a\"]*5+[\"b\"]*3)` は例外にならず note_id=1 を返した。 / 根拠: notes/service.py:50-56、create_note は :68-69、update_note は :158-162 から `_validate` を呼ぶ。 / 提案: `_validate` の tags 検査に `len(tags) > TAGS_MAX` なら ValidationError を足す。重複を除く前の個数で数える。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち AC1(R1)、AC2、AC3、AC4、AC5、AC6、AC7、AC8、AC9、AC10 とリスク K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系の1ケースずつ。仕様が必須とする次の検証が1つもない。(a) 組織違い・他人の非公開メモが NotFound になること、管理者が非公開メモを扱えないこと、Forbidden（K1）。(b) LIKE の `%`・`_`・`\\` を普通の文字として探すこと、SQL インジェクション（K2）。(c) 閲覧数の同時加算と、更新の version 競合・読み書きの間に入る更新（K3）。(d) `hooks.before_write` による途中失敗でのロールバック（作成・削除・移管）と、例外の後に接続を使い続けられること（K4、AC10）。(e) 移管で別の組織が混ざるときの Forbidden。(f) api_key の伏せ方（8文字未満・ちょうど8文字）（K7）。(g) RateLimiter の枠の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出し。(h) 共有リンクの期限ちょうど・形の崩れ（改行・桁あふれ）・署名の改ざん（K8）。(i) タグ数・題名・本文・page・per_page・sort の境界値。(j) ログと例外に本文・署名・api_key が出ないこと（AC9）。 / 根拠: tests/test_notes.py の全体を読んだ。`test_tampered` は note_id を書き換えるだけで、期限・形・署名の検証は確かめていない。設計書のテスト方針は、差し込み口（`hooks`・`RateLimiter.hook`）で並行実行と途中の失敗を再現するとしているが、使うテストがない。重大1のバグも既存テストをすり抜けた。 / 提案: 上の (a)〜(j) を、差し込み口を使った決定論的なテストで追加する。認可の条件・ESCAPE・version 条件・BEGIN IMMEDIATE・ロックを外したら失敗する形にする。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、トランザクションの外で可視性・権限を確認している。更新は WHERE の version で守られているので破綻はしない。削除は、確認後に他者が所有者や非公開の設定を変える窓がある。ただし仕様の範囲では実害を示せていない。 / 提案: 権限の確認もトランザクションの中でやり直すと安全。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけ。タグ数・題名や本文の境界・失敗時に何も残らないことは未検証で、実装にも欠陥がある（重大1）。不十分。\n- AC2: 閲覧数・組織違い・非公開・同時閲覧のテストがない。不十分。\n- AC3: `test_list_first_page` と `test_search` の正常系だけ。ワイルドカード・不正な page・sort・タグの OR・インジェクションは未検証。実装は ESCAPE とプレースホルダーで正しい（読んで確認）が、テストがない。不十分。\n- AC4: 作成者による更新と削除の正常系だけ。Forbidden・Conflict・管理者・非公開は未検証。不十分。\n- AC5: 正常系と、管理者以外が Forbidden になるケースのみ。別の組織・途中失敗でのロールバックは未検証。不十分。\n- AC6: 伏せ字を確かめるテストがない（`test_export_audit` は action と actor だけ）。不十分。\n- AC7: 枠の再開（t=61）と上限超過だけ。ちょうど window 秒の境界と同時呼び出しがない。不十分。\n- AC8: 往復と note_id の改ざんだけ。期限の境界・形の崩れがない。不十分。\n- AC9: テストなし（実装のログは ID だけで、読んだ範囲では漏れなし）。不十分。\n- AC10: テストなし（`transaction()` は例外で ROLLBACK する設計。読んだ範囲では妥当）。不十分。\n- エンジンが検出したテストの兆候: なし。テストの弱体化・skip は見つからなかった。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリなので、unittest の単体・結合テストで足りる）。ただし、スレッドを使う並行テストは必要。\n### 不足しているリスク\n- K1〜K8 のうち、実装で読み取れた範囲では重大1（タグ数）以外の欠陥は見つからなかった。ただし K1〜K8 はいずれもテストで確かめられていない（重大2）。\n- 同時の閲覧・更新・RateLimiter の競合は、未検証。\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` → 12件すべて成功。\n- 再現スクリプトで、タグ8個の `create_note` が成功することを確認した（重大1）。\n- `git status` の結果、全ファイルが未追跡で、検証条件の変更履歴はなかった。`$AQ trace` と `$AQ history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,28 @@
+{
+ "case": "SQL-06",
+ "rep": 1,
+ "judge_cost_usd": 0.0629063,
+ "judge_raw": "## 判定\n\n- **重大1**: `search_notes` の LIKE に `ESCAPE '\\'` がないことを、原因・影響とも埋め込んだ欠陥どおりに指摘しています。箇所も `service.py` の `search_notes` で一致し、`%` `_` を含む検索語が 0 件になる再現結果も添えています。よって matches_defect です。\n- **重大2**: コードの欠陥の指摘ではなく、テストが不足しているという指摘です。よって test_gap です。\n- **軽微1**: 権限・可視性の確認がトランザクションの外にあることを指摘しています。ただし、version 条件があるため更新は失われず、ロックの外で確認する構造上の改善提案にとどまります。仕様違反を示す具体的な根拠はなく、style と判断しました。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes の LIKE に ESCAPE 句がなく、% や _ を含む検索語でメモが見つからないという、埋め込んだ欠陥と同じ原因・影響を指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストが受け入れ条件の大半を検証していないという、テスト不足だけの指摘である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"確認を transaction の外で行う構造への改善提案で、version 条件があり更新は失われないと本人も述べており、具体的な欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥（LIKE に ESCAPE 句がない）を原因・影響・箇所とも正確に特定し、再現も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes の LIKE に ESCAPE 句がなく、% や _ を含む検索語でメモが見つからないという、埋め込んだ欠陥と同じ原因・影響を指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストが受け入れ条件の大半を検証していないという、テスト不足だけの指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "確認を transaction の外で行う構造への改善提案で、version 条件があり更新は失われないと本人も述べており、具体的な欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥（LIKE に ESCAPE 句がない）を原因・影響・箇所とも正確に特定し、再現も示している。"
+ }
+}

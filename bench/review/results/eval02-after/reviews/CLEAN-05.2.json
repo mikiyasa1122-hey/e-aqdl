@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-05",
+ "rep": 2,
+ "sec": 38.8,
+ "exit": 0,
+ "cost_usd": 0.2262119,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 42295,
+  "cache_read_input_tokens": 96859,
+  "output_tokens": 4733,
+  "output_tokens_details": {
+   "thinking_tokens": 1024
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 42295,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2920,
+    "cache_read_input_tokens": 38141,
+    "cache_creation_input_tokens": 4154,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4154
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e52d0cbc\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査 `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾が改行のタグ（例 `\"ab\\n\"`）を通してしまう。Python の `$` は末尾の改行の直前にも一致する。仕様のタグは「英小文字・数字・ハイフンの1〜20文字」だけ。 / 成立条件: `create_note`・`update_note`・`search_notes` の tags に `\"ab\\n\"` を渡す。 / 影響: 規則外のタグが保存され、`\"ab\"` と `\"ab\\n\"` が別のタグになる。仕様の入力拒否に反する。 / 根拠: service.py:14, 64, 151。`create_note(conn, u, 't', 'b', ['ab\\n'])` が成功し、`TAG_RE.match('ab\\n')` は True になることを実行で確認した。上流に別の検証はなく、DB 側の制約もない。同じ検証をタグごとに通る3箇所で使っているため、直すのは正規表現側の1か所でよい。 / 提案: `TAG_RE.fullmatch(t)` に変える。share.py の `LINK_RE` は fullmatch で正しく使えている。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 検証は12件の正常系中心の単体テストだけで、全 AC・全リスクの検証 V/VK がこの同じ `unit` に紐づいている。次の必須の検証が空洞になっている。(a) R1 の異常系: 題名・本文・タグの境界、タグ6個、tags に文字列そのものを渡す、失敗時のロールバック（`before_write(\"create:tags\")` の差し込み口を使っていない）。(b) R2/K1: 他組織・他人の非公開メモが NotFound になること、閲覧数が同時でも数え漏れないこと。(c) R3/K2: `%` と `_` を含む検索語、タグ OR、page・per_page・sort の範囲外。(d) R4: Forbidden・Conflict（古い version）、読み出しから書き込みの間の割り込み、削除の失敗。(e) R5/K6: 他組織への移管と失敗時の巻き戻し。(f) R6/K7: api_key の伏せ字は 8文字未満・ちょうど8文字・それ以外の境界を含め、どれもテストしていない。(g) R7/K3: 枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。(h) R8/K8: 期限ちょうど、形の崩れたリンク、署名の改ざん（テストは note_id を変えた場合だけ）。(i) R9/R10: 機密の非出力と、例外の後の接続の再利用。 / 根拠: tests/test_notes.py 全90行。設計の「テスト方針」が `service.hooks.before_write` と `RateLimiter.hook` で並行・途中失敗を再現すると定めているが、どのテストも使っていない。認可の条件を外してもほぼ失敗しない。重大1のタグのバグも、境界のテストがないため見逃された。 / 提案: 上記 (a)〜(i) を、決定論的な形（フックや固定クロック。sleep に頼らない）で追加する。特に K1・K2・K3・K4・K6・K7・K8 の否定系と境界値を入れる。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `list_notes` に非常に大きな page（2^63 を超える値）を渡すと、`(page-1)*per_page` が SQLite の整数範囲を超え、ValidationError ではなく OverflowError になる。 / 提案: page に上限を設けて ValidationError にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名と正常作成しか確かめていない。タグ・長さの境界とロールバックは未検証で、実際にタグの検査漏れ（重大1）がある。\n- AC2: 不十分。自分のメモを閲覧できることだけで、NotFound の各場合（他組織・非公開・存在しない）と同時閲覧の数え漏れは未検証。\n- AC3: 不十分。正常な1ページ目と基本の検索だけ。`%` `_`、タグ OR、範囲外の拒否は未検証。実装は ESCAPE 句とプレースホルダーで正しく見える（service.py:134-154）が、証拠がない。\n- AC4: 不十分。所有者による更新・削除の成功だけ。Forbidden・Conflict・割り込み・削除の失敗は未検証。\n- AC5: 不十分。管理者でなければ Forbidden になる場合と成功の件数だけ。組織をまたぐ場合と、失敗時の元のまま、は未検証。\n- AC6: 不十分。action と actor だけを検証していて、`actor_key` の伏せ字を一度も確かめていない。\n- AC7: 不十分。固定クロックで簡単な超過と枠の更新だけ。ちょうど window 秒の境界とスレッド同時実行は未検証。\n- AC8: 不十分。往復と note_id を差し替えた改ざんだけ。期限の境界、期限切れ、形の崩れは未検証。\n- AC9: 検証なし。ログ・例外に本文・署名・api_key が出ないことを確かめるテストがない。コードを読む限り ID しか出していない。\n- AC10: 検証なし。例外の後に同じ接続を使えるかのテストがない。実装は `transaction()` で ROLLBACK している。\n- エンジンが検出したテストの兆候: なし。skip・弱化は見つからず、`history` にも検証条件を弱める変更はなかった。ただし、すべて `unit` の1スイートへの紐づけで、内容が薄い。\n\n### E2E の要否\n- 不要（HTTP 層のない SQLite ライブラリ。リスクは単体・統合テストで足りる）。ただし、複数の別接続・別スレッドによる並行テストは必要（重大2 (b)(d)(g)）。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを否定するテストがない。\n- K2: `%`・`_`・`\\` を含む検索語のテストがない。\n- K3: 同時の閲覧・更新・RateLimiter のテストがない。\n- K4: ロールバックと巻き戻しのテストがない。\n- K5, K7: api_key の伏せ字と、ログ・例外への非出力のテストがない。\n- K6: 組織をまたぐ移管と一部だけ移る場合のテストがない。\n- K8: 期限ちょうど・形の崩れ・署名の改ざんのテストが不足している。\n\n### 確認したこと\n- 仕様・設計・全ソース（notes/*.py、tests/test_notes.py）を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が全て成功した。\n- `create_note(..., ['ab\\n'])` が成功し、`TAG_RE.match('ab\\n')` が True になることを実行で確認した（重大1）。\n- `history --since 0` の確認: 検証条件を弱める変更はなく、V1〜V10 と VK1〜VK8 を `unit` に紐づける操作だけだった。\n- SQL: プレースホルダーが使われている。LIKE は `\\`・`%`・`_` を ESCAPE 句つきでエスケープし、title と body の両方に同じパターンを渡している。ORDER BY は固定の辞書から選んでいる。インジェクションは確認されなかった。\n- 並行処理: `BEGIN IMMEDIATE` と、version 条件つきの UPDATE の rowcount 判定は設計どおりで、RateLimiter は Lock で保護されている。",
+ "files_changed": [],
+ "valid": true
+}

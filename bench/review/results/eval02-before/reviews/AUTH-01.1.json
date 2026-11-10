@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-01",
+ "rep": 1,
+ "sec": 30.3,
+ "exit": 0,
+ "cost_usd": 0.1214709,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18753,
+  "cache_read_input_tokens": 113729,
+  "output_tokens": 3507,
+  "output_tokens_details": {
+   "thinking_tokens": 510
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18753,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2413,
+    "cache_read_input_tokens": 36376,
+    "cache_creation_input_tokens": 2378,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2378
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 55ea07b9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R4, K1, AC2, AC4 / 対応区分: 修正必須 / 内容: `_visible`（notes/service.py:67-69）が組織（org_id）を確かめていない。他の組織の公開メモを閲覧でき、更新・削除でも存在が漏れる。 / 成立条件: 組織 B の利用者が、組織 A の公開メモ（private=0）の ID を指定する。 / 影響: 他の組織のメモ本文を読める（K1 の漏えい）。閲覧数も増える。更新・削除は NotFound ではなく Forbidden になり、メモの存在が分かる（R2 は「どれも NotFound」と定めている）。 / 根拠: 一時 DB で再現した。組織1のメモを組織2の一般利用者が `get_note` すると本文 `secret body` が返った。同じ利用者の `update_note` と、組織2の管理者の `delete_note` は Forbidden だった（NotFound になるべき）。`get_note` の2か所と `update_note`・`delete_note` は `_visible` の組織判定に頼っているが、SQL 側にも組織の条件がない。 / 提案: `_visible` に `row[\"org_id\"] == user[\"org_id\"]` を加える。\n- [重大2] 区分: テスト / 対象: AC2, AC4, AC1, K1, K3, K4 / 対応区分: 証拠不足 / 内容: 他の組織・他人の非公開メモが NotFound になるテストがない。閲覧数の同時加算、更新の version 競合、途中失敗でのロールバック（create・delete・transfer）のテストもない。`service.hooks` はあるが、テストで一切使っていない。重大1の欠陥も 12 件すべてを通過した。 / 根拠: 高リスク K1（漏えい）・K3（更新や数の消失）・K4（途中失敗による不整合）に対応する AC1・AC2・AC4・AC5 の中心の挙動を、検証が確かめていない。 / 提案: ①他の組織・非公開の閲覧・更新・削除 ②version の不一致と、`hooks.before_write` で他の更新を差し込んだ競合 ③`hooks.before_write` で例外を出し、メモ・タグ・監査が何も残らず接続が再利用できること ④複数スレッドで別々の接続から閲覧し、閲覧数が正確なこと ⑤管理者による更新・削除と、非公開メモの NotFound のテストを追加する。\n- [重大3] 区分: テスト / 対象: AC3, AC5, AC6, AC7, AC8, AC9, AC10, K2, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。(a) 一覧の範囲外（page・per_page・sort）の拒否と、検索の `%`・`_`・SQL 断片・タグ OR・不正タグ。(b) 移管の組織違い・失敗時に元のままであること。(c) api_key の伏せ字（8文字未満・8文字以上）。(d) RateLimiter の枠の境界（ちょうど window 秒）と同時呼び出し（`hook` を使う）。(e) 共有リンクの期限ちょうど・期限切れ・形の崩れ・署名違い。(f) ログに本文・署名・鍵が出ないこと。 / 根拠: すべて必須の受け入れ条件であり、K2・K6・K7・K8 の主要な防御もこれに含まれる。現在のテストは正常系が中心で、条件を外しても失敗しない。共有リンクの改ざんテストも、note_id を書き換えるものが1件あるだけ。 / 提案: 上の各項目の境界値と異常系のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R3, 設計 / 対応区分: 改善提案 / 内容: `update_note` が、ロック前に読んだ行で認可を判定している。管理者の権限が外れた場合などは version 判定で守られないが、仕様の範囲外とした。`search_notes` はタグの検査を `_validate` と二重に書いており、共通化できる。 / 提案: タグ検査を1つの関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_empty_title_rejected` が空の題名だけを確認しており不十分。上限・タグ・失敗時の無残存を確かめていない。\n- AC2: 閲覧の正常系だけで不十分。他の組織・非公開・同時閲覧の検証がなく、実装も重大1で未達。\n- AC3: 一覧と検索の正常系だけで不十分。範囲外・`%`・`_`・タグ・インジェクションの検証がない。実装自体は ESCAPE とプレースホルダーを使っていた。\n- AC4: 作成者による更新・削除の正常系だけで不十分。Conflict・Forbidden・NotFound がない。実装は重大1で未達。\n- AC5: 件数の正常系と、一般利用者の拒否だけで不十分。組織違いと全部か何もしないかの検証がない。\n- AC6: 伏せ字を確かめるテストがなく、不十分。\n- AC7: 回数超過と枠の再開の正常系だけで、ちょうど window 秒と同時呼び出しがなく不十分。\n- AC8: 往復と改ざん1件だけで、期限の境界・期限切れ・形の崩れがなく不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、ユニットテストと並行・失敗の差し込み口で足りる。\n### 不足しているリスク\n- K1: 重大1で、他の組織の公開メモが漏れる実装の欠陥がある。\n- K3・K4・K2・K6・K7・K8: 実装の読解では概ね妥当に見えた。ただし、検証がなく確認済みとは言えない（重大2・3）。\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py 全体を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12 件が成功した。\n- 一時のメモリ DB で他の組織の閲覧・更新・削除を再現した。本文が漏れ、更新と削除は Forbidden になった。\n- `git status` でリポジトリが未コミットであることを確認した。`$AQ trace` と `history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

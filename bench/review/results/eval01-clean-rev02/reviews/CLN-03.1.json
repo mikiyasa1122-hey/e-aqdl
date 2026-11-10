@@ -1,0 +1,49 @@
+{
+ "case": "CLN-03",
+ "rep": 1,
+ "sec": 30.7,
+ "exit": 0,
+ "cost_usd": 0.24521930000000003,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 49977,
+  "cache_read_input_tokens": 103553,
+  "output_tokens": 3494,
+  "output_tokens_details": {
+   "thinking_tokens": 1200
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 49977,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1926,
+    "cache_read_input_tokens": 41521,
+    "cache_creation_input_tokens": 8456,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 8456
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e7dd616c\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py:11` の `LINK_RE` は先頭に 0 を付けた note_id（例 `007.…`）を通す。`int()` で正規化してから署名を検証するため、`7.…` と同じ署名で `007.…` も有効になる。仕様の形「10進の数字だけ」には反しない。リンクの同一性にこだわる場合だけ問題になる / 提案: 先頭 0 を拒否する（`0|[1-9][0-9]*`）か、`str(int)` と一致するかを確認する。\n- [軽微2] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: `transfer_notes` は `from_user` と `to_user` の dict を信用し、DB の users と突き合わせない。仕様の対象外（呼び出し側が確かめてから渡す）なので欠陥ではない / 提案: 呼び出し側の契約を docstring に書く。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `tests/test_ac1_create.py` で境界値・タグの型・途中失敗のロールバックを確かめており、妥当。ただし内容は読んでいない。`create_note` のコードは、メモ・タグ・監査ログを1つの `transaction()` で書き、途中失敗の差し込み口もある。\n- AC2・K1・K3: 同じ組織・他の組織・他人の非公開・存在しないメモの見え方を確かめている（`test_ac2_view.py`）。NotFound では閲覧数が増えないこと、確認後に非公開へ変わったケース、差し込みによる割り込み、4スレッド×10回で 40 になる実ファイル DB の並行テストもある。妥当。\n- AC3・K2: コードを確認した。LIKE の ESCAPE、プレースホルダー、`ORDER BY` はホワイトリスト、タグ検査はすべて実装されている。テストは通っている。ただし `test_ac3_list_search.py` の中身は読んでいない。\n- AC4・K3・K4: 次の観点を確かめており妥当。\n  - 作成者・管理者・他人・他の組織・非公開の認可\n  - 古い version による Conflict\n  - 読み出しと書き込みの間の更新による Conflict\n  - 判定の後に移管された場合の再判定\n  - 更新時の入力検証\n  - 削除の失敗がロールバックされ、例外が伝わること\n- AC5・K6: コードは管理者の role、3者の同一組織、1つのトランザクションを確認している。`test_ac5_transfer.py` の中身は読んでいないが、テストは通っている。\n- AC6・K7: `_mask_key` は8文字未満をすべて伏せ、それ以外は末尾4文字だけを出す。`test_ac6_audit.py` の中身は読んでいないが、テストは通っている。\n- AC7・K3: 枠の境界（159.999 と 160.0）、拒否が枠を延ばさないこと、20スレッドの Barrier による同時呼び出し、`hook` による決定論的な割り込みを確かめており妥当。排他は Lock で、sleep には依存していない。\n- AC8・K8: 期限の境界、改ざん（note_id・期限・署名）、秘密鍵違い、形の崩れ（改行・大文字・全角数字・型違い）を確かめており妥当。\n- AC9・K5: ログ・例外メッセージ・監査の detail に、本文・署名・api_key・秘密鍵が出ないことを確かめている。コードのログは ID だけを出している。妥当。\n- AC10: `tests/test_ac10_recovery.py` は読んでいない。コードの `_rollback` は ROLLBACK の失敗で元の例外を隠さず、`in_transaction` を確認する。テストは通っている。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストは見つからなかった。\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、unittest が実ファイル DB・複数スレッド・差し込み口で並行実行と途中失敗を再現している。\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様・設計を読み、`trace` と `history` を実行した。検証条件の弱体化は見つからなかった。\n- `notes/*.py` を全部読み、AC2・AC4・AC7・AC8・AC9 のテストと `tests/base.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件がすべて通った。\n- gate、コードの変更、依存関係のインストールはしていない。",
+ "files_changed": [],
+ "valid": true
+}

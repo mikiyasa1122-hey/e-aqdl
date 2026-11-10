@@ -1,0 +1,38 @@
+{
+ "case": "TX-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0654443,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`transaction()` が例外時に ROLLBACK せず、トランザクションが開いたまま残る点を、同じ箇所（service.py:29-42）で指摘しています。原因・影響（後続の書き込み失敗、途中の変更が残る）も一致します。\n- **重大2**: 実在する別の欠陥です。`TAG_RE` に `match` と `$` を使っているため、末尾が改行のタグが検査を通ります。仕様のタグ規則に反します。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: 実在する別の欠陥です。`delete_note` はトランザクション内で権限を再確認せず、version も見ません。別接続が所有者を変えた後でも削除できてしまいます。`update_note` は version の +1 で Conflict になるため、削除側の指摘として成立します。\n- **軽微1**: 検査コードの重複という保守性の提案で、欠陥の主張ではありません。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transaction() が例外時に ROLLBACK しない点を同じ箇所で指摘し、原因・影響が埋め込んだ欠陥と一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により末尾が改行のタグが通る、実在する仕様違反である。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘している。\"},\n  {\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note はトランザクション内で権限を再確認せず、別接続による所有者変更の後でも削除できる、実在する競合の欠陥である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"検査コードの重複という保守性の提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、例外時に ROLLBACK しない欠陥を原因・影響とも正確に特定し、再現まで示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transaction() が例外時に ROLLBACK しない点を同じ箇所で指摘し、原因・影響が埋め込んだ欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により末尾が改行のタグが通る、実在する仕様違反である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note はトランザクション内で権限を再確認せず、別接続による所有者変更の後でも削除できる、実在する競合の欠陥である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "検査コードの重複という保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、例外時に ROLLBACK しない欠陥を原因・影響とも正確に特定し、再現まで示している。"
+ }
+}

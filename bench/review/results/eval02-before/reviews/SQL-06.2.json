@@ -1,0 +1,49 @@
+{
+ "case": "SQL-06",
+ "rep": 2,
+ "sec": 34.6,
+ "exit": 0,
+ "cost_usd": 0.13590470000000002,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20168,
+  "cache_read_input_tokens": 113767,
+  "output_tokens": 4384,
+  "output_tokens_details": {
+   "thinking_tokens": 1037
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20168,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2926,
+    "cache_read_input_tokens": 36390,
+    "cache_creation_input_tokens": 3779,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3779
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7b81bfe0\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `search_notes`（notes/service.py の `search_notes`、`sql` を組み立てる箇所）の LIKE に `ESCAPE '\\\\'` がない。`_like_escape` でバックスラッシュを前置しても、SQLite の LIKE にはデフォルトのエスケープ文字がない。そのため `\\` は普通の文字として扱われ、`%` と `_` はワイルドカードのままになる。設計書の「LIKE は ESCAPE」にも反する。 / 成立条件: 検索語に `%` または `_` を含めるだけで起きる。 / 影響: 「`%` と `_` を普通の文字として部分一致で探す」という仕様に違反する。実行して確認した。題名が \"50% off\" と \"abc\" のメモがあるとき、`search_notes(q=\"%\")` と `search_notes(q=\"_\")` と `search_notes(q=\"a_c\")` はどれも空の `[]` を返した。`%` を含むメモが検索でヒットしない。上流の検証や DB の制約でこれを防ぐものはなく、既存のテストにも該当するものはない。 / 根拠: notes/service.py の `search_notes` の `\"AND (title LIKE ? OR body LIKE ?)\"`。`python3 -B` で上記の再現を実行した。 / 提案: `title LIKE ? ESCAPE '\\\\' OR body LIKE ? ESCAPE '\\\\'` にする。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC2・AC4・AC5・AC7 の同時実行、K1、K2、K4、K8）/ 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほぼ正常系の1ケースずつ。次の検証が1つもない。(a) 他の組織・他人の非公開メモの閲覧・一覧・検索・更新・削除・移管が NotFound か Forbidden になること。(b) 閲覧数の同時増加で数え漏れがないこと。(c) 楽観的ロックの Conflict（古い version、読み書きの間に割り込む更新）。(d) `hooks.before_write` を使った途中失敗でのロールバック（create・delete・transfer）と、その後の接続の再利用。(e) 入力の境界値（題名100/101文字、本文10000文字、タグ5/6個、不正なタグ、tags に文字列を渡す、page・per_page・sort の範囲外）。(f) `%` / `_` の検索と SQL 注入文字列。(g) api_key の伏せ方（8文字未満・ちょうど8文字）。(h) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドからの同時呼び出し。(i) 共有リンクの期限ちょうど・形の崩れ・改ざん。(j) ログ・例外メッセージに本文・署名・api_key が出ないこと。この欠如のため、重大1の不具合もテストで検出されなかった。設計が用意した `hooks.before_write` と `RateLimiter.hook` は一度も使われていない。 / 根拠: 受け入れ条件・リスクの大半が検証されていない。認可・同時実行・DB の整合性はこのライブラリの中心的な要求で、K1・K3・K4・K8 は仕様のリスクに挙げられている。 / 提案: 上記 (a)〜(j) を unittest で追加する。同時実行は `hooks` と `threading.Barrier` で決定論的に再現し、sleep には頼らない。認可の条件や `ESCAPE` を外したら失敗することも確かめる。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `delete_note` は、権限の確認（`_can_modify`）をトランザクションの外で読んだ行で行っている。並行する移管で所有者が変わっても、削除は通る。更新側は version の条件で Conflict になるが、削除側にはそれがない。 / 提案: トランザクション内で行を読み直して認可を確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけを確認しており不十分。上限の境界、タグの規則、失敗時のロールバック（`hooks` を使う）、重複タグの扱いがない。\n- AC2: 同じ組織の閲覧だけを確認しており不十分。他組織・非公開・存在しないメモが NotFound になること、閲覧数の同時増加がない。\n- AC3: 一覧は1ページ目、検索は「予算」の1件だけで不十分。範囲外の入力、`%` / `_`、タグ絞り込み、他人の非公開メモの除外がない。このため重大1が見逃されている。\n- AC4: 所有者による更新と削除の正常系だけで不十分。Forbidden、Conflict、同時の更新、削除の途中失敗がない。\n- AC5: 正常系と非管理者の拒否だけで不十分。他組織への移管と途中失敗時に元のままであることがない。\n- AC6: 操作者名と action だけを確認しており、api_key の伏せ方は未検証。\n- AC7: 逐次の limit と枠の入れ替えだけを確認しており不十分。ちょうど window 秒の境界と複数スレッドからの同時呼び出しがない。\n- AC8: 往復と改ざん1件だけで不十分。期限ちょうど、形の崩れ、期限切れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。`history --since 0` では、検証の `bind` が追加されているだけで、弱体化は見られなかった。\n\n### E2E の要否\n- 不要。UI や HTTP のないライブラリで、unittest による結合（SQLite の実接続）で十分。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを防ぐ認可を、確かめるテストがない。実装の認可（`_visible` と `_can_modify`）は、コードを読んだ限り妥当。\n- K2: 注入の検証がない。SQL は `?` プレースホルダーで、`ORDER BY` はホワイトリストなので、実装は妥当。\n- K3: 同時の更新・閲覧・呼び出しを確かめる検証がない。実装は `BEGIN IMMEDIATE` と `Lock` を使っている。\n- K4: 途中失敗のロールバックを確かめる検証がない。\n- K5・K7: api_key の伏せ方と、ログ・例外に機密情報が出ないことの検証がない。\n- K6: 移管で組織の外にメモが渡らないこと、一部だけ移らないことの検証がない。\n- K8: 期限ちょうど・形の崩れ・改ざん・期限切れの検証が足りない。\n\n### 確認したこと\n- spec.md・design.md を読み、notes/*.py と tests/test_notes.py を全て読んだ。\n- `python3 -B -m unittest discover -s tests` は12件すべて合格（テスト自体が薄い）。\n- `python3 -B` で `search_notes` に \"%\" / \"_\" / \"a_c\" を渡し、すべて `[]` を返すことを確認した（重大1の再現）。\n- `aqdlc history --since 0` で、検証条件の弱体化がないことを確認した。\n- `gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

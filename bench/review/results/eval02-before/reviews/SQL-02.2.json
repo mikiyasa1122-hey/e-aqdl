@@ -1,0 +1,49 @@
+{
+ "case": "SQL-02",
+ "rep": 2,
+ "sec": 42.0,
+ "exit": 0,
+ "cost_usd": 0.1243002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14761,
+  "cache_read_input_tokens": 121102,
+  "output_tokens": 5313,
+  "output_tokens_details": {
+   "thinking_tokens": 1506
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14761,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3443,
+    "cache_read_input_tokens": 36856,
+    "cache_creation_input_tokens": 4319,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4319
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 67ae1954\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC7, AC10, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 失敗時の巻き戻し、同時実行、楽観的ロックの競合、境界値を確かめるテストがない。`tests/test_notes.py` は12件すべてが正常系か単純な拒否1件だけ。次の検証が欠けている。(a) 途中失敗で何も残らないこと（`hooks.before_write(\"create:tags\")`、`\"delete:note\"`、`\"transfer:{id}\"` で例外を起こし、メモ・タグ・監査が元のままか確認する）。(b) 閲覧数の同時加算（複数スレッド・別接続）。(c) 古い version での更新と、`before_write(\"update\")` 中に他の更新が入る競合の Conflict。(d) 管理者以外・他の組織への移管の Forbidden と、全か無かの確認。(e) RateLimiter の境界（ちょうど window 秒で新しい枠になること、`hook` を使ったスレッド同時呼び出しで上限を超えないこと）。(f) 例外の後に同じ接続を再利用できること（AC10 のテストは皆無）。(g) 入力検証の境界（題名100/101文字・空白のみ、本文10000/10001文字、タグ5/6個・重複・不正文字・文字列そのもの）。 / 根拠: 該当 AC・リスクは仕様で必須とされている。設計のテスト方針も、差し込み口で並行実行と途中の失敗を再現すると明記している。ところが `hooks` と `RateLimiter.hook` を使うテストが1件もない。`trace` では V1〜V10 と VK1〜VK8 が `unit` に紐づくだけで、中身は空洞。実行結果は12件通過。ただし、実装から `transaction()` の ROLLBACK や `version = ?` の条件を外しても、現状のテストはすべて通る。 / 提案: 上記 (a)〜(g) を unittest で追加する。待機に頼らず、`hooks`、`RateLimiter.hook`、`clock` の差し込み口で決定論的に再現する。\n- [重大2] 区分: テスト / 対象: AC3, AC6, AC8, AC9, K1, K2, K5, K7, K8 / 対応区分: 証拠不足 / 内容: セキュリティ系の検証が欠けている。(a) 他の組織・他人の非公開・存在しないメモが、get・list・search・update・delete のすべてで NotFound になること。管理者でも非公開メモは NotFound になること。非作成者の member が更新・削除すると Forbidden になること。(b) 検索語に `%`・`_`・`'` を含めた LIKE の回避とインジェクション。(c) page・per_page・sort の範囲外と bool、検索語の100/101文字、タグの OR 絞り込み。(d) api_key の伏せ字（8文字未満・ちょうど8文字・末尾4文字）。(e) 共有リンクの期限ちょうど（now == expires）・期限切れ・形の崩れ（改行付き、桁あふれ、大文字の16進、部品の欠落）・署名の改ざん。(f) ログ・例外メッセージに本文・署名・api_key が出ないこと。現状の `test_tampered` は note_id を書き換える1ケースだけで、`test_export_audit` は api_key の伏せ字を検証していない（`actor_key` を一度も見ていない）。 / 根拠: K1・K2・K5・K7・K8 は漏えい・インジェクション・不正リンク通過という重大なセキュリティリスクで、仕様が AC として明示している。認可・LIKE ESCAPE・伏せ字・期限判定の各条件を外してもテストは落ちない。実装コード自体（`_visible`、`_like_escape`、`LINK_RE.fullmatch`、`>= expires`、伏せ字の計算）を読むかぎり欠陥は見つからなかった。これは実装の欠陥の指摘ではなく、確認する証拠が不足しているという指摘。 / 提案: 上記 (a)〜(f) の異常系・境界値テストを追加する。`caplog` 相当（`assertLogs`）でログに機密値が出ないことも確認する。\n- [軽微1] 区分: 実装 / 対象: R9, K8 / 対応区分: 改善提案 / 内容: `share.py` の `raise ValueError(link)` は、署名を含むリンク全体を例外オブジェクトに持たせる。`from None` で表示は抑えられるが、`__context__` には残る。 / 提案: `raise ValueError` を引数なしにするか、`if not m` で直接 Forbidden を送出する。\n- [軽微2] 区分: 実装 / 対象: R4, R5 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、権限判定（`_can_modify`）を transaction の外で読んだ行に基づいて行う。`transfer_notes` が間に入った場合、delete は古い所有者の判断で通る。update は version の増加で Conflict になる。仕様の「後から書いた側が先の更新を消さない」の範囲外で、狭い競合。 / 提案: 判定と書き込みを同じ `BEGIN IMMEDIATE` の中で行う。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成の正常系と空題名の拒否だけで不十分。境界値、タグの規則、ロールバックの検証がない（重大1）。\n- AC2: V2 は get の正常系だけで不十分。他の組織・非公開・存在しないメモの NotFound と、閲覧数の同時加算を確かめていない（重大1・2）。\n- AC3: V3 は一覧の1ページ目と検索の正常系だけで不十分。範囲外の ValidationError、`%` と `_`、インジェクション、タグ OR、他人の非公開メモの除外がない（重大2）。\n- AC4: V4 は所有者による更新・削除の正常系だけで不十分。Conflict、Forbidden、管理者の扱い、更新時のタグ検証、削除の失敗伝播がない（重大1・2）。\n- AC5: V5 は成功と非管理者の拒否だけで不十分。他の組織への移管と、途中失敗時に元のままであることがない（重大1）。\n- AC6: V6 は `actor_key` を一切検証しておらず空洞（重大2）。\n- AC7: V7 は単一スレッドの上限と枠の再開（t=61）だけで不十分。ちょうど window 秒の境界と、同時呼び出しがない（重大1）。\n- AC8: V8 は正常系と1ケースの改ざんだけで不十分。期限ちょうど、期限切れ、形の崩れがない（重大2）。\n- AC9: V9 に対応するテストがない（重大2）。\n- AC10: V10 に対応するテストがない（重大1）。\n- エンジンが検出した兆候: なし。skip・.only・アサーションなしのファイルはなし。`history` には検証条件を弱める変更は見当たらない（bind の追加のみ）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、sqlite3 を使うユニット・統合テストで十分。ただし、ファイル DB と別接続・別スレッドを使う並行テストは必要（重大1）。\n### 不足しているリスク\n- K1: 認可の経路（get・list・search・update・delete）の否定テストがない。\n- K2: インジェクション・LIKE のワイルドカードのテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行テストがない。\n- K4・K6: ロールバックと全か無かの検証がない。\n- K5・K7: 伏せ字・ログの機密情報のテストがない。\n- K8: 期限の境界と形の崩れのテストがない。\n### 確認したこと\n- spec.md、design.md、`notes/*.py` の全ソースを通読した。コードは仕様と設計に概ね整合している。トランザクションは BEGIN IMMEDIATE で囲まれ、SQL はプレースホルダー。ORDER BY はホワイトリスト、LIKE は ESCAPE、リンクは fullmatch と compare_digest で処理している。実装の欠陥は立証できなかった。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が通過した（出力は標準出力のみ。ファイルは書き込んでいない）。\n- `aqdlc.py history --since 0` を確認した。検証条件の弱体化は見当たらない。\n- `git status` を確認した。notes/ と tests/ は未追跡のため、`git diff` による改ざん確認はできなかった。",
+ "files_changed": [],
+ "valid": true
+}

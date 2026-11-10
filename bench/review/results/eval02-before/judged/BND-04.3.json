@@ -1,0 +1,28 @@
+{
+ "case": "BND-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0600163,
+ "judge_raw": "各指摘を埋め込み欠陥・コードに照らして分類しました。\n\n- 重大1は、埋め込んだ欠陥そのものです。箇所は `verify_link` で、原因は `>` による比較、影響は期限ちょうどでのリンク有効化です。いずれも一致します。\n- 重大2は、テストの不足だけを指摘しています。\n- 重大3は、実在する欠陥です。`delete_note` は権限確認を transaction の外で行い、`DELETE` の rowcount も見ません。別の接続が先に削除すると、存在しないメモの削除が監査ログに残ります。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link の `>` 比較で期限ちょうどが有効になるという、埋め込み欠陥と同じ箇所・原因・影響を、実行確認つきで指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"コードの欠陥ではなく、テストが受け入れ条件・リスクを網羅していないことだけを指摘している。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note は権限確認が transaction の外にあり、rowcount も見ないため、競合時に存在しないメモの削除が audit に残る。これは実在する競合の欠陥である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（期限ちょうどの共有リンクが有効）を原因・箇所・影響まで正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link の `>` 比較で期限ちょうどが有効になるという、埋め込み欠陥と同じ箇所・原因・影響を、実行確認つきで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "コードの欠陥ではなく、テストが受け入れ条件・リスクを網羅していないことだけを指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note は権限確認が transaction の外にあり、rowcount も見ないため、競合時に存在しないメモの削除が audit に残る。これは実在する競合の欠陥である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（期限ちょうどの共有リンクが有効）を原因・箇所・影響まで正確に捉えている。"
+ }
+}

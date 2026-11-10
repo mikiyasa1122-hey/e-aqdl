@@ -1,0 +1,49 @@
+{
+ "case": "CLN-06",
+ "rep": 1,
+ "sec": 27.7,
+ "exit": 0,
+ "cost_usd": 0.1381024,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23717,
+  "cache_read_input_tokens": 118184,
+  "output_tokens": 3140,
+  "output_tokens_details": {
+   "thinking_tokens": 792
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23717,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1980,
+    "cache_read_input_tokens": 38891,
+    "cache_creation_input_tokens": 5177,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5177
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8e643ace\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R6, AC6 / 対応区分: 改善提案 / 内容: `export_audit` は audit と users を INNER JOIN している（notes/service.py:360）。このため、actor の利用者行が存在しない監査行は出力から黙って落ちる。現在の `db` モジュールには利用者の削除機能がないので、実害は出ていない。 / 提案: 将来、利用者の削除を入れるなら LEFT JOIN にして、actor が不明の行も出す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: R1 の規則どおりに作成・拒否され、失敗時に何も残らない。`fail_at(\"create:tags\")` でタグの書き込み中に例外を起こし、メモ・タグ・監査が残らないことを確認する形になっている。検証の規則は notes/service.py:198-207 で実装されている。テストの中身（test_ac1_create.py）は精読していないが、全63件が通ることを実行して確認した。妥当と判断する。\n- AC2・K1・K3: 次の点を確認するテストがある。\n  - 他組織・他人の非公開・存在しないメモが、どれも NotFound になる。\n  - NotFound のときは閲覧数が増えない。\n  - 確認後に非公開へ変えられた場合も NotFound になる。\n  - 同じ接続で割り込んだ閲覧が数え漏れにならない。\n  - 別接続・別スレッドの4並列×10回で、閲覧数がちょうど40になる。\n\n  妥当。\n- AC3・K2: 実装は、プレースホルダー、`ESCAPE '\\'`、`%` `_` `\\` のエスケープ、per_page・page・sort の検査、bool の拒否、OFFSET の上限処理、タグの検査を備えている。検索は題名・本文の両方に同じパターンを渡している。テスト（test_ac3_list_search.py）の中身は精読していないが、通ることは確認した。実装を読む限り妥当。\n- AC4・K3・K4: 次の点を実装で確認した。\n  - 認可は `_check_modify` に集約されている。\n  - 更新は `UPDATE ... WHERE version = ?` と rowcount で Conflict を判定する。\n  - 認可と入力検証は、書き込みと同じトランザクションの中で読み直した行に対して行う。\n  - 削除は途中で失敗するとロールバックされ、例外はそのまま伝わる。\n\n  test_ac4_update_delete.py（127行）は読んでいないが、実行して全件通ることは確認した。実装は妥当。\n- AC5・K6: `transfer_notes` は、管理者かどうかと3者が同じ組織かどうかを検査する。更新は1つのトランザクション内で行い、途中の失敗はロールバックされる。フック経由で途中の失敗を再現するテストがあり、妥当。\n- AC6・K7: 8文字未満はすべて伏せ、それ以上は末尾4文字だけを残す。実装は仕様どおり。\n- AC7・K3: 次の2つで検証している。\n  - 枠の境界（159.999 は拒否、160.0 は新しい枠）。\n  - 20スレッド同時と、ロック内のフックによるインターリーブ。\n\n  sleep に頼らない決定論的な形になっており、妥当。\n- AC8・K8: 形式の検査は `fullmatch` で行う。期限は「ちょうど以降は無効」で、署名の比較には `compare_digest` を使う。test_ac8_share.py は読んでいないが、通ることは確認した。実装は妥当。\n- AC9・K5: ログは ID だけを出し、本文・署名・api_key は出していない。test_ac9_secrets.py は読んでいないが、通ることは確認した。実装を読む限り妥当。\n- AC10・K4: `transaction()` は `BaseException` でロールバックし、ROLLBACK 自体の失敗で元の例外を隠さない。test_ac10_recovery.py は読んでいないが、通ることは確認した。実装は妥当。\n- エンジンが検出したテストの兆候はなし。`history` で確認した範囲（末尾の #79〜#93）は、実装担当の bind だけで、検証条件の弱体化は見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリである。重要なリスクは、実 SQLite（ファイル DB・別スレッド・別接続）を使った単体テストで確かめられている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様書・設計書・`notes/*.py` を全文読み、仕様・設計との整合を確認した。\n- `python3 -m unittest discover -s tests -t .` を、バイトコード生成なしで実行した。63件すべて OK だった。\n- `$AQ history --since 0` の末尾を確認し、検証条件の弱体化がないことを見た。\n- `git status` を確認した。実装は未追跡のファイルで、コードは変更していない。\n- gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

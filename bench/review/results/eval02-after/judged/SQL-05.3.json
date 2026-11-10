@@ -1,0 +1,33 @@
+{
+ "case": "SQL-05",
+ "rep": 3,
+ "judge_cost_usd": 0.0672943,
+ "judge_raw": "各指摘を埋め込み欠陥と照らして分類しました。\n\n- **重大1**: `_like_escape` が `\\` を二重化していない点を、原因・箇所・影響のすべてで指摘しています。埋め込み欠陥と一致します。\n- **重大2**: テストの不足だけを述べています。コードの欠陥の主張ではないため test_gap です。\n- **重大3**: `delete_note` の認可が `transaction()` の外にあり、transfer との競合で他人のメモを削除できるという指摘です。コード上の経路は実在します。`DELETE` に所有者や version の条件がなく、仕様の R4 に反します。埋め込み欠陥とは別なので real_other です。\n- **軽微1**: `transfer_notes` が `updated_at` を更新しないことと、型エラーを分けて返さないことは、仕様違反ではありません。欠陥の主張というより改善提案なので style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_like_escape が \\\\ 自体をエスケープしていない点を、同じ箇所・同じ原因と影響（\\\\ の直後の % がワイルドカードになる）で指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note の認可が transaction の外にあり、transfer との競合で所有者でなくなったメモを削除できる経路は実在する。埋め込み欠陥とは別である。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"updated_at を更新しないことと型エラーを分けて返さないことは、仕様違反ではなく改善提案である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 が埋め込み欠陥（\\\\ をエスケープしていない）を正確に特定し、再現もしている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_like_escape が \\ 自体をエスケープしていない点を、同じ箇所・同じ原因と影響（\\ の直後の % がワイルドカードになる）で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note の認可が transaction の外にあり、transfer との競合で所有者でなくなったメモを削除できる経路は実在する。埋め込み欠陥とは別である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "updated_at を更新しないことと型エラーを分けて返さないことは、仕様違反ではなく改善提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 が埋め込み欠陥（\\ をエスケープしていない）を正確に特定し、再現もしている。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-04",
+ "rep": 2,
+ "sec": 38.9,
+ "exit": 0,
+ "cost_usd": 0.21965859999999998,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 40587,
+  "cache_read_input_tokens": 95146,
+  "output_tokens": 4778,
+  "output_tokens_details": {
+   "thinking_tokens": 1034
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 40587,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3370,
+    "cache_read_input_tokens": 36849,
+    "cache_creation_input_tokens": 3738,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3738
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 22bd3e62\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査 `TAG_RE = ^[a-z0-9-]{1,20}$` を `TAG_RE.match` で使っている。`$` は末尾の改行の直前にも一致するため、末尾に改行を持つ `\"abc\\n\"` を正当なタグとして受け入れる。 / 成立条件: タグが `\"abc\\n\"` のような、末尾に改行を持つ文字列のとき。create_note・update_note・search_notes のタグ絞り込みのすべてで起きる。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という規則（R1）に反するタグが保存される。20文字ちょうどのタグに改行を足した21文字も通る。 / 確認した保証: 上流に別の検査はない。DB の CHECK 制約もない。実際に `create_note(..., tags=['abc\\n'])` を実行したところ、例外にならず note_id=1 が返った。 / 根拠: notes/service.py の TAG_RE と、`_validate` および search_notes の `TAG_RE.match(t)`。share.py は同じ問題を避けるため fullmatch を使っており、設計の方針とも不揃い。 / 提案: `TAG_RE.fullmatch(t)` に変えるか、パターンの `$` を `\\Z` にする（`_validate` と search_notes の両方）。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, K1, K2, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py（12件）は正常系が中心で、仕様が求める異常系・境界値・並行・途中の失敗を確かめていない。足りない検証は次のとおり。(a) 他の組織・他人の非公開メモが get・list・search・update・delete で NotFound になること（K1）。(b) 管理者による Forbidden、非公開メモを管理者が扱えないこと、移管で別の組織が混ざること（K6）。(c) 検索語に `%` `_` `\\` を含めたときの扱いと、検索語に SQL 断片を入れても注入されないこと（K2）。(d) 古い version での Conflict と、`hooks.before_write(\"update\")` を使った読み出しから書き込みの間の競合（K3, AC4）。(e) 閲覧数の同時加算（AC2）。(f) create・delete・transfer の途中で `hooks.before_write` から例外を出し、何も残らないこと（K4, AC1, AC5）。(g) リンク期限の境界（期限ちょうどが無効）、形の崩れた入力（改行・非数字）、署名の改ざん（K8, AC8）。(h) 入力の境界値（題名100/101文字、タグ5/6個、per_page 0/50/51、page 0、sort 不正）。(i) RateLimiter の枠の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出し（AC7, K3）。 / 根拠: 今あるテストは、これらの条件を外しても通ってしまう。実際、重大1のバグが通っている。test_update_by_owner や test_transfer も正常系だけで、K1・K3・K4・K6 のリスクに対する検証が空洞化している。 / 提案: 上の (a)〜(i) を unittest で追加する。並行と途中の失敗は、設計どおり hooks と RateLimiter.hook で決定論的に再現し、sleep には頼らない。\n- [重大3] 区分: テスト / 対象: AC6, AC9, AC10, K5, K7, R10 / 対応区分: 証拠不足 / 内容: 次の検証がない。(a) export_audit で api_key が伏せられること。test_export_audit は action と actor しか見ておらず、actor_key を一度も確認していない。末尾4文字を残すこと、8文字未満はすべて伏せること、ちょうど8文字の境界も未検証。(b) ログ・例外メッセージに本文・署名・api_key が出ないこと（AC9）。(c) 例外のあとに同じ接続を使い続けられること（AC10, R10）。 / 根拠: 機密情報の露出（K5・K7）は重要なリスクで、現在の検証では伏せ処理を壊しても失敗しない。AC10 に対応するテストは1件もない。 / 提案: actor_key の期待値を確かめるテスト（7文字・8文字・長い鍵）、assertLogs と例外文字列の検査、失敗の注入のあとに同じ接続で create・get が成功するテストを追加する。\n- [軽微1] 区分: 設計 / 対象: R4 / 対応区分: 改善提案 / 内容: update_note と delete_note は、認可（_visible・_can_modify）を transaction の外で読んだ行で判定している。update は version 条件で守られているが、delete は version を持たない。間に所有者の移管が入った場合の挙動は、仕様では想定されていない。 / 提案: 認可の読み出しを transaction の中に移すことを検討する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常な作成だけを確かめており、不十分。タグの規則違反（重大1の改行入りタグ）、各境界値、途中で失敗したときに何も残らないことは未検証。\n- AC2: 作成者本人による get だけを確かめており、不十分。他の組織・他人の非公開メモが NotFound になること、閲覧数が増えること、同時閲覧は未検証。\n- AC3: 1ページ目と通常の検索だけで、不十分。範囲外の拒否、`%` `_` の扱い、タグの OR 絞り込み、非公開メモの除外は未検証。\n- AC4: 所有者の更新と削除の正常系だけで、不十分。Conflict、Forbidden、競合、更新時のタグ検査は未検証。\n- AC5: 正常系と非管理者の拒否だけで、不十分。組織をまたぐ移管と、途中で失敗したときに元のままであることは未検証。\n- AC6: actor_key を確認しておらず、不十分。\n- AC7: limit 超過と枠が過ぎたあとの復帰だけを確かめており、不十分。ちょうど window 秒の境界と同時呼び出しは未検証。\n- AC8: 往復と1つの改ざんだけで、不十分。期限ちょうど、期限切れ、形の崩れたリンクは未検証。\n- AC9: テストがない。\n- AC10: テストがない。\n- `unittest discover` で 12 件が OK だった。エンジンが検出したテストの兆候（skip、アサーションなし）はなかった。ただし、すべての V が同じ \"unit\" チェックに結び付いているだけで、各 AC を個別に確かめているとはいえない。\n\n### E2E の要否\n- 不要（HTTP や UI を持たない Python ライブラリで、SQLite への直接の呼び出しをテストできる）。代わりに、実際の SQLite と別々の接続・スレッドを使った並行テストが必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: SQL インジェクションと LIKE のエスケープを確かめる検証がない。コードは ESCAPE とプレースホルダーを使っており、実装上は妥当に見える。\n- K3: 閲覧・更新・RateLimiter の同時実行を確かめる検証がない。\n- K4: create・delete・transfer の途中の失敗を確かめる検証がない。\n- K5・K7: api_key の伏せ処理とログへの機密情報の出力を確かめる検証がない。\n- K6: 組織をまたぐ移管と、一部だけ移ることを確かめる検証がない。\n- K8: 期限の境界、改ざん、形の崩れたリンクを確かめる検証がない。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py の全ソースをたどった。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12 件が OK だった。\n- `create_note(..., tags=['abc\\n'])` を実行し、例外にならず保存されて 1 が返ることを確認した（重大1）。\n- `aqdlc.py history --since 0` を見た。検証条件の弱体化の形跡はなかった。ただし全 V が \"unit\" に一括で結び付けられている。\n- SQL の確認: LIKE は `\\` `%` `_` をエスケープして ESCAPE `'\\'` を付けており、題名・本文の両方に同じパターンを渡している。値はすべてプレースホルダーで渡しており、ORDER BY は固定の辞書から選んでいるため、注入の経路は見つからなかった。\n- 認可・transaction・RateLimiter・share の各コードに、重大1以外の欠陥は見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

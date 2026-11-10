@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-06",
+ "rep": 2,
+ "sec": 30.5,
+ "exit": 0,
+ "cost_usd": 0.1359516,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21209,
+  "cache_read_input_tokens": 115496,
+  "output_tokens": 3955,
+  "output_tokens_details": {
+   "thinking_tokens": 691
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21209,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2475,
+    "cache_read_input_tokens": 37686,
+    "cache_creation_input_tokens": 3524,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3524
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f7150041\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検証 `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っているため、末尾が改行のタグ（\"abc\\n\"）を通してしまう。Python の `$` は文字列末尾の改行の手前にも一致する。 / 成立条件: create_note・update_note・search_notes に、tags=[\"abc\\n\"] のように末尾が改行のタグを渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。20文字ちょうど＋改行（21文字）も通る。 / 根拠: notes/service.py:14, 64, 150。`python3 -c \"TAG_RE.match('abc\\n')\"` が True を返すことを実行して確認した。share.py は同じ問題を避けるため fullmatch を使っており、実装内でも対応が揃っていない。 / 提案: `TAG_RE.fullmatch(t)` に変える（`\\Z` でもよい）。_validate と search_notes の2か所を直す。\n- [重大2] 区分: テスト / 対象: AC1, AC3, AC4, K2 / 対応区分: 証拠不足 / 内容: 入力検証と異常系のテストが事実上ない。ない検証は、題名の境界（100文字・101文字・空白だけ）、本文10000文字、タグ6個・重複・不正な文字・文字列そのもの、page=0・per_page=51・不正な sort、検索語の空・101文字、% と _ のエスケープ、タグ OR 検索、SQL インジェクション文字列。create の途中失敗での全体ロールバック（hooks.before_write）もない。 / 根拠: tests/test_notes.py は 90 行・12 テストで、拒否は空題名の1件だけ。受け入れ条件が境界値と拒否を明示しており、重大1の欠陥もこの不足のせいで検出されていない。 / 提案: 境界値・拒否・LIKE のエスケープ・インジェクション・ロールバックのテストを追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC5, AC7, AC8, AC9, AC10, K1, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 認可・並行・整合性・セキュリティの主要なリスクを確かめるテストがない。ない検証は次のとおり。(a) 他組織・他人の非公開・存在しないメモが NotFound になること、管理者は非公開メモに NotFound になること、他人のメモは Forbidden になること（K1）。(b) 閲覧数の同時加算（K3）。(c) update の version 不一致と、読み出し後に別の更新が入った場合の Conflict（hooks.before_write で再現できる）。(d) delete と transfer の途中失敗での巻き戻し。(e) transfer の組織外の拒否（K6）。(f) api_key のマスク（8文字未満・8文字以上）と、ログ・例外に本文・署名・api_key が出ないこと（K5, K7, AC9）。(g) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し（AC7）。(h) 共有リンクの期限の境界（ちょうどの時刻は無効）、形の崩れ、署名の改ざん（K8）。(i) 例外の後に接続を使い続けられること（AC10）。 / 根拠: 現状のテストは正常系が中心で、test_export_audit も api_key のマスクを検証していない。tests/ には並行実行・NotFound・Conflict・巻き戻しを確かめるテストが1つもない。いずれも仕様が受け入れ条件として明示している。 / 提案: hooks と RateLimiter.hook を使い、スレッドや sleep に頼らず決定論的に再現するテストを追加する。認可・期限・競合の条件を外すと失敗する形にする。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: verify_link は先頭に0を付けた note_id（\"007.…\"）を int に変換して署名を検証するため、同じメモに対して複数の文字列が有効になる。仕様の形式違反ではなく、有効性にも影響しない。 / 提案: 署名の対象を元の文字列にするか、先頭0を拒否する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空題名の拒否と正常系だけで、境界値・タグ・ロールバックを確かめていない。重大1の欠陥が実在する。\n- AC2: 不十分。見え方（NotFound）と閲覧数の同時加算のテストがない。実装（_visible、transaction 内の UPDATE）は妥当に見える。\n- AC3: 不十分。正常系の1ページ目と単純な検索だけで、範囲外・エスケープ・タグ・インジェクションがない。\n- AC4: 不十分。正常系の更新と削除だけで、Conflict・Forbidden・巻き戻しがない。\n- AC5: 不十分。正常系と非管理者の拒否だけで、組織違い・途中失敗がない。\n- AC6: 不十分。action と actor の確認だけで、マスクを確かめていない。\n- AC7: 不十分。枠の境界（ちょうど window 秒）と同時呼び出しがない。実装は lock と `>=` で正しく見える。\n- AC8: 不十分。往復と改ざんの1件だけで、期限の境界・形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only なし）。テストの改ざん・弱体化の履歴も見つからなかった。history は bind のみ。\n### E2E の要否\n- 不要。外部の入出口を持たないライブラリで、unittest で十分に確かめられる。\n### 不足しているリスク\n- K1〜K8（上記の AC に対応するもの）の検証が不足している。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12 件が成功。ただし、重大1の欠陥は検出できていない。\n- `TAG_RE.match('abc\\n')` が True を返すことを実行して確認した。\n- `aqdlc.py history --since 0` で bind の履歴を確認した。検証の弱体化はなかった。\n- service.py・db.py・ratelimit.py・share.py の全文を読んだ。SQL は ? のプレースホルダーを使っており、LIKE は ESCAPE を使い、ORDER BY はホワイトリストで、問題は見つからなかった。楽観的ロックと BEGIN IMMEDIATE の構成も妥当に見える。",
+ "files_changed": [],
+ "valid": true
+}

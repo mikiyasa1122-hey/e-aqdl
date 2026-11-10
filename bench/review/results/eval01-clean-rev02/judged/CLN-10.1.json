@@ -1,0 +1,23 @@
+{
+ "case": "CLN-10",
+ "rep": 1,
+ "judge_cost_usd": 0.1171943,
+ "judge_raw": "## 判定\n\n**[軽微1]** は real_other です。`sort` に `[]` や `{}` のようなハッシュできない値を渡すと、`sort not in SORT_COLUMNS`（辞書への `in`）が TypeError を送出します。仕様 R3 は、範囲外の sort を ValidationError にすると定めています。そのため、成立する入力があり、仕様に反します。影響は小さい不具合です。\n\n**[軽微2]** は style です。`007.…` のような先頭 0 のリンクは `int` に直して署名を検証するので、署名は通常のリンクと同じ値になり、有効になります。仕様の「10進の数字だけ」は満たしており、漏えいも起きません。指摘者自身もそう認めています。正規形を強制する硬化の提案であり、欠陥の主張ではありません。\n\nこのケースは欠陥なしなので、`matches_defect` は使いません。`defect_detected` は \"n/a\" です。\n\n```json\n{\"findings\": [\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"sort=[] のようにハッシュできない値を渡すと `in SORT_COLUMNS` が TypeError を送出し、仕様 R3 の「範囲外は ValidationError」に反する（実在する軽微なバグ）。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭 0 の note_id でも署名は数値で計算されるので漏えいはなく、仕様の「10進の数字だけ」も満たす。正規形を強制する硬化の提案にとどまる。\"}\n ],\n \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、軽微1 は実在する軽微な入力検証の漏れ、軽微2 は好みの範囲の提案。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "sort=[] のようにハッシュできない値を渡すと `in SORT_COLUMNS` が TypeError を送出し、仕様 R3 の「範囲外は ValidationError」に反する（実在する軽微なバグ）。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭 0 の note_id でも署名は数値で計算されるので漏えいはなく、仕様の「10進の数字だけ」も満たす。正規形を強制する硬化の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、軽微1 は実在する軽微な入力検証の漏れ、軽微2 は好みの範囲の提案。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLN-08",
+ "rep": 1,
+ "sec": 31.5,
+ "exit": 0,
+ "cost_usd": 0.1420867,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23512,
+  "cache_read_input_tokens": 114327,
+  "output_tokens": 3659,
+  "output_tokens_details": {
+   "thinking_tokens": 1261
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23512,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2061,
+    "cache_read_input_tokens": 36891,
+    "cache_creation_input_tokens": 6622,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6622
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e0a1ceab\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `verify_link` は note_id を `int()` で正規化してから署名を検証する。そのため、`007.<期限>.<署名>` のように先頭に 0 を付けた note_id でも、署名が一致すれば note_id=7 として通る。署名の対象文字列とリンクの文字列が一致しない。署名の偽造にはならず、返す note_id も正しい。仕様は「note_id は10進の数字だけ」としており、違反ではない。 / 提案: 先頭 0 の許容を避けたい場合は、`str(int(x)) != x` なら Forbidden にする。仕様にこの規定はないので任意。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。`create_note` は `_validate` を通してからトランザクションに入る。`hooks.before_write(\"create:tags\")` で途中の失敗を起こし、メモ・タグ・監査ログのどれも残らないことをテストで確認している（`test_ac1_create.py`）。\n- AC2: 妥当。他組織、他人の非公開、存在しないメモがすべて NotFound になる。NotFound のとき閲覧数は増えない。確認後に非公開へ変えられた場合も NotFound になり、閲覧数は増えない。割り込みの閲覧と、別接続・別スレッドからの 4 スレッド×10 回の閲覧（合計 40 になることを確認）でも数え漏れがない。`BEGIN IMMEDIATE` と `views = views + 1` で実装しており、K1・K3 の対策になっている。\n- AC3: 妥当。`list_notes` は page・per_page・sort の範囲外を拒否し、bool 型も拒否する。`search_notes` の LIKE は `ESCAPE` を付けて `%` と `_` を文字として扱い、タグは OR で絞り込み、検索語とタグの検査も行う。SQL は `?` で値を渡しており、`f\"…{SORT_COLUMNS[sort]}\"` は sort を検査したうえで固定辞書から引いている。K2 は問題なし。\n- AC4: 妥当。認可はトランザクション内で行を読み直してから判定する。version は UPDATE の条件に入れ、`rowcount` で Conflict を判定する。更新時も入力検証を行い、削除でも `before_write` で失敗を起こして巻き戻しを確認している。\n- AC5: 妥当。管理者であること、3 者が同じ組織であることを検査し、1 つのトランザクションで移す。`before_write` による途中の失敗で元のままになることを確認している（K6）。\n- AC6: 妥当。8 文字未満はすべて伏せ、8 文字以上は末尾 4 文字以外を伏せる。非管理者は Forbidden。\n- AC7: 妥当。時刻を差し替えられる clock で枠の境界（159.999 は拒否、160.0 は新しい枠）を確認している。拒否された呼び出しが枠を延ばさないことも確認している。20 スレッドで同時に呼んで許可が 5 回であること、`hook` で割り込ませても直列になることを確認している。確認に sleep は使っていない（`b_done.wait` はイベント待ちで、待ち時間は上限のみ）。\n- AC8: 妥当。形式、期限ちょうどの境界、改ざん、別の秘密鍵、不正な形式（大文字、改行、全角数字、型違い）を確認している。`fullmatch` と `compare_digest` を使っている。\n- AC9: 妥当。コード上、ログ・例外メッセージ・監査ログの `detail` には本文・署名・api_key が出ない。例外メッセージには ID と、検査に失敗したタグの値しか出ない。\n- AC10: 妥当。`transaction()` は例外時に ROLLBACK し、ROLLBACK 自体が失敗しても元の例外を隠さない。例外の後も接続を使い続けられることをテストで確認している。\n- エンジンが検出したテストの兆候: なし。skip や `.only`、アサーションなしのテストはなく、手元の確認でも見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、並行実行と途中の失敗は、テスト用の差し込み口と、別接続・別スレッドからの操作で確認している。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて OK。\n- `notes/*.py` 全文を読み、認可、SQL の組み立て、トランザクション境界、並行処理を仕様・設計と照合した。\n- `aqdlc.py history --since 0` を確認した。検証条件を弱めた変更は見当たらず、implementer による impl-map と bind の登録のみだった。\n- コードはすべて未コミットのため、`git diff` による改ざん比較はできていない。\n- `gate` は実行していない。コードの指紋 e0a1ceab は、引き継ぎ情報の値をそのまま記載した。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLN-08",
+ "rep": 3,
+ "sec": 25.6,
+ "exit": 0,
+ "cost_usd": 0.1083379,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 16471,
+  "cache_read_input_tokens": 124679,
+  "output_tokens": 2997,
+  "output_tokens_details": {
+   "thinking_tokens": 828
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16471,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1693,
+    "cache_read_input_tokens": 38826,
+    "cache_creation_input_tokens": 4579,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4579
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e0a1ceab\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: notes/share.py:349 は note_id を int に変換してから署名する。このため、先頭に 0 を付けたリンク（例: `0007.exp.sig`）も、`7.exp.sig` と同じ署名で有効になる。偽造はできず、HMAC の鍵がなければ新しい note_id は作れない。ただし 1 つのリンクが複数の文字列表現を持つ。 / 提案: 先頭 0 を拒否する（正規表現を `0|[1-9][0-9]*` にする）か、`str(int)` と元の文字列が一致するかを確かめる。\n- [軽微2] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: search_notes に、_validate と同じタグ検査が重複して書かれている（service.py:213-218）。 / 提案: タグ検査を共通の関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名・本文・タグの境界と、`before_write(\"create:tags\")` による途中失敗での全巻き戻しを確かめており、妥当。\n- AC2: V2 は見えない 5 パターンがすべて NotFound になること、確認後に非公開へ変わった場合、フックで割り込んだ閲覧、別接続・別スレッド 4 本での閲覧（40 件の加算）を確かめている。sleep に頼っておらず、妥当。\n- AC3: V3 は page・per_page・sort の範囲外、LIKE の `%` と `_`、タグの OR、不正なタグ、他組織・他人の非公開メモが含まれないことを確かめている。実装側はプレースホルダーと ESCAPE を使っており、題名と本文の両方に同じエスケープ済みパターンが渡っている。妥当。\n- AC4: V4 は古い version での Conflict、読み出しと書き込みの間に割り込まれた場合の Conflict、Forbidden と NotFound の区別、更新時の入力検証、削除の途中失敗の伝播を確かめており、妥当。\n- AC5: V5 は管理者以外・他組織の拒否と、途中失敗で元のままになることを確かめており、妥当。実装は同一トランザクションの中で行われている。\n- AC6: V6 は鍵のマスクを確かめている。実装は 8 文字未満をすべて伏せ、8 文字以上は末尾 4 文字だけを見せるので、仕様どおり。\n- AC7: V7 は枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、Barrier を使った 20 スレッドの同時呼び出し（成功は 5 回）、ロック内のフックによる割り込みを確かめている。決定論的で妥当。\n- AC8: V8 は期限の境界、改ざん、形の崩れたリンクを確かめており、妥当。\n- AC9: V9 はログと例外に本文・署名・api_key が出ないことを確かめている。実装側もログには ID しか出していない。\n- AC10: V10 は例外の後の接続の再利用を確かめており、妥当。\n- テストの兆候（skip・.only・アサーションなし）: エンジンの検出はなし。\n- 検証条件の変更履歴: 履歴の末尾を見たところ、実装担当による bind の追加だけで、弱体化は見当たらない。\n- 並行系リスク（K3）: 決定論的なフックと、別スレッド・別接続での実行の両方で検証されている。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使った実際の単体テストが、並行・巻き戻し・認可を直接確かめている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .`: 63 件が成功。\n- notes/ の db.py・service.py・ratelimit.py・share.py と errors.py をすべて読み、認可（_visible、_can_modify）、トランザクション、SQL のプレースホルダー・ESCAPE、楽観的ロックの UPDATE 条件、HMAC の compare_digest を確認した。\n- `aqdlc.py history --since 0`: 履歴の末尾 15 件（#79–#93、すべて実装担当の bind）を確認。弱体化はなかった。それより前の履歴は読んでいない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 1,
+ "sec": 34.9,
+ "exit": 0,
+ "cost_usd": 0.1425982,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 20537,
+  "cache_read_input_tokens": 155802,
+  "output_tokens": 4485,
+  "output_tokens_details": {
+   "thinking_tokens": 778
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20537,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2952,
+    "cache_read_input_tokens": 40388,
+    "cache_creation_input_tokens": 381,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 381
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` の楽観的ロックが、読み出しから書き込みまでの間に入った別の更新を検出できない。UPDATE 文の WHERE に version がない。 / 成立条件: version の確認（`notes/service.py` の `update_note`、`row[\"version\"] != version`）はトランザクションの外で行う。その後、`BEGIN IMMEDIATE` の前に別の更新が入ると、確認は古い行に対して通ってしまう。UPDATE は `WHERE id = ?` だけなので `rowcount` は常に 1 になり、Conflict にならない。 / 影響: 後から書いた側が先の更新を消す。仕様の「読み出しから書き込みの間に他の更新が入った場合も Conflict」に反する。更新が静かに失われる。 / 根拠: `notes/service.py` の `update_note` で、UPDATE が `WHERE id = ?` だけになっている。設計書は「UPDATE の条件に version を入れて rowcount で判定する」としていて、実装と食い違う。再現として、`service.hooks.before_write(\"update\")` の中から別の更新（version 1→2）を入れ、元の呼び出しを version=1 で続けた。結果は Conflict にならず、戻り値は 2、本文は SECOND、version は 3 だった。先の更新が失われている。上流にこれを防ぐものはなく、DB の制約もない。 / 提案: UPDATE の WHERE を `id = ? AND version = ?` にして `rowcount != 1` で Conflict にする。version の確認は、トランザクション内の行に対して行う方がよい。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC8, AC9, AC10, K1, K2, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: AC2・AC3・AC4・AC5・AC8 の異常系・境界値、AC1 の検証の一部、AC6・AC9・AC10 の検証が `tests/test_notes.py` にない。リスク K1・K2・K4・K6・K7・K8 の検証もない。ある検証は正常系が中心。具体的には次のとおり。 (a) 他組織・他人の非公開メモが NotFound になること。 (b) タグ・題名・本文の境界値（101 文字、タグ 6 個、不正なタグ）。 (c) `%`・`_` を含む検索。 (d) 一覧の範囲外（page=0、per_page=51、不正な sort）。 (e) Conflict と Forbidden（管理者が非公開メモを扱う場合を含む）。 (f) 途中の失敗でロールバックされること。`hooks.before_write` は用意されているのに、1 つも使われていない。 (g) 他組織への移管が Forbidden になること。 (h) api_key のマスク（8 文字未満・ちょうど 8 文字）。 (i) 共有リンクの期限ちょうど、形の崩れ、改ざんした署名。現在の改ざんテストは note_id の書き換えだけ。 (j) 例外の後にも接続が使えること。 (k) ログ・例外に機密情報が出ないこと。 / 根拠: テストは 12 件で、どれも正常系か単純な拒否だけ。これらの規則を壊してもテストは通る。重大1のバグも検出できていない。仕様の AC と重要リスクは、これらの検証で確かめることになっている。 / 提案: 上記 (a)〜(k) について、それぞれ規則を外すと失敗するテストを追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC7, K3 / 対応区分: 証拠不足 / 内容: 同時実行の検証が全くない。閲覧数が数え漏れしないこと（AC2）、同時更新で Conflict になること（AC4・K3）、RateLimiter が複数スレッドから呼ばれても上限を超えないこと（AC7）を確かめていない。RateLimiter の枠の境界（ちょうど window 秒で新しい枠）も確かめていない。 / 根拠: 設計は `hooks.before_write` と `RateLimiter.hook` を、決定論的に競合を再現するために用意している。それが使われていない。重大1のバグは、このテストがないために見逃されている。 / 提案: `hooks` を使った決定論的な競合テストを書く。別スレッド・別接続で、閲覧数の加算と更新の競合を確かめる。RateLimiter では、`hook` を使うかスレッドを使って、上限を超えないことと境界の t=window を確かめる。\n- [軽微1] 区分: 実装 / 対象: R4, R5 / 対応区分: 改善提案 / 内容: `delete_note` の認可（`_visible` と `_can_modify`）はトランザクションの外で判定している。確認の後、削除の前に所有者が変わる場合がある。`update_note` の検証順序も、version の確認より前に `_validate` が入っている。 / 提案: 認可の判定を、トランザクション内で読み直した行に対して行う。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけを確かめている。境界値（101 文字、10000 文字超、タグ 6 個、不正なタグ、文字列のタグ）とロールバックの検証がなく、不十分。\n- AC2: 同じ組織のメモが見えることしか確かめていない。NotFound（他組織・他人の非公開・存在しない）と、閲覧数の加算・同時の閲覧がなく、不十分。\n- AC3: 一覧の正常系と単純な検索だけ。範囲外の拒否、`%`・`_`、タグの OR、他人の非公開メモの除外がなく、不十分。実装は `ESCAPE` とプレースホルダーを使っていて、目視では妥当（K2 の検証は不足）。\n- AC4: 所有者による更新と削除の正常系だけ。Conflict、Forbidden、管理者の扱い、更新時の検証、競合の検証がなく、不十分。重大1のバグも見逃している。\n- AC5: 管理者による移管の件数と、管理者以外の拒否だけ。他組織の拒否と、途中で失敗したときの巻き戻しがなく、不十分。\n- AC6: 行の action と actor しか確かめていない。api_key のマスクを検証していないため不十分（実装は仕様どおりに見える）。\n- AC7: 上限と枠の更新だけを単一スレッドで確かめている。枠の境界ちょうどと同時の呼び出しがなく、不十分。\n- AC8: 往復と note_id の改ざんだけ。期限ちょうど、署名の改ざん、形の崩れがなく、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- テストの兆候: エンジンが検出した skip・.only・アサーションなしのテストはない。検証条件の弱体化も、`history` では確認されなかった。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリなので、unittest の単体・結合テストで足りる。ただし並行・異常系のテストは必須）。\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいの検証がない（重大2）。\n- K3: 同時の更新・閲覧・呼び出しで更新や数が失われる。実装にバグがあり（重大1）、検証もない（重大3）。\n- K4: 途中の失敗による不整合の検証がない（重大2）。\n- その他 K2・K6・K7・K8・K5: 検証がない（重大2）。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が通った。\n- `$AQ history --since 0` を確認した。検証条件が弱められた形跡はなかった。\n- 重大1のバグを、`python3 -I -c` で hooks を使って再現した。`update_note` は Conflict にならず、先の更新を上書きした。ファイルは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

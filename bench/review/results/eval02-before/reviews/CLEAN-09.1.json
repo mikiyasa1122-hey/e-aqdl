@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-09",
+ "rep": 1,
+ "sec": 41.0,
+ "exit": 0,
+ "cost_usd": 0.1498358,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20766,
+  "cache_read_input_tokens": 115458,
+  "output_tokens": 5521,
+  "output_tokens_details": {
+   "thinking_tokens": 1296
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20766,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3428,
+    "cache_read_input_tokens": 37678,
+    "cache_creation_input_tokens": 3089,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3089
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 095b6340\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `notes/service.py:14` の `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている（`:64`, `:151`）。`$` は末尾の改行の手前にも一致するため、`\"abc\\n\"` のようなタグが検査を通る。 / 成立条件: 作成・更新・検索のタグに末尾が `\\n` の文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。20文字ちょうどのタグに改行を足した21文字も通る。検索の絞り込みでも検査を通る。 / 根拠: `create_note(c,u,'t','b',['abc\\n'])` が成功し、`get_note` の tags が `['abc\\n']` になることを実行して確認した。`share.py` は同じ問題を避けて `fullmatch` を使っているので、service.py だけが漏れている。 / 提案: `TAG_RE.fullmatch(t)` に変える（または `\\Z` を使う）。「末尾が改行のタグ」を拒否する回帰テストも追加する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` は12件で正常系が中心。仕様が明示する異常系・境界値・同時実行・ロールバックの検証がほぼない。足りないものは次のとおり。(a) R2/K1: 他組織・他人の非公開メモが NotFound になること（管理者にも見えないことを含む）、閲覧数の同時加算。(b) R3/K2: `%`・`_` を含む検索語、page・per_page・sort の範囲外、他人の非公開メモが一覧・検索に出ないこと、タグの OR 絞り込み、SQL インジェクション文字列。(c) R4: 他人による更新・削除の Forbidden、古い version と読み出しから書き込みの間の更新による Conflict（`hooks.before_write` で再現できる）、更新時のタグ検証、削除の途中失敗がそのまま伝わりロールバックされること。(d) R1/R5/R10: `create:tags` や `transfer:*` の途中失敗後に何も残らないこと、その後も接続が使えること、組織をまたぐ移管の Forbidden。(e) R6: 伏せ字の検証（8文字未満・8文字・長い鍵。現状は `actor` しか見ていない）。(f) R7: 枠の境界（ちょうど window 秒）と複数スレッドでの上限。(g) R8: 期限ちょうど、期限切れ、形の崩れ、署名の改ざん。(h) R9: ログ・例外に本文・署名・api_key が出ないこと。 / 根拠: 設計書が `hooks.before_write` と `RateLimiter.hook` を再現用に用意しているのに、テストは一度も使っていない。仕様が名指しする境界とリスクが未検証で、条件を外しても失敗するテストがない。実際に [重大1] の欠陥も見逃している。 / 提案: 上記 (a)〜(h) を、sleep に頼らず hook で順序を固定する決定論的なテストとして追加する。各テストは、対応する認可・更新条件・ESCAPE・境界の比較を外すと失敗する形にする。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、認可（`_visible` / `_can_modify`）をトランザクションの外で判定する。`delete_note` は、削除の SQL を再確認なしに実行し、削除対象の行数も確かめない。 / 成立条件: 認可判定の後、`BEGIN IMMEDIATE` の前に、別接続が `transfer_notes` で所有者を変えるか、メモを削除する。 / 影響: (1) 所有者が移された後でも、元の所有者が削除できる。移管後は他人のメモなので、これは Forbidden（または NotFound）になるべき。(2) 他の接続が先に削除したメモでも、DELETE が0行のまま成功し、実際には削除していない `delete` の監査ログが残る。`update_note` も、version が一致する限り、移管後に元の所有者が更新できる。移管は `version` を上げるため、古い version なら Conflict になって防がれる。ただし、最新の version を読み直してから更新を呼ぶ呼び出し側には効かない。 / 確認した保証: DB の制約や `version` 条件は DELETE 側にはない。`get_note` は、トランザクション内で `_visible` を再確認している。 / 根拠: `service.py:183-192`（delete）、`:159-171`（update）。 / 提案: トランザクション内で `_row` を読み直し、`_visible` と `_can_modify` を再判定する。存在しなければ NotFound にする。`delete_note` では DELETE の `rowcount` も確かめる。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `list_notes` の `sort` に list などの unhashable な値を渡すと、`sort not in SORT_COLUMNS`（`service.py:125`）が ValidationError ではなく TypeError になる。 / 提案: `isinstance(sort, str)` を先に確かめる。\n- [軽微2] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: `transfer_notes` が更新しない `updated_at` は、移管後の一覧の並び順に影響しない。ただし、移管先 `to_user` が DB に存在しない場合、FK 制約で IntegrityError になり、仕様上の例外型（ValidationError / NotFound）にならない。ロールバック自体は行われる。 / 提案: 移管先の存在を確かめ、NotFound か ValidationError にする。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` は正常系、`test_empty_title_rejected` は題名の空文字だけを確認している。タグ・本文・題名の境界値、タグの重複数え、途中失敗後に何も残らないことは確認していない。不十分。タグ検証の欠陥も見逃している。\n- AC2: `test_delete_by_owner` の NotFound は、削除後の閲覧を確認しているだけ。他組織・他人の非公開メモ、管理者から見えないこと、閲覧数の加算と同時加算は確認していない。不十分。\n- AC3: `test_list_first_page` と `test_search` は正常系だけ。範囲外の入力、`%`・`_`、タグの OR、インジェクション、他人の非公開メモの除外は確認していない。不十分。\n- AC4: `test_update_by_owner` だけ。Forbidden・Conflict・競合・削除の失敗伝播は確認していない。不十分。\n- AC5: `test_transfer` は件数だけ、`test_transfer_requires_admin` は管理者以外だけを確認している。別組織への移管、途中失敗でのロールバック、所有者が実際に移ったかは確認していない。不十分。\n- AC6: `test_export_audit` は `action` と `actor` だけを見ている。api_key の伏せ字は確認していない。不十分。\n- AC7: `test_limit` は limit 超過と61秒後の復帰だけ。ちょうど window 秒の境界と複数スレッドは確認していない。不十分。\n- AC8: 往復と改ざん（note_id の書き換え）だけ。期限ちょうど、期限切れ、形の崩れ、署名の書き換えは確認していない。不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。`git diff` で比較できる履歴はない（全ファイルが未追跡）。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、SQLite への実接続を使う unittest で足りる）。ただし、並行実行と途中失敗の再現テストは必要（[重大2]）。\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを防ぐ検証がない。\n- K2: SQL インジェクションと LIKE の `%`・`_` の検証がない。\n- K3: 閲覧数の同時加算、更新の競合、RateLimiter の同時呼び出しの検証がない。\n- K4: 途中失敗によるロールバックの検証がない。\n- K5・K7: api_key の伏せ字、ログ・例外への機密情報の露出の検証がない。\n- K6: 組織をまたぐ移管と、一部だけ移る不整合の検証がない。\n- K8: 期限切れ・形の崩れ・署名の改ざんの検証が不十分。\n### 確認したこと\n- 仕様書・設計書・`notes/*.py`・`tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` で 12 件が通った。\n- `create_note(..., ['abc\\n'])` が成功し、保存されることを実行して確認した（[重大1]）。\n- `git status` で全ファイルが未追跡であることを確認した。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

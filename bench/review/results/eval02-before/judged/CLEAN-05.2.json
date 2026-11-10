@@ -1,0 +1,43 @@
+{
+ "case": "CLEAN-05",
+ "rep": 2,
+ "judge_cost_usd": 0.0712163,
+ "judge_raw": "**判定の要約**: このケースは欠陥なしで、変更は `_mask` を関数に切り出しただけです。`_mask` は仕様どおり、8文字未満は全部伏せ、8文字以上は末尾4文字だけ残します。そのため `matches_defect` に当たる指摘はなく、`defect_detected` は \"n/a\" です。\n\n- **重大1**: `TAG_RE.match('abc\\n')` は、`$` が末尾の改行の手前に一致するため真になります。タグ検証の穴は実在し、仕様の「英小文字・数字・ハイフンの1〜20文字」に反します。埋め込んだ欠陥ではないので `real_other` です。\n- **重大2〜4**: コードの欠陥ではなく、テストの不足だけを述べているので `test_gap` です。\n- **軽微1**: `delete_note` の認可判定がトランザクションの外にあるため、transfer 直後の競合で元の所有者が削除できる余地があります。実在する穴なので `real_other` です。ただし影響は小さい競合です。\n- **軽微2**: 先頭に 0 を付けたリンクも通りますが、指摘自身が仕様違反ではないと認めています。欠陥の主張ではないので `style` です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match により末尾改行つきタグが通る実在の仕様違反で、埋め込み変更とは無関係。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"認可・競合・巻き戻しのテスト不足だけを指摘している。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"同時実行・境界値のテスト不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"SQL・api_key の伏せ字・ログのテスト不足だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の認可判定がトランザクション外にあり、transfer 直後の競合で元の所有者が削除できる実在の TOCTOU。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭 0 の別表現は仕様違反ではないと自ら認めており、好みの提案にとどまる。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、_mask への切り出しは振る舞いを変えておらず、その箇所への誤指摘もない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match により末尾改行つきタグが通る実在の仕様違反で、埋め込み変更とは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "認可・競合・巻き戻しのテスト不足だけを指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "同時実行・境界値のテスト不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "SQL・api_key の伏せ字・ログのテスト不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の認可判定がトランザクション外にあり、transfer 直後の競合で元の所有者が削除できる実在の TOCTOU。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭 0 の別表現は仕様違反ではないと自ら認めており、好みの提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、_mask への切り出しは振る舞いを変えておらず、その箇所への誤指摘もない。"
+ }
+}

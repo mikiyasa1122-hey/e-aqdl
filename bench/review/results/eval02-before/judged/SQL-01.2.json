@@ -1,0 +1,33 @@
+{
+ "case": "SQL-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0670503,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `search_notes` で検索語を SQL 文字列に直接埋め込んでいる点を指摘しています。箇所（service.py の search_notes）、原因（SQL インジェクション）、影響（他組織・非公開メモの漏えい）がすべて埋め込んだ欠陥と一致します。→ matches_defect\n- **重大2**: タグの検査で `.match` と `$` を使っているため、末尾に改行を付けたタグが通ります。仕様違反の実在するバグですが、埋め込んだ欠陥とは別物です。→ real_other\n- **重大3**: テストの不足だけを指摘しています。→ test_gap\n- **重大4**: `delete_note` で認可判定がトランザクションの外にある点を指摘しています。実行確認はなく、現状のコードでは `private` を変更する経路もありません。ただし、移管直後に削除が通る経路は実在し、TOCTOU の穴として根拠も示されています。仕様の観点では限定的ながら実在する欠陥です。→ real_other\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes が検索語を SQL 文字列に直接埋め込むインジェクションを、箇所・原因・影響とも正解どおりに指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により末尾改行のタグが通る、実行で確認済みの仕様違反で、埋め込んだ欠陥とは別物。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note が認可判定をトランザクション外で行い、移管直後の削除が通りうる TOCTOU を根拠付きで指摘している（成立は限定的で未確認）。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ SQL インジェクションを箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes が検索語を SQL 文字列に直接埋め込むインジェクションを、箇所・原因・影響とも正解どおりに指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により末尾改行のタグが通る、実行で確認済みの仕様違反で、埋め込んだ欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note が認可判定をトランザクション外で行い、移管直後の削除が通りうる TOCTOU を根拠付きで指摘している（成立は限定的で未確認）。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ SQL インジェクションを箇所・原因・影響とも正確に捉えている。"
+ }
+}

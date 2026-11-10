@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 1,
+ "sec": 29.9,
+ "exit": 0,
+ "cost_usd": 0.1661599,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 29636,
+  "cache_read_input_tokens": 125799,
+  "output_tokens": 3502,
+  "output_tokens_details": {
+   "thinking_tokens": 876
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 29636,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2125,
+    "cache_read_input_tokens": 43067,
+    "cache_creation_input_tokens": 6570,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6570
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, R5 / 対応区分: 改善提案 / 内容: `transfer_notes`（notes/service.py:359）は version を +1 するが `updated_at` を更新しない。移管直後の「更新順」一覧の並びは変わらない。仕様に updated_at の更新規定はなく、欠陥ではない。 / 提案: 「更新順」に移管を含めたいなら `updated_at = ?` も更新する。含めないなら、その旨を設計書に1行書く。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。tests/test_ac1_create.py が R1 の入力規則を確かめている。タグの境界、重複の数え方、tags が文字列のときの拒否を含む。`fail_at(\"create:tags\")` でトランザクションの途中失敗を起こし、何も残らないことも確かめている。\n- AC2: 妥当。他組織、他組織の管理者、他人の非公開、存在しないメモが、すべて NotFound になることを subTest で確かめている。NotFound のときに閲覧数が増えないことも確かめている。次の3点を、フックと実スレッドで確かめており、sleep には頼っていない。\n  - 確認後に非公開へ変わった場合\n  - 閲覧の途中に別の閲覧が割り込んだ場合\n  - 別々の接続で4スレッドが10回ずつ閲覧し、合計が40になる場合\n- AC3: tests/test_ac3_list_search.py は実行して通った（63件すべて OK）。コードでは次を確認した。\n  - page・per_page・sort の範囲外は ValidationError。bool も拒否する。\n  - LIKE は ESCAPE で % と _ を普通の文字として扱う。\n  - タグは R1 と同じ規則で検査し、OR で絞り込む。\n  - SQL の値はすべてプレースホルダー。f-string で埋め込むのは、SORT_COLUMNS の固定値と `?` の個数だけ。K2 は妥当。\n- AC4: 妥当。次を確かめている。\n  - 作成者と管理者だけが更新・削除できる。\n  - 他組織は NotFound、同じ組織の他人は Forbidden、非公開は管理者でも NotFound。\n  - 古い version は Conflict。\n  - 読み書きの間に他の更新が入った場合は Conflict。\n  - 最新の version を渡した場合も、先の更新を消さない。\n  - 判定の後に移管された場合も Forbidden。\n  - 削除の途中失敗では、タグとメモの両方を巻き戻し、例外を呼び出し側に伝える。\n  - 更新時にも R1 の検証をする。\n- AC5: tests/test_ac5_transfer.py（45行）を、コードの経路（service.py:348-361）と合わせて確認した。管理者以外と組織またぎは Forbidden。途中失敗はトランザクション全体を巻き戻す。K6 は妥当。\n- AC6: 8文字未満はすべて伏せ、8文字以上は末尾4文字だけ見せる。実装（service.py:371）は仕様どおり。\n- AC7: 妥当。クロックを注入して、枠の境界（159.999 は拒否、160.0 で新しい枠）を確かめている。拒否が枠を延ばさないことも確かめている。20スレッドを Barrier でそろえ、ちょうど5件だけ通ることを確かめている。`hook` で判定の途中に割り込ませ、ロックで直列化されることも確かめている。\n- AC8: 形の検査は `fullmatch` で、期限は `>=` で判定している（share.py:135）。署名は `compare_digest` で比べる。期限切れ・改ざん・形の崩れはすべて Forbidden。メッセージに署名は出ない（K8 は妥当）。\n- AC9・AC10: tests/test_ac9_secrets.py と tests/test_ac10_recovery.py がある。コードでは、ログとメッセージに ID と固定文言しか出していない。`_rollback` は元の例外を隠さず、`in_transaction` を確かめてから ROLLBACK する。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのファイルは見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実 DB（メモリ上とファイル）と実スレッドを使う単体テストが、リスクに見合っている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（`PYTHONDONTWRITEBYTECODE=1`）は 63件すべて OK。\n- spec.md・design.md を、notes/db.py・errors.py・ratelimit.py・share.py・service.py の全行と突き合わせた。認可（`_visible`・`_can_modify`）、トランザクション、SQL の組み立てにも問題は見つからなかった。\n- `$AQ trace` で、R1〜R10 の受け入れ条件とリスクのすべてに検証があることを確認した。\n- `$AQ history --since 0` は先頭40行だけ確認した。その範囲に検証条件を弱めた変更は見当たらない。\n- 反証テストは無効のため、「欠陥を検出できる」ことの証明は未実施。",
+ "files_changed": [],
+ "valid": true
+}

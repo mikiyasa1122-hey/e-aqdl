@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-05",
+ "rep": 3,
+ "sec": 32.3,
+ "exit": 0,
+ "cost_usd": 0.1297773,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19175,
+  "cache_read_input_tokens": 116213,
+  "output_tokens": 4144,
+  "output_tokens_details": {
+   "thinking_tokens": 527
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19175,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3065,
+    "cache_read_input_tokens": 37272,
+    "cache_creation_input_tokens": 2135,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2135
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード bd3d930e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 / 対応区分: 修正必須 / 内容: `search_notes` が他人の非公開メモを返す。`notes/service.py` の検索 SQL は `WHERE org_id = ? AND (title LIKE ? ... OR body LIKE ? ...)` だけで、`private = 0 OR owner_id = ?` の条件がない。`list_notes` にはこの条件があるが、検索にはない。 / 成立条件: 同じ組織の利用者 A が非公開メモを作り、同じ組織の B が題名か本文に含まれる語で検索する。 / 影響: 非公開メモの id と題名が B に漏れる。仕様 R3（他人の非公開メモは含めない）と R2 の存在を明かさない方針に反する。 / 根拠: `notes/service.py` の `search_notes`。呼び出し元の上流にも DB の制約にも、この絞り込みはない。既存テストにも防ぐものはない。 / 提案: SQL に `AND (private = 0 OR owner_id = ?)` を足し、`user[\"id\"]` を渡す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが 12 件の正常系の確認にとどまり、受け入れ条件の中心である異常系・境界値・並行実行・失敗時の巻き戻しを確かめていない。足りない検証は次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること（get / update / delete）。(b) 検索と一覧で他人の非公開メモが除外されること。(c) `%` と `_` を普通の文字として探すこと。(d) SQL インジェクション文字列を渡しても結果が変わらないこと。(e) 題名・本文・タグの境界値（100 文字、空白だけ、タグ 5 個と 6 個、文字列のタグ）。(f) 更新の Conflict（古い version）と Forbidden。(g) `hooks.before_write` による途中障害でのロールバック（作成・削除・移管）。(h) 移管で組織をまたぐ場合の Forbidden。(i) api_key が 8 文字未満のときの伏せ字。(j) RateLimiter の枠の境界（ちょうど window 秒）とスレッド並行。(k) 閲覧数の並行加算。(l) 共有リンクの期限ちょうど、期限切れ、形の崩れ。(m) ログに機密が出ないこと。(n) 例外の後に接続が使えること。 / 根拠: これらは仕様が受け入れ条件として明記している。重大1の漏えいも既存テストをすり抜けた。設計書も、並行実行と途中障害を `hooks` で再現する方針を挙げているが、使っているテストが 1 件もない。 / 提案: 上記 (a)〜(n) を unittest で追加する。並行実行は `hooks`・`RateLimiter.hook`・Barrier などで決定論的に再現し、sleep に頼らない。\n- [重大3] 区分: 実装 / 対象: R4, AC4, R5, AC5, K3 / 対応区分: 修正必須 / 内容: 更新・削除・移管の認可とメモの状態の読み取りがトランザクションの外にある。`update_note` と `delete_note` は、`_row` で読んだ行で `_visible` と `_can_modify` を判定してから `BEGIN IMMEDIATE` に入る。`delete_note` は DELETE の条件にも認可の条件にも version を使わない。そのため、判定後に移管でメモの所有者が変わると、旧所有者による削除と更新が、古い状態で通った認可のまま成功する。`transfer_notes` も `from_user` の所有メモを移すだけで、移管中の更新との整合は version の加算に頼っている。 / 成立条件: 旧所有者 A（member）が `update_note` か `delete_note` の `_row` 読み取り直後に、管理者が A のメモを B に移管する。`hooks.before_write(\"update\")` で再現できる。 / 影響: 所有者でなくなった A が B のメモを更新・削除できる。ただし update は version の条件で `Conflict` になることが多い。version を最新にして渡した場合と、`delete_note` は防げない。仕様 R4（作成者と同組織の管理者だけ）に反する。 / 確認した保証: `update_note` は UPDATE の WHERE に version を含むため、移管で version が上がれば Conflict になる。`delete_note` にはこの保証がなく、DELETE は `id` だけで絞っている。未確認: 並行時の再現は実行していない。コードの経路からの判断。 / 提案: `delete_note` では、トランザクションを開始した後に `_row` を読み直して認可を再判定する。または DELETE の WHERE に `owner_id` と `org_id` を加える。update も同様に、トランザクション内で再判定する。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` のタグ検査・個数の検査が `_validate` と重複している。`list_notes` の `total` と `rows` の 2 回の SELECT も同じスナップショットにならない。 / 提案: タグの検査を共通の関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常な作成と空の題名の拒否だけで、不十分。境界値・タグ検査・途中失敗後の巻き戻しの確認がない。\n- AC2: 作成者の閲覧しか確かめておらず、不十分。他組織・他人の非公開の NotFound も、閲覧数の並行加算もない。\n- AC3: 検索と一覧の正常系しかなく、不十分。非公開の除外がないため、重大1の欠陥を検出できなかった。`%` `_`、不正な page / per_page / sort、インジェクションの確認もない。\n- AC4: 所有者による更新と削除だけで、不十分。Conflict・Forbidden・管理者・非公開・並行のテストがない。\n- AC5: 管理者による移管の件数と、管理者以外の拒否だけで、不十分。組織をまたぐ拒否と、途中失敗で元に戻ることの確認がない。\n- AC6: 12 文字の鍵で、伏せ字そのものは確認していない（action と actor の確認のみ）。8 文字未満の確認もなく、不十分。\n- AC7: 枠の再開（61 秒）と上限超過だけで、不十分。ちょうど window 秒の境界と、スレッド並行がない。\n- AC8: 往復と改ざん 1 件だけで、不十分。期限ちょうど、期限切れ、形の崩れがない。\n- AC9: ログ・例外の機密情報を確かめる検証が何もない。\n- AC10: 例外の後に接続を再利用する検証がない。\n- エンジンが検出したテストの兆候: なし（skip・`.only`・アサーションなしのテストは検出されなかった）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite のインメモリとファイルを使った単体・結合テストで足りる。ただし、並行実行は別々の接続・スレッドで確認する必要がある。\n### 不足しているリスク\n- K1: 検索での非公開メモの漏えい（重大1）。get / update / delete の NotFound 経路の検証もない。\n- K2: SQL は `?` と ESCAPE を使っており、コード上は問題ない。ただし、インジェクションと `%` `_` を確かめるテストがない。\n- K3, K4: 並行実行と途中失敗のテストがない。`hooks` を使うテストがない。\n- K5, K7: api_key の伏せ字とログの出力のテストがない。\n- K6, K8: 組織をまたぐ移管と、共有リンクの期限・形のテストが不足している。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12 件すべて OK（出力のみ。ファイルへの書き込みなし）。\n- `git status` でコードがすべて未追跡であることを確認した。履歴上の検証条件の弱体化は確認できていない（`history` は未実行）。\n- 並行の再現は実行していない。重大3はコードの経路からの判断。",
+ "files_changed": [],
+ "valid": true
+}

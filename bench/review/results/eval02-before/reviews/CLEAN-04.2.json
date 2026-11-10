@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-04",
+ "rep": 2,
+ "sec": 41.6,
+ "exit": 0,
+ "cost_usd": 0.2208849,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 40539,
+  "cache_read_input_tokens": 93929,
+  "output_tokens": 4932,
+  "output_tokens_details": {
+   "thinking_tokens": 1230
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 40539,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3123,
+    "cache_read_input_tokens": 36480,
+    "cache_creation_input_tokens": 4059,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4059
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 22bd3e62\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査用正規表現 `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っているため、末尾が改行のタグ（例 `\"abc\\n\"`）を通してしまう。Python の `$` は文字列末尾の改行の手前にも一致する。share.py の `LINK_RE` は `fullmatch` を使って同じ問題を避けているが、タグには適用されていない。 / 成立条件: create_note・update_note・search_notes に、末尾が `\\n` のタグを渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という仕様に違反する値が保存・検索条件になる。同じ見た目のタグが複数できて、OR 絞り込みもずれる。 / 根拠: notes/service.py の `TAG_RE` と、`_validate`・`search_notes` の `TAG_RE.match(t)`。実行結果は `service.create_note(conn,u,'t','b',['abc\\n'])` が例外なく note_id=1 を返した。上流に別の検証はない。 / 提案: `TAG_RE.fullmatch(t)` に変える（3か所）。`\"abc\\n\"` を拒否するテストも足す。\n- [重大2] 区分: テスト / 対象: AC1, AC3, AC4, K2, K4 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は正常系中心の12件だけ。次の検証がない。(a) 題名・本文・タグの境界値（100文字・101文字、空白だけ、タグ6個、重複タグ、不正文字、文字列そのもの）。(b) 作成・削除・更新の途中失敗でロールバックされること。`hooks.before_write` は設計でそのために用意されたが、テストで使われていない。(c) 検索の `%` `_` の扱いと SQL インジェクション文字列（K2）。(d) per_page・page・sort の範囲外。(e) 他の組織・非公開メモが一覧・検索に出ないこと。 / 根拠: AC1・AC3・AC4 と K2・K4 は、拒否と失敗時の挙動そのものが受け入れ条件。現状のテストでは条件を外しても失敗しない。重大1の欠陥もこのテストでは見つからない。 / 提案: 上記の異常系・境界値・失敗注入のテストを足す。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC5, AC10, K1, K3, K6 / 対応区分: 証拠不足 / 内容: 認可と同時実行の検証が全くない。(a) 他組織・他人の非公開メモが NotFound になること（get・update・delete）。(b) 管理者が非公開メモを扱えないこと、メンバーが他人のメモを更新・削除すると Forbidden になること。(c) 古い version での Conflict と、読み出しから書き込みの間に割り込まれたときの Conflict（`hooks.before_write(\"update\")` で決定論的に再現できる）。(d) 別接続・別スレッドでの閲覧数の数え漏れなし（file DB で）。(e) transfer の組織またぎ拒否と、途中失敗で元のままになること。(f) 例外後に接続が使えること（AC10）。 / 根拠: K1・K3・K6 は漏えい・更新消失・一部だけ移管という重大リスクで、条件を外してもテストが通る状態。 / 提案: 上記のテストを足す。並行はフックで順序を固定し、sleep に頼らない。\n- [重大4] 区分: テスト / 対象: AC6, AC7, AC8, AC9, K5, K7, K8 / 対応区分: 証拠不足 / 内容: (a) AC6・K7: 監査ログのマスクを確かめていない。`test_export_audit` は action と actor だけを見ており、`actor_key` は検証していない。8文字未満・ちょうど8文字の境界もない。(b) AC7: RateLimiter の「ちょうど window 秒で新しい枠」の境界（`now-start >= window`）と、複数スレッドの同時呼び出しで上限を超えないこと（`hook` を使う）がない。テストは 0→61 しか見ていない。(c) AC8・K8: 期限ちょうど・1秒前、署名違い、形の崩れ（数字以外・改行付き・署名の長さ違い・大文字16進）がなく、改ざんは1パターンだけ。(d) AC9・K5: ログ・例外にメモ本文・署名・api_key が出ないことを確かめていない。 / 根拠: AC6〜AC9 の境界と K5・K7・K8 の改ざん・漏えいが、条件そのものを検証されていない。 / 提案: 上記の境界・異常系テストを足す（ログは `assertLogs` で確認する）。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `list_notes` で `page` が極端に大きい（例 10**30）と、OFFSET の計算で sqlite3 の OverflowError が出て、ValidationError にならない。 / 提案: page の上限を設けるか、OverflowError を ValidationError に変換する。\n- [軽微2] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `007.<期限>.<署名>` のように先頭ゼロの note_id でも、int 化した値の署名と一致すれば通る。署名は note_id 本人が作らないと作れないので、影響は小さい。 / 提案: 正規表現を `0|[1-9][0-9]*` にして、正規の形だけ受け付ける。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否だけで、不十分。境界値・タグ規則・ロールバックがなく、重大1の欠陥を見逃している。\n- AC2: 不十分。閲覧数の加算、他組織・非公開の NotFound、並行の数え漏れがない。\n- AC3: 不十分。1ページ目と単純な検索だけ。範囲外、LIKE のエスケープ、インジェクション、タグ OR、非公開の除外がない。\n- AC4: 不十分。所有者による更新・削除の正常系だけ。Forbidden・NotFound・Conflict・タグ検証・削除失敗の伝播がない。\n- AC5: 不十分。正常系と管理者でないときの拒否だけ。組織またぎと途中失敗の巻き戻しがない。\n- AC6: 不十分。マスクを検証していない。\n- AC7: 不十分。同時呼び出しと枠の境界がない。\n- AC8: 不十分。往復と改ざん1例だけ。期限の境界と形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし（skip・`.only`・アサーションなし）。`history` を確認した結果、検証条件の弱体化は見当たらない（bind のみ）。ただし紐付けた unit の内容が上記のとおり空洞に近い。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest で足りる）。ただし、別接続・別スレッドの file DB を使った並行テストは必要。\n\n### 不足しているリスク\n- K1: 認可の否定系のテストがない。\n- K2: インジェクションと `%` `_` のテストがない。\n- K3: 更新・閲覧・RateLimiter の並行のテストがない。\n- K4: 途中失敗でロールバックされることのテストがない。\n- K5: ログ・例外に機密が出ないことのテストがない。\n- K6: 組織またぎの移管と部分移管のテストがない。\n- K7: マスクのテストがない。\n- K8: 期限・改ざん・形の崩れの網羅がない。\n\n### 確認したこと\n- spec.md・design.md と notes/*.py を全読みし、認可（`_visible`・`_can_modify`）、SQL（プレースホルダー・ORDER BY の許可リスト・LIKE の ESCAPE）、`transaction()` を追った。実装は設計どおりで、重大1以外に欠陥は見つからなかった。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて OK。\n- 再現: `create_note(..., ['abc\\n'])` が成功した（重大1）。\n- `aqdlc history --since 0`: bind の記録のみ。",
+ "files_changed": [],
+ "valid": true
+}

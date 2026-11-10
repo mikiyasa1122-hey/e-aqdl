@@ -1,0 +1,18 @@
+{
+ "case": "CLN-10",
+ "rep": 3,
+ "judge_cost_usd": 0.1123262,
+ "judge_raw": "## 判定\n\n欠陥なしのケース。レビュー担当の指摘は軽微1の1件のみ。\n\n**軽微1**（移管で version を +1 する点）について、コードでは `transfer_notes` が `version = version + 1` としており、事実として正しい。仕様は移管後の version について何も定めていない。移管前の version を持つ呼び出し側の更新が Conflict になるのは、楽観的ロックとして安全側の動作である。tests/test_ac5_transfer.py の `test_transfer_bumps_version` もこの挙動を確認している。レビュー担当自身も「改善提案」とし、欠陥とは主張しておらず、仕様に一言書くことを勧めているだけ。これは欠陥の主張ではなく、仕様の記述に関する提案であり、style に当たる。\n\n欠陥なしのケースなので、matches_defect は使わず、defect_detected は n/a とする。判定「合格」も正しい。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"移管で version が上がる挙動は安全側で、テストもあり、仕様への一言追記を勧めるだけの提案で欠陥の主張ではない。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビュー担当は合格と判定し、欠陥でない改善提案を1件出しただけだった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "移管で version が上がる挙動は安全側で、テストもあり、仕様への一言追記を勧めるだけの提案で欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は合格と判定し、欠陥でない改善提案を1件出しただけだった。"
+ }
+}

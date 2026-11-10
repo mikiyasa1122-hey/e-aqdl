@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-03",
+ "rep": 3,
+ "sec": 28.6,
+ "exit": 0,
+ "cost_usd": 0.13693289999999997,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22120,
+  "cache_read_input_tokens": 120669,
+  "output_tokens": 3637,
+  "output_tokens_details": {
+   "thinking_tokens": 460
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22120,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2389,
+    "cache_read_input_tokens": 39861,
+    "cache_creation_input_tokens": 2260,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2260
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 73cf7484\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `_can_modify` が `row[\"owner_id\"] == user[\"id\"] or not row[\"private\"] or (admin かつ同じ組織)` になっており、公開メモなら同じ組織の一般メンバーなら誰でも更新・削除できる。仕様 R4 は「作成者と同じ組織の管理者だけ（それ以外は Forbidden）」としている。 / 成立条件: 同じ組織の member（作成者でも管理者でもない）が、公開メモに対して update_note か delete_note を呼ぶ。 / 影響: 他人のメモを一般メンバーが書き換え・削除できる。認可の欠陥で、データ破壊にもつながる。 / 確認した保証: 呼び出し元の `_visible` は閲覧可否しか見ていない。DB の制約や他の層に、所有者や管理者を確かめる処理はない。既存テストも防いでいない。 / 根拠: notes/service.py の `_can_modify`。実際に再実行して確認した。同じ組織の member(bob) が alice の公開メモを update_note するとバージョン 2 が返り、delete_note も例外なく成功した。 / 提案: `_can_modify` を `row[\"owner_id\"] == user[\"id\"] or (user[\"role\"] == \"admin\" and row[\"org_id\"] == user[\"org_id\"])` に直す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほとんどが正常系の確認にとどまっている。仕様が求める次の検証がない。R1 の境界値（題名100文字・101文字、本文、タグ6個、重複タグ、不正なタグ、tags に文字列を渡す）、R1 の途中失敗でのロールバック、R2 の他組織・他人の非公開メモが NotFound になること、閲覧数の同時加算、R3 の page・per_page・sort の範囲外・`%`・`_` の検索・SQL インジェクション・タグの OR 絞り込み、R4 の Forbidden・Conflict・更新時のタグ検査・削除の失敗伝播、R5 の組織外メンバーの拒否と途中失敗での巻き戻し、R6 の api_key の伏せ字（テストは action と actor しか見ていない）、R7 の枠の境界ちょうどと同時スレッド、R8 の期限ちょうど・形の崩れたリンク、R9 の機密がログに出ないこと、R10 の例外後の接続再利用。 / 根拠: 仕様は境界値・同時実行・認可の拒否を受け入れ条件に含めている（AC1〜AC10、K1〜K8）。重大1の認可の欠陥も、拒否のテストがないため通っている。設計は `hooks.before_write` と `RateLimiter.hook` を再現用に用意しているが、テストは一度も使っていない。 / 提案: 上記の拒否・境界・ロールバック・並行の各テストを追加する。特に非所有者 member の update・delete が Forbidden になるテスト、同時の get_note（別接続・別スレッド）で views が正確に増えるテスト、RateLimiter.hook を使った同時の上限テストが必要。\n- [重大3] 区分: 実装 / 対象: R5, AC5, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` は `to_user` と `from_user` の dict をそのまま信用しており、移管先が実在する利用者かを DB で確かめていない。 / 成立条件: 呼び出し側が、実在しない id を持つ to_user を渡す。 / 影響: foreign_keys が ON のため、実在しない id なら UPDATE が FOREIGN KEY 違反で失敗し、ロールバックされて IntegrityError が出る。これは仕様の例外（Forbidden）ではない。一方、dict の org_id だけを偽装した場合は DB と照合されない。ただし仕様は「呼び出し側が role・org_id を信用する」ことを許しているため、この点は仕様どおり。 / 確認した保証: 実際には再現していないため未確認。ロールバック自体は transaction() が行う。 / 根拠: notes/service.py の `transfer_notes`。 / 提案: 重大度は低め。移管先の存在確認を入れるか、仕様でその扱いを明記する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名しか確かめておらず不十分。境界値・タグの規則・ロールバックの確認がない。\n- AC2: 閲覧数の増加も、見えないメモが NotFound になることも確かめていない。不十分。\n- AC3: 一覧と検索の正常系のみで、範囲外・`%` と `_`・SQL インジェクション・タグの OR を確かめていない。不十分。\n- AC4: 作成者の更新・削除の成功のみ。Forbidden・Conflict がなく、実装の認可の欠陥（重大1）を見逃している。不十分。\n- AC5: 管理者による移管と、管理者でないときの拒否のみ。組織外の拒否・巻き戻しがなく不十分。\n- AC6: api_key の伏せ字を確かめていない。不十分。\n- AC7: 枠の境界ちょうどと同時スレッドを確かめていない。不十分。\n- AC8: 往復と改ざんのみ。期限の境界・形の崩れを確かめていない。不十分。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、単体テストと並行テストで足りる。\n### 不足しているリスク\n- K1: 非所有者 member による更新・削除（重大1）。\n- K2: SQL インジェクション・LIKE の特殊文字のテストがない。\n- K3: 同時の閲覧・更新・RateLimiter のテストがない。\n- K4: ロールバックのテストがない。\n- K5・K7: api_key の伏せ字とログのテストがない。\n- K8: 期限の境界のテストがない。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。ただし上記のとおり検証が薄い。\n- 同じ組織の member が公開メモを update_note・delete_note するスクリプトを実行し、どちらも成功した（重大1を再現）。\n- `git status` と `history`: テストや検証条件の弱体化は見つからなかった。\n```",
+ "files_changed": [],
+ "valid": true
+}

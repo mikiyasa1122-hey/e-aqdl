@@ -1,0 +1,49 @@
+{
+ "case": "TX-03",
+ "rep": 2,
+ "sec": 31.7,
+ "exit": 0,
+ "cost_usd": 0.1035905,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12604,
+  "cache_read_input_tokens": 122085,
+  "output_tokens": 4095,
+  "output_tokens_details": {
+   "thinking_tokens": 662
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12604,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2786,
+    "cache_read_input_tokens": 36960,
+    "cache_creation_input_tokens": 2519,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2519
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 62accf30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, K4, R10 / 対応区分: 修正必須 / 内容: `create_note` が2つのトランザクションに分かれている。メモ本体の INSERT が先にコミットされ、タグと監査ログは別のトランザクションで記録される。 / 成立条件: タグまたは監査ログの記録で失敗が起きたとき（`hooks.before_write(\"create:tags\")` はまさにその位置）。 / 影響: 「途中で失敗したら何も残さない」に反する。タグも監査ログもないメモが残る。実行して確認した。`before_write` で例外を起こすと `create_note` は例外を投げたが、notes の件数は 2 になった（先の成功分の 1 件と、失敗したのに残った 1 件）。 / 根拠: notes/service.py の `create_note`（`with transaction(conn)` が2回ある）。上流の保証や DB の制約でも防げていない。 / 提案: INSERT・タグ・監査ログを1つの `with transaction(conn)` にまとめる。`hooks.before_write` はその中に置く。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `TAG_RE` が `^[a-z0-9-]{1,20}$` を `re.match` で使っている。`$` は末尾の改行の手前にも一致するため、\"ab\\n\" が有効なタグとして通る。実行して確認した（`create_note(..., ['ab\\n'])` が成功した）。 / 成立条件: 末尾に改行を付けたタグを、作成・更新・検索の入力に渡したとき。 / 影響: タグの規則（英小文字・数字・ハイフンのみ）に反する不正な値が保存される。共有リンクの検証が `fullmatch` で対処している問題と同じものが、タグ検証には残っている。 / 根拠: notes/service.py の `TAG_RE` と `_validate`、`search_notes` 内のタグ検査。 / 提案: `TAG_RE.fullmatch(t)` を使う。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心で、仕様の中核を確かめるものがほとんどない。具体的には次の検証がない。 (a) 他の組織・他人の非公開メモが NotFound になること。 (b) 閲覧数の並行カウント。 (c) `%` と `_` を含む検索語、SQL インジェクションに見える入力、タグの OR 絞り込み。 (d) 更新時の version による Conflict と、読み出しから書き込みの間に他の更新が入った場合。 (e) 更新・削除での Forbidden。 (f) 作成・更新・削除・移管の途中失敗でロールバックされること。 (g) 移管の組織またぎ拒否。 (h) api_key の伏せ字（8文字未満・境界を含む）。 (i) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。 (j) 共有リンクの期限ちょうど・形の崩れ・改行・署名の改ざん。 (k) ログへの機密情報の非出力。 (l) 例外の後に接続を使い続けられること。 / 根拠: 上記の欠落のため、重大1・2の欠陥をテストが検出できなかった（12 件すべて合格）。設計書は `hooks.before_write` と `RateLimiter.hook` を、これらを再現するための差し込み口と定めているが、テストはどちらも使っていない。 / 提案: 上記 (a)〜(l) を、決定論的に再現できる形（hooks・注入した clock・スレッド同期）で追加する。\n- [重大4] 区分: テスト / 対象: AC4, K4, K3 / 対応区分: 証拠不足 / 内容: `update_note` の `Conflict` は、旧 version を渡した場合と、`before_write(\"update\")` で他の更新が割り込んだ場合のどちらも、テストで確かめられていない。`delete_note` のロールバックも同様。 / 根拠: AC4 は「後から書いた側が先の更新を消さない」を必須としている。 / 提案: 重大3の (d)・(f) と合わせて、これらのテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4, R8 / 対応区分: 改善提案 / 内容: 次の2点がある。 (1) 更新・削除の認可確認がトランザクションの外にある。ただし version の条件で更新の整合は守られる。 (2) 共有リンクが先頭ゼロ付きの note_id（例: \"007\"）を通す。 / 提案: 認可確認を `BEGIN IMMEDIATE` の後に行う。リンクは正規形（`str(int(x)) == x`）に限る。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名と正常系だけしか確かめていない。失敗時に何も残らないこと、境界値、タグの規則は未検証で、実際に欠陥が2件ある。\n- AC2: 不十分。自分のメモの閲覧しかなく、他の組織・非公開・存在しない場合の NotFound も、並行時の閲覧数も確かめていない。\n- AC3: 不十分。最初のページと通常の検索語だけで、`%`・`_`・範囲外・タグの OR は未検証。実装の `ESCAPE` とプレースホルダーはコードを見て妥当と判断したが、テストの裏付けはない。\n- AC4: 不十分。所有者による成功しか確かめていない。Conflict・Forbidden・ロールバックは未検証。\n- AC5: 不十分。成功と非管理者の拒否だけで、組織またぎ・途中失敗は未検証。\n- AC6: 不十分。`export_audit` のテストは action と actor しか見ておらず、`actor_key` は検証していない。\n- AC7: 不十分。枠の境界は 61 秒後しか見ておらず、ちょうど window 秒と並行呼び出しは未検証。\n- AC8: 不十分。往復と改ざんの1例だけで、期限ちょうど・形の崩れは未検証。\n- AC9, AC10: テストなし。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、リスクは単体・統合テストで足りる。ただし並行処理と失敗の再現テストは必須。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL の組み立てはコードを見る限り妥当だが、テストがない。\n- K3: 同時の更新・閲覧・呼び出しで更新や数が失われないことを確かめるテストがない。\n- K4: 途中の失敗による不整合は、実際に欠陥がある（重大1）。\n- K5・K7・K8: 検証テストがない。\n- K6: 移管で一部だけ移る、または組織の外に渡る、を確かめるテストがない。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests`: 12 件すべて合格。\n- 再現スクリプトを実行した。 (1) タグ \"ab\\n\" が受理された。 (2) `create:tags` で例外を起こしても、メモ本体が残った。\n- `history --since 0`、`trace`、`git diff` は実行していない。テスト改ざんの有無は未確認（git に追跡済みのファイルは README.md のみ）。\n- 実行したコードの確認は notes/*.py の全ファイルを読んだ。",
+ "files_changed": [],
+ "valid": true
+}

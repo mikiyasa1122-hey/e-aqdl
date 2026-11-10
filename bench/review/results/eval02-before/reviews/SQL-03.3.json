@@ -1,0 +1,49 @@
+{
+ "case": "SQL-03",
+ "rep": 3,
+ "sec": 31.9,
+ "exit": 0,
+ "cost_usd": 0.1508337,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 24237,
+  "cache_read_input_tokens": 124597,
+  "output_tokens": 4141,
+  "output_tokens_details": {
+   "thinking_tokens": 612
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24237,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2740,
+    "cache_read_input_tokens": 41798,
+    "cache_creation_input_tokens": 2440,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2440
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 86e2428c\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2（notes/service.py:116 の `list_notes`） / 対応区分: 修正必須 / 内容: `sort` を検証せず、`ORDER BY {SORT_COLUMNS.get(sort, sort)}` で、`updated`・`title` 以外の値を SQL にそのまま埋め込んでいる。 / 成立条件: `list_notes(sort=任意の文字列)`。呼び出し側が利用者の入力を渡せば到達する。 / 影響: 仕様は「updated か title 以外は ValidationError」「利用者の入力を SQL の文字列に埋め込まない」と定めている。実際は ValidationError にならず、SQL が差し込める。実行で確認した結果は次のとおり。`sort=\"nonexist\"` は `OperationalError: no such column`。`sort=\"id\"` は成功した。ORDER BY への埋め込みなので、条件式による情報の取り出しもできる。K2 に当たる。 / 確認した保証: 上流の検証も DB の制約も呼び出し元の検証もない（`sort` の検査は他にない）。 / 根拠: notes/service.py の `list_notes` 内 `SORT_COLUMNS.get(sort, sort)`。上記の実行結果。 / 提案: `if sort not in SORT_COLUMNS: raise ValidationError(...)` を追加し、`.get` のフォールバックをやめる。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4（notes/service.py:11 の `TAG_RE`） / 対応区分: 修正必須 / 内容: `^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾の改行を許してしまう（`$` は末尾の改行の前にも一致する）。 / 成立条件: タグが `\"abc\\n\"` のとき。作成・更新・検索のすべてで起こる。 / 影響: 仕様は「英小文字・数字・ハイフンの1〜20文字」。不正なタグが保存される。実行で確認した結果、`create_note(tags=[\"abc\\n\"])` が成功し、`get_note` が `['abc\\n']` を返した。20文字のタグ＋改行は21文字になる。 / 確認した保証: 他の層でタグの検査はしていない。 / 根拠: `_validate` と `search_notes` が `TAG_RE.match` を使っている。上記の実行結果。 / 提案: `TAG_RE.fullmatch` を使うか、パターンを `\\Z` で終える。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC8, AC9, AC10, K1, K2, K3, K4, K6, K8（tests/test_notes.py） / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系だけである。次の検証がない。(a) 他の組織・他人の非公開メモが NotFound になること（K1・R2〜R5）。(b) 閲覧数の同時の数え漏れ（K3）。(c) 更新の Conflict（version 不一致・読み書きの間の割り込み）と、管理者・他人の Forbidden。(d) 作成・削除・移管の途中失敗で何も残らないこと（`hooks.before_write` が使われていない）と、失敗後の接続の再利用（K4・AC10）。(e) 移管で他の組織に渡さないこと（K6）。(f) 一覧の page・per_page・sort の範囲外と、検索の `%`・`_`・SQL 文字列の入力（K2）。(g) 共有リンクの期限ちょうど・形の崩れ・期限切れ。(h) ログ・例外に本文・署名・api_key が出ないこと（AC9）。(i) タグ・題名・本文の境界値。重大1・2のバグも、既存のテストでは検出できていない。 / 根拠: 設計書のテスト方針は、差し込み口で並行と途中失敗を再現すると定めている。いずれの受け入れ条件・リスクも、認可・境界・異常系を確かめる検証が必須である。 / 提案: 上記の各項目を、決定論的に再現する単体テストとして追加する。認可・更新条件・重複防止の条件を外すと失敗するテストにする。\n- [重大4] 区分: テスト / 対象: AC6, K7, AC7（tests/test_notes.py の `test_export_audit`、`RateLimitTest`） / 対応区分: 証拠不足 / 内容: `test_export_audit` は action と actor しか見ておらず、`actor_key` の伏せ字を一切確かめていない（8文字未満・ちょうど8文字・末尾4文字）。RateLimiter のテストは「ちょうど window 秒で新しい枠」の境界と、`hook` を使った複数スレッドの同時呼び出しを確かめていない（`t=60` の境界は未検証）。 / 根拠: AC6 と K7 の核心は伏せ字の検証、AC7 の核心は枠の境界と同時の呼び出しの検証である。 / 提案: 鍵の長さ別の期待値の検証と、`t=60` の境界・`hook` を使った並行のテストを追加する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名だけを確かめており不十分（タグ・本文の境界、改行付きタグ、失敗時に何も残らないことが未検証）。\n- AC2: 不十分（閲覧数が増えること、他の組織・非公開の NotFound、同時の閲覧が未検証）。\n- AC3: 不十分（page・per_page・sort の範囲外、`%`・`_`、タグの OR、他人の非公開の除外が未検証）。実装にも sort の欠陥がある（重大1）。\n- AC4: 不十分（Conflict・Forbidden・入力検証・削除の失敗時が未検証）。\n- AC5: 不十分（他の組織・管理者以外の拒否、途中失敗の巻き戻しが未検証。`test_transfer_requires_admin` は管理者以外の拒否だけ）。\n- AC6: 不十分（伏せ字を確認していない）。\n- AC7: 不十分（枠の境界と同時の呼び出しが未検証）。\n- AC8: 不十分（期限ちょうど・期限切れ・形の崩れが未検証。改ざんは1件だけ）。\n- AC9: テストなし。\n- AC10: テストなし。\n- エンジンが検出したテストの兆候はなし。skip・`.only` もない。\n\n### E2E の要否\n- 不要（HTTP や画面のないライブラリで、SQLite を使う単体テスト・結合テストで足りる）。\n\n### 不足しているリスク\n- K1・K3・K4・K6・K8: 検証がない（重大3）。\n- R9: 実装を通した確認は未実施。コードのログは ID だけを出し、例外メッセージに本文・署名・api_key は含まれない。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` で12件が合格した。\n- `list_notes` の sort 不正値と、改行付きタグを実行して確認した。\n- `git status` と `$AQ history`、`$AQ trace` を確認した。検証の弱体化は見つからなかった（`history` は途中で出力を切ったため、後半の変更は未確認）。\n- notes/ の全ソースコードを読んだ。\n- 実装報告（impl.md）は読んでいない。`gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

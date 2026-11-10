@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 3,
+ "sec": 25.1,
+ "exit": 0,
+ "cost_usd": 0.1336135,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 21811,
+  "cache_read_input_tokens": 165495,
+  "output_tokens": 2980,
+  "output_tokens_details": {
+   "thinking_tokens": 418
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21811,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1899,
+    "cache_read_input_tokens": 41738,
+    "cache_creation_input_tokens": 305,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 305
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: `list_notes` が page=0 を受け付ける。仕様は「page は1以上、範囲外は ValidationError」。 / 成立条件: `list_notes(conn, user, page=0)`。page に 0 を渡すだけで起きる。 / 影響: ValidationError にならず、1ページ目の結果が `page: 0` として返る。入力拒否の仕様違反。 / 根拠: notes/service.py の `list_notes` が `page < 0` で判定している（`< 1` が正しい）。実行で確認した。`list_notes(page=0)` が例外を出さず、items と `'page': 0` を返した。上流に page の検証はない。 / 提案: 条件を `page < 1` に直す。page=0 と負の値が ValidationError になるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが 12 件しかなく、受け入れ条件・リスクの大半を確かめていない。検証の空洞化にあたる。page=0 の欠陥も通ってしまっている。 / 根拠: tests/test_notes.py の 12 件は正常系中心である。次の検証が見当たらない。\n  - R1/K4: タグ・本文・文字数・タグ数の境界、途中失敗（`hooks.before_write`）での何も残らないこと。\n  - R2/K1/K3: 他組織・他人の非公開メモが NotFound になること、閲覧数の並行増加。\n  - R3/K2: `%`・`_`・`\\` を含む検索語、タグ OR 絞り込み、`per_page` と `sort` の境界。\n  - R4/K3: version の Conflict、読み出し〜書き込みの間に更新が入った場合、管理者・非管理者の Forbidden と非公開メモの NotFound。\n  - R5/K6: 他組織への移管拒否、途中失敗時のロールバック。\n  - R6/K7: 8 文字未満の api_key を全て伏せること。\n  - R7: 枠の境界（ちょうど window 秒）とスレッド並行。\n  - R8/K8: 期限ちょうど、改ざん、形の崩れたリンク。\n  - R9: ログ・例外に本文・署名・api_key が出ないこと。\n  - R10: 例外の後に接続を使い続けられること。\n\n  設計が用意した `hooks.before_write` と `RateLimiter.hook` の差し込み口は、テストで一度も使われていない。 / 提案: 上記の異常系・境界値・並行（hook で決定論的に再現）のテストを AC ごとに追加する。認可の条件や LIKE の ESCAPE を外すと失敗するテストにする。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常作成と空題名の拒否のみ。本文・タグの境界、トランザクションのロールバックは未検証のため不十分。\n- AC2: 作成後の取得のみ。可視性の拒否と並行する閲覧数は未検証のため不十分。\n- AC3: `list_notes` は page=1 のみ。page=0 の欠陥を見逃している。検索は `%`・`_` やタグ絞り込みが未検証のため不十分。\n- AC4: 作成者による更新・削除の正常系のみ。Conflict・Forbidden・並行は未検証のため不十分。\n- AC5: 正常系と非管理者の拒否のみ。組織またぎと失敗時のロールバックは未検証のため不十分。\n- AC6: `test_export_audit` はある。8 文字未満の鍵や境界は未確認のため、内容は不十分の可能性がある。\n- AC7: 上限到達のテストはある。枠の境界と並行は未検証のため不十分。\n- AC8: 往復と改ざんのみ。期限の境界、形の崩れ、期限切れは未検証のため不十分。\n- AC9: テストなし。\n- AC10: テストなし。\n- エンジンが検出したテストの兆候はなし。skip や `.only` はない。\n### E2E の要否\n- 不要。ライブラリで、HTTP や UI はない。単体テストで十分だが、上記の異常系・並行の単体テストが必要。\n### 不足しているリスク\n- K1〜K8 の大半について、否定系・並行の検証がない（重大2）。\n- 実装を読んだ範囲では、SQL のプレースホルダーと ESCAPE、トランザクション、楽観的ロック、共有リンクの検証は設計どおりに見えた。これらは未検証であり、「テストで確認済み」とは言えない。\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。\n- `$AQ trace` を実行した。全検証が「合格・反証未実施」だった。\n- `$AQ history` は出力の途中で止めたため、前半しか読んでいない。検証条件の弱体化は確認していない。\n- `python3 -m unittest discover -s tests` を実行した。12 件が OK だった。\n- `list_notes(page=0)` を実行し、ValidationError にならず結果が返ることを確認した。",
+ "files_changed": [],
+ "valid": true
+}

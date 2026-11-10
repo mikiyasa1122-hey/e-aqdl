@@ -1,0 +1,33 @@
+{
+ "case": "EXC-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0626863,
+ "judge_raw": "**判定の要点**\n\n- 重大1は、埋め込み欠陥と同じ `delete_note` の `except Exception` による握りつぶしを指摘しています。原因（例外を捕まえて警告ログだけにする）も影響（呼び出し側が成功と誤認し、メモが残る）も一致しています。\n- 重大2と重大3は、テストの不足だけを述べています。コードの欠陥の主張ではありません。\n- 軽微1は、`update_note` の権限判定がトランザクションの外にある点を挙げています。ただし報告自身が、version 条件と `transfer_notes` の version 加算で Conflict になると認めています。実在する欠陥の根拠はなく、堅牢性の提案にとどまるので style にしました。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"delete_note の except Exception が例外をログだけにして握りつぶす点を、原因・影響とも正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"競合・同時実行・途中失敗のテストが無いというテスト不足だけの指摘である。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"認可・検証・境界値の異常系テストが無いというテスト不足だけの指摘である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"報告自身が version による Conflict で防がれると認めており、堅牢性の改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（削除失敗の握りつぶし）を箇所・原因・影響まで正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "delete_note の except Exception が例外をログだけにして握りつぶす点を、原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "競合・同時実行・途中失敗のテストが無いというテスト不足だけの指摘である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "認可・検証・境界値の異常系テストが無いというテスト不足だけの指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "報告自身が version による Conflict で防がれると認めており、堅牢性の改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（削除失敗の握りつぶし）を箇所・原因・影響まで正確に捉えている。"
+ }
+}

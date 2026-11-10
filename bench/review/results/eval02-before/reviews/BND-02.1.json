@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 1,
+ "sec": 34.4,
+ "exit": 0,
+ "cost_usd": 0.1379098,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20638,
+  "cache_read_input_tokens": 114918,
+  "output_tokens": 4385,
+  "output_tokens_details": {
+   "thinking_tokens": 1004
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20638,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2903,
+    "cache_read_input_tokens": 37546,
+    "cache_creation_input_tokens": 3093,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3093
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3 (notes/service.py:224) / 対応区分: 修正必須 / 内容: `list_notes` の page 検査が `page < 0` になっており、page=0 が通る。仕様は「page は1以上、範囲外は ValidationError」。 / 成立条件: `list_notes(conn, user, page=0)` を呼ぶ。 / 影響: 本来拒否すべき入力が受理され、OFFSET が負の値になる。実行して確認した結果、page=0 で `{'page': 0, ...}` が返り、例外にならなかった。 / 確認した保証: 上流の検証も呼び出し元の検証もなく、既存テストも page=0 を試していない。 / 根拠: service.py:224 と、実行結果。 / 提案: `page < 1` に直す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10、K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系の12件だけで、仕様が求める主要な検証がない。具体的には次のとおり。①権限の拒否（他の組織・他人の非公開メモの NotFound、Forbidden、管理者でも非公開メモは NotFound）がない。②Conflict（古い version、更新の途中に別の更新が入る場合）と、更新時のタグ検査がない。③失敗時のロールバック（`hooks.before_write` による途中の失敗。create・delete・transfer・R10 の接続の再利用）がない。④同時実行（閲覧数の数え漏れ、RateLimiter の同時呼び出し）がない。⑤検証の境界値（題名100文字と101文字、空白だけの題名、タグ5個と6個、tags に文字列を渡す、per_page 0・51、sort の不正値）がない。⑥検索の `%`・`_` のエスケープ、タグの OR、SQL インジェクションの入力がない。⑦api_key の伏せ字（8文字未満、末尾4文字）の検証がなく、AC6 の `export_audit` テストは api_key の値を見ていない。⑧RateLimiter の境界（ちょうど window 秒で新しい枠になる）がなく、テストは 61 秒しか見ていない。⑨共有リンクの期限ちょうど、形の崩れ、署名の改ざん、期限切れがない。tampered テストは note_id の改ざんだけを見ている。⑩ログや例外に機密情報（本文・署名・api_key）が出ないことのテストがない。 / 根拠: 仕様の AC1〜AC10 は境界・異常系・並行を明示している。テストがなければ、認可や CHECK の条件を外しても検出されない。重大1のバグも検出されていない。tests/test_notes.py の全体を確認した。 / 提案: 上の①〜⑩を決定論的に検証するテストを追加する。並行実行と途中の失敗は `hooks.before_write` と `RateLimiter.hook` を使う。DB は `:memory:` か一時ファイルを使う。\n- [重大3] 区分: 実装 / 対象: R4, R5, K1, K3 (notes/service.py:285-296, 298-311) / 対応区分: 修正必須 / 内容: `delete_note` は、認可の判定（`_visible` と `_can_modify`）をトランザクションの外で行い、その結果を使って削除している。トランザクション内で再確認も、version や owner の条件付き DELETE もしていない。 / 成立条件: 判定の後、`BEGIN IMMEDIATE` の前に、別の接続が `transfer_notes` でメモの所有者を変えるか、メモを非公開にする。 / 影響: 元の所有者（管理者でない member）が、すでに他人に移ったメモを削除できる。削除は R4 の「作成者と管理者だけ」に反する。R5 の移管が実行された後に、もう所有者でない人が削除できてしまう。 / 確認した保証: DELETE の WHERE は `id = ?` だけで、owner の条件がない。DB の制約でも防げない。`update_note` は version の条件で防げているため、削除だけが対象。ただし、この指摘は経路をコードから立証したもので、再現の実行はしていない。 / 根拠: service.py:286-294 のコードの経路。 / 提案: トランザクション内で `_row` を取り直して `_visible` と `_can_modify` を再判定してから削除する。または `DELETE ... WHERE id = ? AND owner_id = ?` の rowcount を見る。\n- [軽微1] 区分: 実装 / 対象: R5 (notes/service.py:304-310) / 対応区分: 改善提案 / 内容: `transfer_notes` は `from_user`・`to_user` を呼び出し側の dict から信用している。仕様の対象外（呼び出し側が確かめてから渡す）にあたるため、実害はない。 / 提案: `to_user` が DB に存在するかを確かめれば、外部キー違反の例外を業務エラーにできる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常な作成と空の題名の拒否だけで、不十分。境界値、タグの検査、失敗時に何も残らないこと（`hooks.before_write(\"create:tags\")` で再現できる）が未検証。\n- AC2: 自分のメモを自分で見る場合だけで、不十分。他の組織・他人の非公開メモが NotFound になること、閲覧数の増加、同時閲覧が未検証。\n- AC3: 一覧は1ページ目、検索は単純な一致だけで、不十分。page=0（重大1の実バグを見逃している）、範囲外、sort、`%`・`_`、タグの OR が未検証。\n- AC4: 作成者による更新と削除の正常系だけで、不十分。Conflict、Forbidden、管理者の扱い、非公開メモ、削除の途中の失敗が未検証。\n- AC5: 件数と管理者以外の拒否だけで、不十分。他の組織への移管の拒否、途中で失敗した場合に元のままになることが未検証。\n- AC6: 不十分。api_key の値を検証していない。\n- AC7: 不十分。枠の境界と同時の呼び出しが未検証。\n- AC8: 不十分。期限の境界と期限切れ、形の崩れ、署名の改ざんが未検証。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候はなし。\n### E2E の要否\n- 不要。HTTP や UI がないライブラリで、仕様の対象外にもなっている。ただし、複数の接続・スレッドを使った並行テスト（ファイルの DB）は必要。\n### 不足しているリスク\n- K1: 認可の拒否に関するテストがなく、重大3の削除での認可の抜けもある。\n- K2: SQL インジェクションの入力のテストがない。実装はプレースホルダーと ESCAPE を使っており、問題は見つからなかった。\n- K3: 同時の更新・閲覧・呼び出しのテストがない。\n- K4: 途中の失敗によるロールバックのテストがない。\n- K5・K7: api_key の伏せ字と、ログや例外に機密情報が出ないことのテストがない。\n- K6: 移管で組織の外に渡らないことのテストがない。\n- K8: 期限の境界・改ざん・形の崩れのテストがない。\n### 確認したこと\n- 仕様・設計と、`notes/*.py`・`tests/test_notes.py` の全体を読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件すべて成功。ただし正常系が中心。\n- `list_notes(page=0)` を実行 → ValidationError にならず結果が返った（重大1）。\n- 実装の確認では、更新の version 条件、`transaction()` のロールバック、検索の ESCAPE とプレースホルダー、`verify_link` の fullmatch と `compare_digest`、`export_audit` の伏せ字の計算に問題は見つからなかった。\n- コードの変更・依存関係のインストールはしていない。`gate` も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

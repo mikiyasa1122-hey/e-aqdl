@@ -1,0 +1,20 @@
+{
+ "runs": 30,
+ "pass": 30,
+ "pass_rate": 1.0,
+ "needs_fix": 0,
+ "unjustified_block": 0,
+ "unjustified_block_rate": 0.0,
+ "to_reinvestigate": 0,
+ "blocking_fp": 0,
+ "blocking_fp_by_action": {},
+ "blocking_findings": 0,
+ "suggestions": 31,
+ "minor": 31,
+ "format_invalid": 0,
+ "unparsed_verdict": 0,
+ "cost": "0.147 ± 0.034",
+ "sec": "29.347 ± 2.344",
+ "not_judged": 0,
+ "invalid_runs": 0
+}

@@ -1,0 +1,49 @@
+{
+ "case": "BND-01",
+ "rep": 2,
+ "sec": 31.9,
+ "exit": 0,
+ "cost_usd": 0.1117931,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14375,
+  "cache_read_input_tokens": 126171,
+  "output_tokens": 4166,
+  "output_tokens_details": {
+   "thinking_tokens": 633
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14375,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2880,
+    "cache_read_input_tokens": 38941,
+    "cache_creation_input_tokens": 2304,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2304
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 71ec4f30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:107 / 対応区分: 修正必須 / 内容: `list_notes` が `per_page` の上限を `PER_PAGE_MAX + 1`（=51）まで許している。仕様は 1〜50 で、範囲外は ValidationError にする。 / 成立条件: `per_page=51` で呼ぶ。 / 影響: 範囲外の入力が拒否されず、仕様違反になる。上流に別の検証はなく、既存のテストも防いでいない。 / 根拠: 実行して確認した。`list_notes(conn, user, per_page=51)` が例外にならず `per_page: 51` を返した。 / 提案: 条件を `1 <= per_page <= PER_PAGE_MAX` にする。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC10, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: テストが12件の正常系中心で、必須の異常系・境界値・競合の検証がない。次が欠けている。(a) 他の組織・他人の非公開メモが閲覧・一覧・検索・更新・削除で NotFound や除外になること、管理者が非公開メモを扱えないこと（K1）。(b) 更新の Conflict（古い version、読み出しと書き込みの間の割り込み）と、閲覧数の同時加算（K3）。(c) `before_write` で途中の失敗を起こしたときの作成・削除・移管のロールバックと、例外後に接続を使い続けられること（K4, AC1, AC5, AC10）。(d) 検索の `%`・`_`・`\\` と、SQL インジェクション文字列（K2）。(e) 入力の境界値（題名100・101文字、空白だけ、タグ5・6個、tags に文字列を渡す、per_page 0・50・51、page 0、不正な sort）。(f) 移管で組織が違う場合の Forbidden（K6）。 / 根拠: これらは受け入れ条件と重要なリスクの中心で、検証がなければ上記の仕様違反（重大1）も見逃される。設計書も、`hooks` による決定論的な再現を前提にしている。 / 提案: `service.hooks.before_write` で失敗や割り込みを差し込む決定論的なテストを、上の (a)〜(f) について追加する。\n- [重大3] 区分: テスト / 対象: AC6, AC7, AC8, AC9, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。api_key のマスクの形（末尾4文字だけ残す。8文字未満は全部伏せる。テストの鍵は 12 文字で、境界の 7・8 文字も未検証。監査ログの出力に生の鍵がないことも確認していない）。RateLimiter の枠の境界（ちょうど window 秒で新しい枠になる。実装は `>=`）と、`hook` を使った複数スレッドの同時呼び出し。共有リンクの期限の境界（`now == expires` は無効）、署名の改ざん、形の崩れ（改行を含む、数字以外、署名が64文字でない）。ログや例外に本文・署名・鍵が出ないこと。 / 根拠: 受け入れ条件に境界と同時実行が明記されている。いまの `test_limit` は 0 秒と 61 秒しか見ておらず、`test_tampered` は note_id の差し替え1通りだけ。 / 提案: 境界値（window ちょうど、期限ちょうど、鍵 7・8 文字）、スレッドと `hook` による同時のテスト、署名の改ざん・形の崩れ、`assertLogs` による機密情報の非出力を追加する。\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py:update_note, delete_note / 対応区分: 改善提案 / 内容: 認可（`_visible` と `_can_modify`）をトランザクションの外で判定している。判定の後に移管で owner が変わると、古い owner 情報のまま更新・削除が通りうる。ただし更新は version の条件で防がれ、削除は管理者または元の作成者にだけ起こりうる。 / 提案: トランザクションの中で行を読み直して認可を判定する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけを確かめていて不十分。境界値、tags の型、途中の失敗で何も残らないことが未検証。\n- AC2: 同じ組織の閲覧しか見ていないため不十分。他の組織・非公開・存在しないメモの NotFound と、閲覧数の同時加算が未検証。\n- AC3: 不十分。ページ分割の正常系と1語の検索だけで、per_page の境界（実装の欠陥を見逃している）、sort、`%`・`_`、タグの OR、非公開の除外が未検証。\n- AC4: 不十分。作成者による更新・削除だけで、Conflict、Forbidden、NotFound、管理者の扱い、更新時の検証、削除の失敗が未検証。\n- AC5: 不十分。成功と、非管理者が拒否される場合だけを確かめている。組織をまたぐ場合の拒否と、途中で失敗したときの巻き戻しが未検証。\n- AC6: 不十分。`action` と `actor` しか見ておらず、`actor_key` を一度も確認していない。\n- AC7: 不十分。時間の窓の基本動作だけで、境界と同時実行が未検証。\n- AC8: 不十分。往復と改ざん1通りだけで、期限の境界、期限切れ、形の崩れが未検証。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候はなかった。`git diff` は未コミットのため比較対象がなく、検証条件の弱体化は確認できなかった。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest で十分）。ただし上の決定論的なユニットテストは必須。\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいの検証がない。\n- K2: 検索の LIKE エスケープとインジェクションの検証がない。コード上は ESCAPE とプレースホルダーを使っており、正しい。\n- K3: 更新と閲覧数の同時実行の検証がない。\n- K4: 途中の失敗によるロールバックの検証がない。\n- K5: 機密情報の露出の検証がない。\n- K6: 組織をまたぐ移管と、一部だけ移る場合の検証がない。\n- K7: 監査ログの api_key のマスクの検証がない。\n- K8: 期限の境界と、形の崩れたリンクの検証がない。\n### 確認したこと\n- 仕様・設計と、`notes/*.py` の全ファイルおよび `tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件がすべて通った（弱いテストなので合格は欠陥がない証拠にならない）。\n- `list_notes(per_page=51)` を実行し、拒否されず 51 が返ることを確認した。\n- コードから確認し、問題なしと判断したもの:\n  - SQL はすべてプレースホルダーで、LIKE は題名・本文の両方に `ESCAPE '\\'` が効いている。\n  - 楽観的ロックは UPDATE の `version` 条件と rowcount で判定している。\n  - `transaction` は ROLLBACK して例外を伝える。\n  - RateLimiter は Lock の中で判定している。\n  - 共有リンクは `fullmatch`、`compare_digest`、期限 `>=` で処理している。\n  - api_key のマスクは、仕様どおりの動作をコードから確認した。",
+ "files_changed": [],
+ "valid": true
+}

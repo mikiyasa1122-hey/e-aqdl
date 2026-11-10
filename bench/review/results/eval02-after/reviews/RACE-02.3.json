@@ -1,0 +1,49 @@
+{
+ "case": "RACE-02",
+ "rep": 3,
+ "sec": 31.6,
+ "exit": 0,
+ "cost_usd": 0.13342120000000002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20527,
+  "cache_read_input_tokens": 116272,
+  "output_tokens": 3967,
+  "output_tokens_details": {
+   "thinking_tokens": 715
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20527,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2654,
+    "cache_read_input_tokens": 37316,
+    "cache_creation_input_tokens": 3443,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3443
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d865c6b5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3 / 対応区分: 修正必須 / 内容: `get_note` が閲覧数を数え漏らす。閲覧数は `BEGIN IMMEDIATE` の外で読み取り、`UPDATE notes SET views = ?` に Python 側で計算した `views + 1` を渡して書き込んでいる。 / 成立条件: 別々の接続・スレッドが同じメモを同時に閲覧する。両方が同じ `views` を読み、後から書いた側が先の加算を上書きする。 / 影響: R2 の「同時に閲覧されても数え漏れがない」に違反する。閲覧数が実際より少なくなる。 / 確認した保証: トランザクションは読み取りの後に開始している。`UPDATE` の条件は `id` だけで、`views` や `version` の条件も SQL 側の加算もない。上流・DB 側にこれを防ぐ仕組みはない。 / 根拠: notes/service.py の `get_note`（`views = row[\"views\"]` → `hooks.before_write(\"view\")` → `UPDATE ... SET views = ?`）。 / 提案: トランザクション内で `UPDATE notes SET views = views + 1 WHERE id = ?` とし、同じトランザクション内で再取得して `_visible` を確認する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 仕様の規則を確かめるテストがほとんどない。tests/test_notes.py は12件の正常系・簡単な異常系だけで、受け入れ条件の多くは確かめていない。 / 根拠: 仕様の AC は境界値・異常系・並行・ロールバックを明示している。それらがない。 / 提案: 「受け入れ条件ごとの検証の妥当性」に列挙した不足分を、決定論的なテストとして追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC7, K3 / 対応区分: 証拠不足 / 内容: 並行の検証がない。設計が用意した差し込み口 `hooks.before_write` と `RateLimiter.hook` を使うテストが1件もない。 / 根拠: R2（閲覧数）・R4（Conflict）・R7（スレッド同時）が必須要求で、重大1もこの欠如のため検出されていない。 / 提案: 2接続のファイルDBで `before_write(\"view\")` に別接続の閲覧を割り込ませ、閲覧数が2になることを確認する。`update_note` も同様に、割り込みで Conflict になることを確認する。`RateLimiter.hook` 内で別スレッドを割り込ませ、上限を超えないことを確認する。\n- [重大4] 区分: テスト / 対象: AC1, AC5, AC10, K4, K6 / 対応区分: 証拠不足 / 内容: トランザクションのロールバックを確かめるテストがない。 / 根拠: R1 の「何も残らない」、R5 の「全部か何もしないか」、R10 の「例外後も接続が使える」は必須。 / 提案: `before_write(\"create:tags\")`・`transfer:<id>`・`delete:note` で例外を送出し、テーブルの件数が元のままで、`conn.in_transaction` が False であり、次の操作が成功することを確認する。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: 共有リンクの先頭ゼロ（例: `007.…`）は `int` 化されて署名が一致する。同じメモを指す別表現のリンクが有効になる。 / 提案: `note_id` と期限の10進表記を正規化して比較する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系1件と空の題名の拒否1件だけで不十分。本文・題名・タグの境界値、tags が文字列の場合、重複タグ、途中失敗時の巻き戻しが未検証。\n- AC2: 同一組織の閲覧が1件あるだけで不十分。他組織・他人の非公開・存在しないメモが NotFound になること、閲覧数の加算、同時閲覧が未検証。実装にも欠陥がある（重大1）。\n- AC3: 一覧と検索の正常系だけで不十分。範囲外の入力、sort、`%` `_` `\\` を含む検索語、タグの OR 絞り込み、他人の非公開メモの除外が未検証。LIKE は ESCAPE とプレースホルダーを使っており、`_like_escape` の実装も妥当。ただしテストで確かめられていない。\n- AC4: 所有者による更新と削除だけで不十分。Conflict、Forbidden（管理者・他人）、非公開メモの NotFound、競合時の更新、削除の失敗伝播が未検証。\n- AC5: 管理者でない場合の Forbidden と正常系の件数だけで不十分。他組織への移管と途中失敗の巻き戻しが未検証。\n- AC6: 監査ログの出力が1件あるだけで不十分。api_key の伏せ字（末尾4文字、8文字未満）を確認するアサーションがない。\n- AC7: 枠内の上限と枠切れ後のリセットだけで不十分。ちょうど window 秒の境界とスレッド同時が未検証。\n- AC8: 正常系と改ざんだけで不十分。期限ちょうど・期限切れ・形の崩れたリンクが未検証。\n- AC9: 検証なし。ログや例外に本文・署名・api_key が出ないことを確認するテストがない。\n- AC10: 検証なし。例外後の接続の再利用を確認するテストがない。\n- エンジンが検出したテストの兆候: なし。history では検証条件の弱体化は見つからなかった（bind の追加のみ）。\n- 認可の経路（`_visible`・`_can_modify`）は実装上は妥当。ただしテストはなく、K1 は未検証。\n\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、並行性や失敗は unittest と差し込み口で再現できる。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションのテストがない。`%` `_` と `'` を含む検索語が必要。\n- K3: 並行テストがなく、実際に閲覧数の欠陥がある。\n- K4: ロールバックのテストがない。\n- K5, K7: api_key の伏せ字とログのテストがない。\n- K6: 他組織への移管と一部だけ移る場合のテストがない。\n- K8: 期限の境界と形の崩れたリンクのテストがない。\n\n### 確認したこと\n- spec.md と design.md を精読し、notes/*.py と tests/test_notes.py をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` で 12 件が OK（0.003 秒）。\n- `aqdlc history --since 0` で検証条件の弱体化がないことを確認した。\n- 閲覧数の欠陥はコードの経路から立証した。再現コードは実行していない。",
+ "files_changed": [],
+ "valid": true
+}

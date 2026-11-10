@@ -1,0 +1,49 @@
+{
+ "case": "CLN-02",
+ "rep": 2,
+ "sec": 22.8,
+ "exit": 0,
+ "cost_usd": 0.11628659999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 18638,
+  "cache_read_input_tokens": 163846,
+  "output_tokens": 2533,
+  "output_tokens_details": {
+   "thinking_tokens": 524
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18638,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1322,
+    "cache_read_input_tokens": 41109,
+    "cache_creation_input_tokens": 3959,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3959
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8d27e925\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id に先頭ゼロがあっても、整数に変換してから署名を検証する。そのため「01.期限.署名」のように別の表記で同じ note_id を指すリンクも有効になる。偽造はできないので安全上の問題はない。 / 提案: 変換後の文字列とリンク内の文字列が一致するかを確かめる。または仕様に許容すると明記する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名・本文・タグの境界値と、タグ挿入中の途中失敗（hook）での全件巻き戻しを確かめており妥当。\n- AC2: V2 は他組織・他人の非公開・存在しないメモがすべて NotFound になることを確かめている。確認後に非公開へ変更された場合、hook で再現した割り込み閲覧、別接続の4スレッドによる閲覧数40件の確認も含む。妥当。\n- AC3: V3 は page・per_page・sort の範囲外、`%` と `_`、タグの OR 絞り込み、不正なタグを確かめている。SQL は ESCAPE とプレースホルダーを使っており、f-string に入るのは固定のホワイトリストと `?` だけ。妥当。\n- AC4: V4 は Forbidden/NotFound の区別、古い version、読み出しから書き込みの間の割り込み（hook）、トランザクション内での認可の再確認、更新時の検証、削除の途中失敗が呼び出し側に伝わることを確かめている。妥当。\n- AC5: V5 は管理者以外・他組織への移管が Forbidden になること、途中失敗で元のままになることを確かめている。妥当。\n- AC6: V6 は 8文字未満の鍵がすべて伏せられ、それ以上は末尾4文字だけ残ることを確かめている。妥当。\n- AC7: V7 は枠の境界（ちょうど window 秒で新しい枠）、拒否された呼び出しが枠を延ばさないこと、Barrier による20スレッド同時で成功が5回になること、判定の途中の割り込み（hook と Event）を確かめている。sleep には依存していない。妥当。\n- AC8: V8 は期限の境界、改ざん、形の崩れたリンクを確かめており妥当。\n- AC9: V9 はログ・例外メッセージに本文・署名・api_key が出ないことを確かめている。コードの確認でも、ログと例外には ID・件数・題名の規則だけが出ている。妥当。\n- AC10: V10 は例外の後に接続が使い続けられることを確かめており妥当。\n- エンジンが検出したテストの兆候: なし。skip・弱いアサーションは確認できなかった。履歴は bind のみで、検証条件の弱体化はない。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、実際の SQLite と別スレッド・別接続を使う単体・結合テストがリスクに見合っている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（`PYTHONDONTWRITEBYTECODE=1`）: 63件すべて OK。\n- spec.md と design.md を、`notes/` の db・service・ratelimit・share・errors のソース全体と突き合わせた。\n- `history --since 0` を確認した。\n- 並行系のテスト（AC2・AC4・AC7）の中身を読んだ。",
+ "files_changed": [],
+ "valid": true
+}

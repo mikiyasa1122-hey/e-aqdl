@@ -1,0 +1,49 @@
+{
+ "case": "SQL-01",
+ "rep": 1,
+ "sec": 36.7,
+ "exit": 0,
+ "cost_usd": 0.1388733,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19833,
+  "cache_read_input_tokens": 115453,
+  "output_tokens": 4798,
+  "output_tokens_details": {
+   "thinking_tokens": 247
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19833,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3658,
+    "cache_read_input_tokens": 37642,
+    "cache_creation_input_tokens": 2192,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2192
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 676349a2\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2（設計の「SQL はプレースホルダー。LIKE は ESCAPE」） / 対応区分: 修正必須 / 内容: `search_notes` が検索語 q を f 文字列で SQL に直接埋め込んでいる。LIKE の ESCAPE もない。`_like_escape` は定義だけあって使われていない。 / 成立条件: 認証済みの利用者が、q に `'` を含む文字列を渡す（長さ1〜100文字の検査は通る）。 / 影響: SQL インジェクションになる。実行して確認した。q=`zzz%' OR 1=1 OR title LIKE '` を渡すと、全件がヒットした。この条件式は org_id・private の絞り込みの後ろに AND で付くので、同じ組織の非公開メモまでは見えない可能性が高い。ただし条件式を壊されることは変わらず、`'` を含む q は構文エラーにもなる。q が `%` のときは全メモに一致した（仕様は普通の文字として部分一致）。q が `_` の場合も同様。 / 確認した保証: 上流に q をエスケープする処理はない。長さの検査だけがある。既存のテストも防げていない。 / 根拠: notes/service.py:141-142。再現は `search_notes(c,u,\"zzz%' OR 1=1 OR title LIKE '\")` で、title が x%y と abc の2件が返った。 / 提案: `title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'` とし、値には `'%' + _like_escape(q) + '%'` を渡す。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3（タグの規則） / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。Python の `$` は末尾の改行の手前にも一致するので、`\"ab\\n\"` が通る。実行して確認した（create_note が受理した）。 / 成立条件: 末尾に `\\n` を付けたタグ。20文字のタグに `\\n` を付けた場合は21文字でも通る。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に違反するデータが保存される。検索のタグ絞り込みにも同じ検査が使われている。 / 確認した保証: 他の層に検査はない。 / 根拠: notes/service.py:14, 64, 149。 / 提案: `fullmatch` を使うか、`\\Z` で終える。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3, K1 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、可視性と権限の判定を transaction の外で読んだ行で行っている。トランザクションに入った後は再判定しない。`get_note` は中で再判定しているので、扱いが不揃いになっている。 / 成立条件: 判定の後、書き込みの前に、別の接続がメモを非公開にしたり、owner を変えたり（transfer）、削除したりする。 / 影響: 権限を失った利用者の更新・削除が通る。`delete_note` には version の条件がないので、判定後に transfer で所有者が変わっていても、前の判定のまま削除される。 / 確認した保証: `update_note` は UPDATE の WHERE に version があり、変更があれば Conflict になる。ただし transfer は version を上げるので、update 側はたいてい Conflict になる。`delete_note` は防げていない。 / 根拠: notes/service.py:157-190。 / 提案: transaction の中で `_row` を再取得し、`_visible` と `_can_modify` を判定し直す。`update_note` の version 比較もその中で行う。\n- [重大4] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 90行・12件のテストは正常系が中心で、受け入れ条件の大半を確かめていない。足りないものは次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること（AC2, K1）。(b) 閲覧数の同時加算（AC2, K3）。(c) 検索の `%`・`_`・`'` と、タグの OR 絞り込み、ページ・ソートの範囲外（AC3, K2）。このテストがあれば重大1が検出できた。(d) 更新の Conflict（古い version、読み書きの間の割り込み）と、更新の入力検証、Forbidden・管理者の扱い（AC4）。(e) 移管の他組織拒否と、途中の失敗での全部巻き戻し（AC5, K6）。(f) 監査ログの api_key の伏せ字（8文字未満・8文字以上）（AC6, K7）。(g) RateLimiter の枠の境界（ちょうど window 秒）と、スレッド並行（AC7）。(h) 共有リンクの期限ちょうど・形の崩れ・改ざんの署名・数字以外（AC8, K8）。(i) ログに本文・署名・api_key が出ないこと（AC9）。(j) 例外の後に接続が使えること、作成の途中失敗で何も残らないこと（AC1, AC10, K4）。 / 根拠: tests/test_notes.py の全体。設計が用意した hooks（before_write・RateLimiter.hook）を使うテストが1つもない。 / 提案: 上記(a)〜(j)をテストにする。並行・途中失敗は hooks で決定論的に再現する（sleep に頼らない）。\n- [重大5] 区分: 実装 / 対象: R9, AC9, K5 / 対応区分: 修正必須 / 内容: `ValidationError` のメッセージに、利用者の入力である tag をそのまま出している（`f\"不正な tag: {t!r}\"`）。 / 成立条件: 利用者が、秘密情報を tag として渡した場合。 / 影響: 例外メッセージに入力値が出る。仕様が禁じているのは本文・署名・api_key の露出で、タグはそのどれでもない。そのため直接の違反とまでは言えない。ただし API キーなどの貼り付けが例外・ログに残りうる。この点は未確認で、軽微の扱いが妥当かもしれない。 / 根拠: notes/service.py:65, 150。 / 提案: 値を出さず、規則だけを書く。\n\n注: [重大5] は、断定できる欠陥と言い切れない。統括が判断し、必要なら軽微に落としてよい。ただしその場合は件数を合わせて書き直すこと。\n\n- [軽微1] 区分: 実装 / 対象: R2, R4 / 対応区分: 改善提案 / 内容: 設計のとおり `hooks.before_write(\"view\")` を呼んでいる。さらに `transfer_notes` は updated_at を更新しない。仕様には書かれていないので、挙動を決めてよい。 / 提案: 方針をコメントか設計に残す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。タグ・文字数の境界、トランザクションの途中失敗、空白だけの題名がない。不十分。\n- AC2: 正常系の get だけ。NotFound の3種類（他の組織・他人の非公開・存在しない）と、閲覧数の同時加算がない。不十分。\n- AC3: 部分一致の1件だけ。`%`・`_`・`'`、OR のタグ絞り込み、範囲外の page・per_page・sort がない。不十分。実際に欠陥（重大1）を見逃している。\n- AC4: 所有者の更新と削除の正常系だけ。Conflict・Forbidden・管理者・入力検証・削除の失敗がない。不十分。\n- AC5: 正常系と管理者でない場合の拒否だけ。他の組織の拒否と、途中失敗の巻き戻しがない。不十分。\n- AC6: 伏せ字の検証がない（action と actor を見るだけ）。不十分。\n- AC7: 枠の超過と再開だけ。ちょうど window 秒の境界とスレッド並行がない。不十分。\n- AC8: 往復と、note_id の改ざんだけ。期限ちょうど・期限切れ・形の崩れ・署名の改ざんがない。不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。\n- 改ざん・弱体化: `history` と `git diff` は確認していない。tests/ と notes/ は git の追跡外のため、差分で弱体化を見る材料がない。\n\n### E2E の要否\n- 不要。ライブラリで、外部の画面・API がない。ただし、SQLite の別々の接続・スレッドを使う並行テストと、途中失敗のテストは必要（重大4）。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションを確かめるテストがなく、実装にも欠陥がある（重大1）。\n- K3: 閲覧数・更新・RateLimiter の並行を確かめるテストがない。\n- K4・K6: 途中失敗の巻き戻しを確かめるテストがない。\n- K5・K7: 機密の出力を確かめるテストがない。\n- K8: 期限切れ・形の崩れのリンクを確かめるテストがない。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った（OK）。\n- インメモリ DB で、検索の `%`・`'`・OR 注入とタグ末尾の改行を再現した。q が `%` のとき全件ヒットした。注入した q でも全件ヒットした。`\"ab\\n\"` のタグは受理された。\n- `$AQ trace` と `$AQ history` は実行していない。gate も実行していない。\n- コード・テストは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,23 @@
+{
+ "case": "SQL-03",
+ "rep": 1,
+ "judge_cost_usd": 0.060832300000000006,
+ "judge_raw": "## 判定\n\n**重大1** は、埋め込まれた欠陥そのものを指摘しています。\n\n- 箇所は `list_notes` の ORDER BY です。コードの `SORT_COLUMNS.get(sort, sort)` は、許可していない sort の値をそのまま ORDER BY に入れます。\n- 原因は正解データと一致しています。sort を許可した値に限っていません。\n- 影響も一致しています。ORDER BY に任意の式を入れられ、CASE 式やサブクエリで値を推測できると述べています。\n- 提案も妥当です。`SORT_COLUMNS` にない sort を ValidationError にします。\n\n**重大2** は、テストの不足だけを指摘しています。コードの欠陥の主張ではないため、test_gap です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の ORDER BY に未検証の sort を `SORT_COLUMNS.get(sort, sort)` でそのまま入れている点を、原因・影響（任意式・値の推測）とも正しく指摘している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"異常系・境界・並行・途中失敗のテスト不足だけを指摘しており、コードの欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、埋め込まれた ORDER BY への SQL 差し込みを、箇所・原因・影響の全てで捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の ORDER BY に未検証の sort を `SORT_COLUMNS.get(sort, sort)` でそのまま入れている点を、原因・影響（任意式・値の推測）とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "異常系・境界・並行・途中失敗のテスト不足だけを指摘しており、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、埋め込まれた ORDER BY への SQL 差し込みを、箇所・原因・影響の全てで捉えている。"
+ }
+}

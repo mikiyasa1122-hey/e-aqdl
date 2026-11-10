@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-02",
+ "rep": 3,
+ "sec": 31.1,
+ "exit": 0,
+ "cost_usd": 0.1314718,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19990,
+  "cache_read_input_tokens": 117258,
+  "output_tokens": 3977,
+  "output_tokens_details": {
+   "thinking_tokens": 738
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19990,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2551,
+    "cache_read_input_tokens": 38538,
+    "cache_creation_input_tokens": 1684,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1684
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e3e2b821\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, R3, AC3, notes/service.py:158 / 対応区分: 修正必須 / 内容: TAG_RE が `^[a-z0-9-]{1,20}$` で `.match` を使っている。`$` は末尾の改行の手前にも一致するため、末尾に改行のあるタグ（`\"ab\\n\"`）が通る。create_note・update_note・search_notes のタグ検査（208行・294行）すべてに影響する。 / 成立条件: tags に末尾が `\\n` の文字列を渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という仕様に反するタグが保存される。実行して確認した。`create_note(..., ['ab\\n'])` が成功し、`get_note` が `['ab\\n']` を返した。 / 根拠: notes/service.py:158, 208, 294。他の検証では防げない。share.py は同じ問題を避けて fullmatch を使っているのに、ここには適用されていない。 / 提案: `TAG_RE.fullmatch(t)` を使うか、`\\Z` で終わらせる。\n- [重大2] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4 / 対応区分: 証拠不足 / 内容: 途中で失敗したときの巻き戻しを確かめるテストが1件もない。`hooks.before_write` は create:tags、delete:note、transfer:i に用意されているのに、テストで使われていない。また、作成の境界値（題名100文字と101文字、タグ5個と6個、本文10000文字と10001文字、タグの文字種）、Conflict、Forbidden、非公開メモの NotFound、例外の後の接続の再利用も確かめられていない。 / 根拠: 全体のテストは12件で正常系が中心。仕様が R1・R4・R5・R10 で「何も残さない」ことを求めているため、これは必須の検証。 / 提案: hook で例外を起こし、メモ・タグ・監査ログが残らないことと、その後の接続でメモの作成ができることを確かめる。上記の境界値と拒否の経路も加える。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC7, K1, K3 / 対応区分: 証拠不足 / 内容: 閲覧数の同時加算、更新の競合（`hooks.before_write(\"update\")` に別の更新を差し込む）、RateLimiter の複数スレッドからの同時呼び出しを確かめるテストがない。他の組織・他人の非公開メモを隠せているかのテストもない（K1）。RateLimiter は枠の境界ちょうど（60秒）も確かめられていない。 / 根拠: 仕様が同時実行と境界を明示的に要求している。設計が、テストのために hook を用意すると書いている。 / 提案: 別の接続とスレッドで決定的に再現するテストを書き、ロックや version 条件を外したら失敗することを確認する。\n- [重大4] 区分: テスト / 対象: AC3, K2, AC6, AC8, K8, AC9, K5 / 対応区分: 証拠不足 / 内容: 次の項目を確かめるテストがない。(a) `%`・`_`・`\\` を含む検索語が普通の文字として扱われること、(b) タグの OR 絞り込み、(c) page・per_page・sort の範囲外の拒否と境界値、(d) 期限の境界（`now == expires`）、形の崩れたリンク（改行や非数字）、改ざんした署名、(e) api_key の伏せ字（8文字未満・ちょうど8文字）、(f) ログや例外に本文・署名・鍵が出ないこと。 / 根拠: 仕様が AC3・AC6・AC8・AC9 で境界値と異常系を要求している。現状は test_export_audit が action と actor しか確かめておらず、伏せ字そのものを確かめていない。 / 提案: 各境界値と異常系を表にしたテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R3, notes/service.py:264-274 / 対応区分: 改善提案 / 内容: `page=10**30` を渡すと、ValidationError ではなく OverflowError が出る（実行して確認した）。 / 提案: page に上限を設けるか、OFFSET の計算結果を検査して ValidationError にする。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで不十分。境界値・タグの検査・巻き戻しがない。重大1と重大2。\n- AC2: 閲覧数の同時加算・非公開・他組織のテストがなく不十分。実装は BEGIN IMMEDIATE と `views = views + 1` で正しく見えるが、証拠がない。重大3。\n- AC3: test_list_first_page と test_search だけ。ワイルドカード・OR・範囲外のテストがない。実装は ESCAPE とプレースホルダーを使っており妥当に見える。ORDER BY は固定の辞書を引いている。重大4。\n- AC4: test_update_by_owner と test_delete_by_owner だけ。Conflict・Forbidden・巻き戻しがない。実装は version 条件の UPDATE で妥当に見える。重大2と重大3。\n- AC5: test_transfer と test_transfer_requires_admin だけ。他組織の拒否と失敗時にそのままであることの検証がない。重大2。\n- AC6: 伏せ字を確かめていない。重大4。\n- AC7: test_limit は枠を超えることと61秒後だけ。ちょうど60秒と同時呼び出しがない。重大3。\n- AC8: test_roundtrip と test_tampered だけ。期限の境界と形の崩れがない。重大4。\n- AC9: 検証なし。重大4。\n- AC10: 検証なし。重大2。\n- エンジンが検出したテストの兆候はなし。skip や .only もなかった。\n### E2E の要否\n- 不要。ライブラリで HTTP や UI がないため。同時実行は、別の接続とスレッドを使う単体テストで確かめられる。\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの検証がない。\n- K3: 同時実行の検証がない。\n- K4: 途中失敗の検証がない。\n- K5・K7: 検証がない。\n- K8: 形の崩れたリンクの検証がない。\n- なお、transfer_notes は from_user と to_user の dict を信用する（仕様の対象外）。\n### 確認したこと\n- spec.md と design.md、notes/ の全ソースを読み、設計との整合を確かめた。SQL はすべてプレースホルダーを使い、LIKE の ESCAPE も実装されている。\n- `python3 -m unittest discover -s .` を実行し、12件が通った。\n- python3 -B で、タグ `\"ab\\n\"` が受理されること、`page=10**30` で OverflowError になることを実行して確認した。\n- git status を確認した。ソースは未追跡のため、テストの改ざんを示す差分はない。",
+ "files_changed": [],
+ "valid": true
+}

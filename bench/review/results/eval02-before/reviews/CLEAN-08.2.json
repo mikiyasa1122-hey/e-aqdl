@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-08",
+ "rep": 2,
+ "sec": 44.5,
+ "exit": 0,
+ "cost_usd": 0.15764039999999999,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22636,
+  "cache_read_input_tokens": 114704,
+  "output_tokens": 5561,
+  "output_tokens_details": {
+   "thinking_tokens": 1337
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22636,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3854,
+    "cache_read_input_tokens": 36898,
+    "cache_creation_input_tokens": 5739,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5739
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8cfb3494\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC4, AC5, K1, K6 / 対応区分: 証拠不足 / 内容: 認可・組織の分離を確かめる検証がない。tests/test_notes.py の認可系テストは test_transfer_requires_admin（member の移管拒否）だけである。他の組織の利用者や他人の非公開メモが NotFound になること、一覧・検索から除外されることを確かめるテストがない。更新・削除の Forbidden（非作成者の member）、管理者の更新・削除、非公開メモを管理者が扱うと NotFound になること、移管の組織またぎ（元・先・管理者のどれかが別組織）の Forbidden、移管が全部か何もしないかのどちらかになることも確かめていない。setUp で作る利用者はすべて org 10 で、別組織の利用者が存在しない。/ 根拠: K1（情報漏えい）と K6（組織の外へメモが渡る）は重要なリスクで、_visible と _can_modify の条件を外してもテストは通る。 / 提案: 別組織の利用者と非公開メモを使った拒否のテストを追加する。get_note・list_notes・search_notes・update_note・delete_note・transfer_notes が対象。transfer_notes では service.hooks.before_write で途中失敗を起こし、元の所有者のままであることも確かめる。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC4, AC7, AC10, K3, K4 / 対応区分: 証拠不足 / 内容: 並行実行・ロールバック・楽観的ロックの検証がない。設計書は service.hooks.before_write と RateLimiter.hook を並行・途中失敗の再現用に用意しているが、テストは1か所も使っていない。次のテストがすべてない。version 不一致の Conflict、読み出しと書き込みの間の割り込みによる Conflict、同時の閲覧で閲覧数が数え漏れしないこと、create_note・delete_note の途中失敗でメモ・タグ・監査が何も残らないこと、例外の後に同じ接続が使えること、RateLimiter の複数スレッドでの上限と枠の境界（ちょうど window 秒で新しい枠になる）。test_limit は t=0 と t=61 だけで、境界の t=60 を確かめていない。/ 根拠: 仕様が AC7 に「枠の境界・同時の呼び出しを含む」と明記している。K3・K4 は重要なリスクである。実装を読む限りロック・version 条件・ROLLBACK は妥当に見えるが、証拠がない。並行処理では sleep に頼らず、hook で決定論的に再現する。 / 提案: hook を使い、(a) update の割り込みで Conflict、(b) get_note を別接続・別スレッドで並行実行して views が件数分増える、(c) create の tags 挿入時に例外を出して notes・note_tags・audit が空、(d) RateLimiter.hook 内で別スレッドの hit を走らせても上限を超えない、(e) clock を使った t=window ちょうどの境界、(f) 例外の後の接続再利用、を追加する。\n- [重大3] 区分: テスト / 対象: AC1, AC3, AC8, K2, K8 / 対応区分: 証拠不足 / 内容: 入力検証・SQL インジェクション・共有リンクの境界の検証がない。次のテストがない。題名・本文・タグの境界値（100文字・101文字、空白だけ、タグ5個・6個、文字種、文字列のタグ）、page・per_page・sort の範囲外、検索語の % と _ を普通の文字として扱うこと、`'` や `--` を含む検索語、タグ OR 検索、期限ちょうど（now == expires）の Forbidden、期限切れ、署名の改ざん、形の崩れたリンク（改行付き・数字以外・署名の長さ違い・非文字列）。test_tampered は note_id を書き換える1件だけである。/ 根拠: K2（SQL インジェクション）・K8（不正リンクを通す）は重要なリスクで、仕様が境界を列挙している。実装は LINK_RE・ESCAPE・プレースホルダーで対策しているように見えるが、外してもテストは落ちない。 / 提案: 上記の境界値・悪意ある入力のテストを追加する。リンクの期限は now を渡して now==expires と now==expires-1 を確かめる。\n- [重大4] 区分: テスト / 対象: AC6, AC9, K5, K7 / 対応区分: 証拠不足 / 内容: 機密情報の秘匿を確かめるテストがない。test_export_audit は action と actor だけを確認し、actor_key を確認していない。api_key の末尾4文字以外が * になること、8文字未満（境界の7文字・8文字）の鍵がすべて伏せられることを確かめるテストがない。ログ（assertLogs）・例外メッセージ・出力に、本文・共有リンクの署名・api_key が含まれないことも確かめていない。非管理者の export_audit が Forbidden になることも未確認である。/ 根拠: K5・K7 は重要なリスクで、AC6・AC9 の中身そのものである。 / 提案: 7文字・8文字・長い鍵で actor_key を厳密に比較する。logging を捕捉して、本文・署名・鍵を含まないことを確かめる。例外の str にも含まれないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: share.verify_link は先頭ゼロ付きの note_id・期限（例 \"07.…\"）も受理する。署名は int 化した値で計算するため、同じ署名で表記違いのリンクが複数有効になる。仕様の「10進の数字だけ」は満たしており、権限は広がらない。 / 提案: 先頭ゼロを拒否するか、文字列を正規形と照合する。\n- [軽微2] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: delete_note は認可の確認をトランザクションの外で行い、DELETE の rowcount も見ない。同時に削除されたメモでも成功として監査ログを残す。情報漏えいや二重削除による不整合はなく、害は小さい。 / 提案: 確認と削除を同じ BEGIN IMMEDIATE の中で行うか、rowcount が 0 なら NotFound にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否しか確かめておらず不十分。境界値・タグ・本文の検証、途中失敗で何も残らないことが未確認（重大3、重大2）。\n- AC2: V2 は作成者本人の閲覧だけで不十分。他組織・非公開・存在しないメモの NotFound と、同時の閲覧数が未確認（重大1、重大2）。\n- AC3: V3 は1ページ目と単純な検索だけで不十分。範囲外の入力、% と _、OR タグ、他人の非公開メモの除外が未確認（重大3、重大1）。\n- AC4: V4 は作成者の更新・削除の正常系だけで不十分。Conflict・Forbidden・非公開の NotFound・更新時の検証・削除の失敗時が未確認（重大1、重大2）。\n- AC5: V5 は件数の確認と member の拒否だけで不十分。組織またぎと途中失敗の巻き戻しが未確認（重大1）。\n- AC6: V6 は actor_key を確認しておらず空洞化している（重大4）。\n- AC7: V7 は枠の上限と61秒後の再開だけで不十分。ちょうど window 秒の境界と複数スレッドでの上限が未確認（重大2）。\n- AC8: V8 は往復と1種類の改ざんだけで不十分。期限ちょうど・期限切れ・形の崩れが未確認（重大3）。\n- AC9: V9 に対応するテストがなく未検証（重大4）。\n- AC10: V10 に対応するテストがなく未検証（重大2）。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしのテストファイルは見つからなかった）。ただし gate は全ACとKに同じ unit を結び付けているだけで、全12テストが正常系中心である。そのため「合格」は検証の十分さを示さない。\n\n### E2E の要否\n- 不要（HTTP・UI のないライブラリで、unittest と SQLite の別接続・スレッドで足りる）。ただし並行・途中失敗は hook を使った結合テストで必須。\n\n### 不足しているリスク\n- K1・K6: 他組織・他人の非公開メモの漏えいと、移管で組織の外にメモが渡ること（検証なし）\n- K3・K4: 同時実行・途中失敗の不整合（検証なし）\n- K2・K8: SQL インジェクションと不正な共有リンク（検証なし）\n- K5・K7: 機密情報の露出と api_key の漏えい（検証なし）\n- 実装の読み取りでは、明確な仕様違反は見つからなかった（上記軽微2件のみ）。\n\n### 確認したこと\n- spec.md と design.md を通読した。\n- notes/db.py、service.py、ratelimit.py、share.py、errors.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った。\n- `aqdlc.py history --since 0` を確認した。検証条件を弱めた履歴は見当たらず、bind は新規の紐付けだけだった。\n- `aqdlc.py trace` を確認した。全行が passed_but_unchallenged で、検証はすべて同じ unit に紐付いていた。\n- コードの変更・gate の実行・依存関係のインストールはしていない。",
+ "files_changed": [],
+ "valid": true
+}

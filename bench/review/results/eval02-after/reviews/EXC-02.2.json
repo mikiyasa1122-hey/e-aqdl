@@ -1,0 +1,49 @@
+{
+ "case": "EXC-02",
+ "rep": 2,
+ "sec": 34.5,
+ "exit": 0,
+ "cost_usd": 0.1129513,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13953,
+  "cache_read_input_tokens": 123833,
+  "output_tokens": 4474,
+  "output_tokens_details": {
+   "thinking_tokens": 537
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13953,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3112,
+    "cache_read_input_tokens": 38204,
+    "cache_creation_input_tokens": 2625,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2625
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 763c4b09\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4, R10 / 対応区分: 修正必須 / 内容: `delete_note` が例外を握りつぶす。仕様は「失敗したら例外を呼び出し側に伝える（握りつぶさない）」。 / 成立条件: 削除の途中（`DELETE` や監査ログの挿入）で DB エラーやロック待ちタイムアウトが起きたとき。 / 影響: 削除は失敗してロールバックされるのに、呼び出し側には成功（None）が返る。利用者は削除されたと誤認する。 / 確認した保証: 上流や呼び出し元にこれを防ぐ処理はない。 / 根拠: `notes/service.py:193-194` が `except Exception` で `log.warning` を出すだけで再送出しない。`hooks.before_write(\"delete:note\")` で RuntimeError を発生させて再現した。`delete_note` は None を返し、メモは残っていた。 / 提案: `except` 節を削除するか、`raise` で再送出する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` と `match` を使っているため、末尾に改行を含むタグ（`\"abc\\n\"`）が通る。 / 成立条件: tags に `\"abc\\n\"` を渡す（作成・更新・検索のすべて）。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」の規則に違反するデータが保存される。 / 確認した保証: 検査は `service.py:14` の TAG_RE だけで、他の層に検査はない。 / 根拠: `create_note(c, u, 't', 'b', ['abc\\n'])` が成功し、note_id 1 が返った。`share.py` は同じ問題を `fullmatch` で防いでいるので、その流儀と不整合。 / 提案: `TAG_RE.fullmatch` を使うか、パターンの末尾を `\\Z` にする。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, K1, K2, K3, K4, K6, K7 / 対応区分: 証拠不足 / 内容: テストは正常系が中心の12件だけで、仕様の受け入れ条件の大半を確かめていない。次の検証がない。(a) 他組織・他人の非公開メモの NotFound、Forbidden、管理者でも非公開メモは NotFound。(b) version 不一致と、読み出しから書き込みの間の更新による Conflict。(c) 閲覧数の同時加算。(d) 作成時のタグ挿入失敗でのロールバックと、移管の途中失敗でのロールバック。(e) 入力の境界値（題名100/101文字、本文10000文字、タグ5/6個、タグの形式）、page・per_page・sort の範囲外。(f) LIKE の `%`・`_`・`\\` と SQL インジェクション文字列、タグの OR 絞り込み。(g) 移管での組織またぎの拒否。(h) api_key のマスク（8文字未満・8文字・長い鍵）。 / 根拠: 上記はどれも AC・リスク K1〜K7 の中核で、テストがなければ回帰を検出できない。重大1・2の欠陥もテストがなかったため通過している。設計書も `hooks.before_write` による決定論的な再現を想定している。 / 提案: 上記の各項目に対し、否定ケース・境界値のテストを追加する。並行と途中失敗のテストは `hooks` を使って決定論的に書く。\n- [重大4] 区分: テスト / 対象: AC7, AC8, AC9, AC10, K3, K5, K8 / 対応区分: 証拠不足 / 内容: (a) RateLimiter は枠の境界（ちょうど window 秒で新しい枠になること）と、複数スレッドでの上限遵守を確かめていない（`RateLimiter.hook` を使った決定論的なテストもない）。 (b) 共有リンクは期限ちょうど・期限切れ・形の崩れ（改行、非数字、署名の長さ・大文字）の各ケースがなく、改ざんも1ケースだけ。 (c) ログ・例外・監査出力に本文・署名・api_key が出ないことを確かめるテストがない。 (d) 例外の後に接続を使い続けられることを確かめるテストがない。 / 根拠: AC7 は「枠の境界・同時の呼び出しを含む」、AC8 は「期限の境界を含む」と明記している。AC9・AC10 には対応するテストが皆無。 / 提案: 境界値（now=期限ちょうど、window ちょうど）、threads と `hook` による同時実行、caplog 相当（`assertLogs`）によるログ検査、例外後の次の操作の成功確認を追加する。\n- [軽微1] 区分: 実装 / 対象: R3, 設計 / 対応区分: 改善提案 / 内容: `search_notes` の tags 検査が `_validate` と重複している。`_validate` と同じ TAG_RE を共有しているため、重大2を直すときは1か所にまとめると漏れが出にくい。 / 提案: タグ検査を共通関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空題名の拒否と正常な作成だけを確認している。境界値・タグ規則・途中失敗のロールバックは未検証で、実装にもタグの改行の欠陥がある（重大2・3）。\n- AC2: 不十分。自分のメモの閲覧だけで、非公開・他組織・存在しないメモの NotFound と、閲覧数の同時加算は未検証（重大3）。\n- AC3: 不十分。1ページ目と簡単な検索だけ。範囲外の入力、`%`・`_`、インジェクション、タグ OR は未検証。実装の LIKE は ESCAPE とプレースホルダーを使っていて妥当に見える（重大3）。\n- AC4: 不十分。所有者による更新と削除の正常系だけ。Forbidden、Conflict、管理者の扱いは未検証。削除失敗の握りつぶしは実装の欠陥（重大1・3）。\n- AC5: 不十分。管理者以外の拒否と正常系だけ。組織またぎと途中失敗のロールバックは未検証（重大3）。\n- AC6: 不十分。action と actor だけを確認していて、マスクを確認していない（重大3）。\n- AC7: 不十分。単純な上限と窓の経過だけ。境界とスレッドは未検証（重大4）。\n- AC8: 不十分。往復と改ざん1件だけ。期限の境界・形の崩れは未検証（重大4）。\n- AC9・AC10: 検証なし（重大4）。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのファイルは見つかっていない。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、ユニットテストと実 SQLite（`:memory:` またはテスト用ファイル）で十分に確かめられる。ただし並行処理は別接続・別スレッドでの統合テストとして必要（重大3・4）。\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8: 実装は概ね妥当に見えるが、検証がほぼない。\n- 並行の更新（読み出しから書き込みの間の更新）は `UPDATE ... WHERE version = ?` と `BEGIN IMMEDIATE` で守られているように見える。ただし未検証。\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .`: 12件すべて成功。ただし内容は薄い。\n- `delete_note` に `hooks.before_write` で例外を仕込んで再現した。例外は伝わらず None が返り、メモは残った。\n- タグ `\"abc\\n\"` が `create_note` で受理されることを再現した。\n- `notes/*.py` と `tests/test_notes.py` を全文確認した。LIKE の ESCAPE とプレースホルダーの使用、`_visible`・`_can_modify` の適用、マスク処理、`share.py` の `fullmatch` は問題なしと判断した。\n- git 履歴はなく、すべて未追跡の新規ファイルだった。`$AQ history` と `trace` は実行していない。テストの改ざん・弱体化は未確認。",
+ "files_changed": [],
+ "valid": true
+}

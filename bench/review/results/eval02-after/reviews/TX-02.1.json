@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 1,
+ "sec": 28.0,
+ "exit": 0,
+ "cost_usd": 0.12331320000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19069,
+  "cache_read_input_tokens": 115412,
+  "output_tokens": 3548,
+  "output_tokens_details": {
+   "thinking_tokens": 646
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19069,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2420,
+    "cache_read_input_tokens": 36948,
+    "cache_creation_input_tokens": 2353,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2353
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` がメモ1件ごとに別のトランザクションで移している。途中で失敗すると一部だけ移った状態が残る。 / 成立条件: 対象が2件以上あり、2件目以降の更新で例外が起きる（`hooks.before_write(\"transfer:<id>\")` での障害、ロック待ちの時間切れ、DB エラーなど）。 / 影響: 仕様の「全部移すか、何も移さないか（途中で失敗したら元のまま）」に違反する。移管が中途半端に終わり、監査ログも残らない。 / 根拠: `notes/service.py:176-181`。`for i in ids:` の中で `with transaction(conn)` を開いている。`ids` の取得もトランザクションの外にある。 / 提案: 取得（SELECT）・全件の UPDATE・監査の INSERT を1つの `transaction()` にまとめる。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `TAG_RE` が `^[a-z0-9-]{1,20}$` で、`re.match` を使っている。Python の `$` は末尾の改行の前にも一致するため、`\"abc\\n\"` のような改行付きタグが検査を通る。 / 成立条件: 作成・更新・検索のタグに末尾が `\\n` の文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に違反するタグが保存される。保存されるタグは 21 文字になりうる。 / 根拠: `notes/service.py:12`。`TAG_RE.match('abc\\n')` が True になることを実行して確認した。同じ誤りを避けるため `share.py` は `fullmatch` を使っている。 / 提案: `TAG_RE.fullmatch(t)` を使うか、パターンを `\\Z` で終わらせる。3箇所の呼び出し（`_validate` と `search_notes`）をそろえる。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心で、受け入れ条件の異常系・境界値・並行系を確かめていない。具体的には、同時閲覧の閲覧数、更新の競合（Conflict）、他組織・非公開のメモの NotFound、移管の失敗時の巻き戻し、作成途中の失敗、LIKE の `%` と `_`、レート制限の枠の境界と同時呼び出し、共有リンクの期限境界と形の崩れ、api_key の伏せ字、接続の再利用（AC10）、ログへの機密情報の混入（AC9）が該当する。 / 根拠: `tests/test_notes.py` は 90 行 12 件。仕様は境界・同時・失敗時の挙動を受け入れ条件にしており、設計がそのためにフックを用意している（`hooks.before_write`、`RateLimiter.hook`）が、使われていない。重大1・2の欠陥もこのテストでは検出できない。 / 提案: 次の検証を追加する。(a) 別の接続・スレッドからの同時閲覧と同時更新。(b) 移管と作成の途中でフックから例外を起こし、何も残らず接続が使えること。(c) 他の組織・他人の非公開メモに対する NotFound と Forbidden。(d) 検索語 `%` と `_` による部分一致。(e) レート制限の枠が ちょうど window 秒で切り替わること。(f) 共有リンクの期限ちょうどの無効化と改行付きリンクの拒否。(g) api_key が8文字未満・ちょうど8文字のときの伏せ字。(h) 改行付きタグの拒否。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系と空題名だけで不十分。タグ・文字数の境界、失敗時に何も残らないこと、改行付きタグが未検証。\n- AC2: 正常系の取得だけで不十分。他組織・非公開の NotFound と同時閲覧の数え漏れが未検証。\n- AC3: ページングの最初のページと単純な検索だけで不十分。範囲外、`%`・`_`、タグの OR 絞り込み、他人の非公開が未検証。\n- AC4: 作成者による更新・削除だけで不十分。Conflict、管理者・他者の Forbidden、更新の検証が未検証。\n- AC5: 成功と非管理者の拒否だけで不十分。組織をまたぐ拒否と失敗時の巻き戻しが未検証で、実装にも欠陥がある（重大1）。\n- AC6: 先頭の行の action と actor を見ているだけで、api_key の伏せ字は未検証。\n- AC7: 逐次の超過と枠の更新だけで不十分。ちょうど window 秒の境界と同時の呼び出しが未検証。\n- AC8: 往復と改ざんだけで不十分。期限ちょうどの無効化と形の崩れたリンクが未検証。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。`git diff` は新規ファイルのみで、検証条件の弱体化は見つからなかった（`history` は未確認）。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、リスクは単体・統合テストで確かめられる）。\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめる検証がない。実装の認可は `_visible` と `_can_modify` に集約されており、コード上は妥当。\n- K2: 検索の LIKE エスケープとプレースホルダーを確かめる検証がない。実装は `ESCAPE` とプレースホルダーを使っており、コード上は妥当。\n- K3: 同時の更新・閲覧・呼び出しを確かめる検証がない。\n- K4: 途中の失敗による不整合の検証がなく、移管には実際の欠陥がある（重大1）。\n- K5・K7: 監査ログの api_key とログへの機密情報の検証がない。\n- K8: 共有リンクの期限境界と形の崩れの検証がない。\n### 確認したこと\n- 仕様・設計と `notes/*.py`・`tests/test_notes.py` を通読した。\n- `python3 -m unittest discover` を実行し、12 件が成功した。\n- `TAG_RE.match('abc\\n')` が True になることを実行して確認した。\n- `trace` と `history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}
