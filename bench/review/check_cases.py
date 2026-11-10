@@ -11,6 +11,7 @@
 """
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -21,12 +22,13 @@ sys.path.insert(0, HERE)
 import cases as CS  # noqa: E402
 import clean_cases as CL  # noqa: E402
 import sql_cases as SQ  # noqa: E402
+import tested_cases as TD  # noqa: E402
 
 APP = os.path.join(HERE, "app")
 
 
 def all_cases():
-    return CS.CASES + CL.CASES + SQ.CASES
+    return CS.CASES + CL.CASES + SQ.CASES + TD.CASES
 
 
 def materialize(case, dest, app=None, changes=None):
@@ -42,6 +44,58 @@ def materialize(case, dest, app=None, changes=None):
             raise ValueError(f"{case['id']}: {rel} の置き換え元が {n} か所に当たる（1か所であること）: {old[:60]!r}")
         with open(p, "w", encoding="utf-8") as f:
             f.write(s.replace(old, new))
+    if case and case.get("drop_failing_tests"):
+        return prune_failing_tests(dest)
+    return []
+
+
+def failing_tests(cwd):
+    """tests/ のうち、失敗・エラーになるテストの ID（tests.<module>.<Class>.<method>）。"""
+    runner = ("import json,unittest\n"
+              "s=unittest.defaultTestLoader.discover('tests',top_level_dir='.')\n"
+              "r=unittest.TestResult();s.run(r)\n"
+              "print(json.dumps([t.id() for t,_ in r.failures+r.errors]))\n")
+    p = subprocess.run([sys.executable, "-c", runner], cwd=cwd, capture_output=True, text=True, timeout=180)
+    return json.loads(p.stdout.strip().splitlines()[-1])
+
+
+def prune_failing_tests(dest):
+    """欠陥で失敗するテストのメソッドだけを取り除く（残りはすべて合格する）。取り除いた ID の列を返す。"""
+    import ast
+    dropped = []
+    for _ in range(3):
+        bad = failing_tests(dest)
+        if not bad:
+            return dropped
+        by_file = {}
+        for tid in bad:
+            m = re.match(r"tests\.(\w+)\.(\w+)\.(\w+)(?: \(.*\))?$", tid, re.S)  # subTest は「method (引数)」
+            if not m:
+                raise ValueError(f"テストの ID を読めない（読み込みの失敗など）: {tid}")
+            by_file.setdefault(m.group(1), set()).add((m.group(2), m.group(3)))
+        for mod, items in by_file.items():
+            path = os.path.join(dest, "tests", mod + ".py")
+            with open(path, encoding="utf-8") as f:
+                src = f.read()
+            lines = src.splitlines(keepends=True)
+            cut = []
+            for node in ast.parse(src).body:
+                if not isinstance(node, ast.ClassDef):
+                    continue
+                gone = [n for n in node.body if isinstance(n, ast.FunctionDef) and (node.name, n.name) in items]
+                tests_left = [n for n in node.body if isinstance(n, ast.FunctionDef) and n.name.startswith("test")
+                              and n not in gone]
+                for n in ([node] if gone and not tests_left else gone):
+                    first = min([n.lineno] + [d.lineno for d in n.decorator_list])
+                    cut.append((first - 1, n.end_lineno))
+            for a, b in sorted(cut, reverse=True):
+                while b < len(lines) and not lines[b].strip():
+                    b += 1  # 後ろの空行も取る
+                del lines[a:b]
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("".join(lines).rstrip("\n") + "\n")
+        dropped += sorted({re.sub(r" \(.*\)$", "", t, flags=re.S) for t in bad})
+    raise ValueError(f"テストを取り除いても合格しない: {failing_tests(dest)}")
 
 
 def run_unittest(cwd, target):
@@ -107,6 +161,39 @@ def check():
     return report
 
 
+def check_tested():
+    """「検証あり・欠陥あり」のケース群の確認。"""
+    report = {"cases": {}}
+    problems = []
+    with tempfile.TemporaryDirectory() as tmp:
+        ref = os.path.join(tmp, "ref")
+        materialize(None, ref, app=TD.APP_DIR)
+        for c in TD.CASES:
+            r = report["cases"][c["id"]] = {}
+            if not run_repro(ref, c)[0]:
+                problems.append(f"{c['id']}: 参照コードで repro が失敗する")
+            dest = os.path.join(tmp, c["id"])
+            try:
+                r["dropped_tests"] = materialize(c, dest)
+            except ValueError as e:
+                problems.append(f"{c['id']}: {e}")
+                continue
+            r["tests_pass"], out = run_visible(dest)
+            m = re.search(r"Ran (\d+) test", out)
+            r["tests_left"] = int(m.group(1)) if m else 0
+            r["repro_fails"] = not run_repro(dest, c)[0]
+            if not r["tests_pass"]:
+                problems.append(f"{c['id']}: 残したテストが失敗:\n{out}")
+            if not r["dropped_tests"]:
+                problems.append(f"{c['id']}: 欠陥で失敗するテストがない（app_clean のテストが欠陥を捉えていない）")
+            if r["tests_left"] < 50:
+                problems.append(f"{c['id']}: 残ったテストが少ない（{r['tests_left']} 件）")
+            if not r["repro_fails"]:
+                problems.append(f"{c['id']}: 欠陥を入れても repro が合格する")
+    report["problems"] = problems
+    return report
+
+
 def check_clean():
     """クリーンケース群の確認。"""
     defects = [c for c in CS.CASES if c["defect"]]
@@ -155,6 +242,17 @@ def check_clean():
 
 
 if __name__ == "__main__":
+    if "--set" in sys.argv and sys.argv[sys.argv.index("--set") + 1] == "tested":
+        rep = check_tested()
+        if "--json" in sys.argv:
+            with open(sys.argv[sys.argv.index("--json") + 1], "w", encoding="utf-8") as f:
+                json.dump(rep, f, ensure_ascii=False, indent=1)
+        for k, v in rep["cases"].items():
+            print(k, f"残り {v.get('tests_left')} 件 / 取り除いた {len(v.get('dropped_tests', []))} 件")
+        for p in rep["problems"]:
+            print("問題:", p)
+        print("OK" if not rep["problems"] else f"問題 {len(rep['problems'])} 件")
+        sys.exit(1 if rep["problems"] else 0)
     if "--set" in sys.argv and sys.argv[sys.argv.index("--set") + 1] == "clean":
         rep = check_clean()
         if "--json" in sys.argv:

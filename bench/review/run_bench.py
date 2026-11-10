@@ -11,6 +11,7 @@
       集計（report.md・summary.json）
 
 --set with-sql で、既存の40ケースに SQL の追加ケース（sql_cases.py。EVAL-02）を足す（--set sql で追加ケースだけ）。
+--set tested で、「検証あり・欠陥あり」のケース群（tested_cases.py。テストは揃って合格するが欠陥が1つある）を使う。
 --set clean で、クリーンケース群（clean_cases.py。欠陥なし・受け入れ条件ごとのテストあり）を使う（EVAL-01）。
 集計は clean_report.py。既存の40ケースとは別の DIR に出し、結果を混ぜない。
 
@@ -35,6 +36,7 @@ import cases as CS  # noqa: E402
 import check_cases as CC  # noqa: E402
 import clean_cases as CL  # noqa: E402
 import sql_cases as SQ  # noqa: E402
+import tested_cases as TD  # noqa: E402
 import run_docs as D  # noqa: E402
 
 REVIEWER_MD = os.path.join(ROOT, "plugins", "aq-dlc", "agents", "reviewer.md")
@@ -47,7 +49,7 @@ def arg(name, default=None):
 
 def selected():
     ids = arg("--cases")
-    pool = {"clean": CL.CASES, "sql": SQ.CASES, "with-sql": CS.CASES + SQ.CASES}.get(arg("--set"), CS.CASES)
+    pool = {"clean": CL.CASES, "sql": SQ.CASES, "with-sql": CS.CASES + SQ.CASES, "tested": TD.CASES}.get(arg("--set"), CS.CASES)
     return [c for c in pool if not ids or c["id"] in ids.split(",")]
 
 
@@ -67,7 +69,7 @@ def build_one(case, out):
     e = Env(git=True)
     src = os.path.join(out, "src", case["id"])
     shutil.rmtree(src, ignore_errors=True)
-    CC.materialize(case, src)
+    dropped = CC.materialize(case, src)
     p = e.project
     with open(os.path.join(p, "README.md"), "w", encoding="utf-8") as f:
         f.write("# notes\n組織ごとのメモのライブラリ。\n")
@@ -129,7 +131,7 @@ def build_one(case, out):
     impl = os.path.join(e.arts, "impl.md")
     shutil.move(impl, os.path.join(out, "src", case["id"] + "-impl.md"))
     meta = {"case": case["id"], "project": p, "home": e.home, "brief": brief,
-            "snapshot": snapshot(p), "built_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+            "dropped_tests": dropped, "snapshot": snapshot(p), "built_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
     with open(os.path.join(out, "built", case["id"] + ".json"), "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=1)
     return case["id"]
@@ -246,6 +248,13 @@ CLEAN_TEST_NOTE = """このケースは、受け入れ条件 AC1〜AC10 とリ�
 """
 
 
+TESTED_NOTE = """このケースのテストは、受け入れ条件ごとに揃って見え、すべて合格するが、埋め込んだ欠陥を捉えるテストだけがない。
+- テスト不足の指摘は、上のテストに実際に不足があるときだけ test_gap（埋め込んだ欠陥の箇所のテストがない、という指摘は test_gap。
+  ただし、テストがないことだけを述べ、実装の欠陥の原因・影響を述べていなければ、matches_defect にはしない）。
+  テストがあるのに「ない」と言っているなら false_positive。
+"""
+
+
 def judge_one(rev_path, out):
     with open(rev_path, encoding="utf-8") as f:
         rev = json.load(f)
@@ -254,10 +263,12 @@ def judge_one(rev_path, out):
         return rev["case"], "skip"
     c = next(x for x in CC.all_cases() if x["id"] == rev["case"])
     clean = bool(c.get("clean_set"))
+    tested = bool(c.get("tested_set"))
     truth = ("欠陥なし（振る舞いを変えない変更: " + c["title"] + "）") if not c["defect"] else (
         f"{c['title']}（分類 {c['category']}・重大度 {c['severity']}・箇所 {c['location']}・原因: {c['cause']}・影響: {c['impact']}）")
     prompt = JUDGE.format(case_id=c["id"], truth=truth, spec=D.SPEC_MD, code=case_code(c["id"], out), review=rev["result"],
-                          tests=case_tests(c["id"], out) if clean else "", test_note=CLEAN_TEST_NOTE if clean else "")
+                          tests=case_tests(c["id"], out) if clean or tested else "",
+                          test_note=CLEAN_TEST_NOTE if clean else TESTED_NOTE if tested else "")
     p = subprocess.run(["claude", "-p", prompt, "--tools", "", "--output-format", "json"], capture_output=True,
                        text=True, timeout=900, cwd=out)
     try:
