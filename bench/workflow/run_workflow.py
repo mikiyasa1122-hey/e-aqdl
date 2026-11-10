@@ -1,10 +1,13 @@
-"""PERF-01 の試行（パイロット）: 通常の Claude Code と E-AQDL の全工程を、同じ課題で比べる。
+"""PERF-01: 通常の Claude Code と E-AQDL の全工程を、同じ課題で比べる。
 
-  python3 bench/workflow/run_workflow.py run --cond plain|eaqdl --rep N --out DIR [--max-turns 10] [--budget 30]
+  python3 bench/workflow/run_workflow.py run --task spec|vague|archive --cond plain|eaqdl --rep N --out DIR [--max-turns 10] [--budget 30]
   python3 bench/workflow/run_workflow.py evaluate --out DIR
   python3 bench/workflow/run_workflow.py report --out DIR
 
-課題: starter/（db.py・errors.py・仕様書・インターフェースの契約）から、notes パッケージを実装する。
+課題（--task）:
+- spec: starter/（db.py・errors.py・仕様書・インターフェースの契約）から、notes パッケージを実装する。
+- vague: 仕様書の代わりに、短くあいまいな依頼（tasks/vague/request.md）と契約だけを渡す。細かい規則は自分で決めさせる。
+- archive: 出来上がっている notes パッケージ（review/app_clean とそのテスト）に、アーカイブ機能（tasks/archive/request.md）を足す。
 - 両方の条件に、同じ初期のリポジトリと同じ依頼の文を渡す。E-AQDL だけ、プラグイン（--plugin-dir）を読み込み、依頼の先頭に
   /aq-dlc:start を付ける。
 - 人の役（台本）: 実行が止まったら、決まった文で返答する（resume）。仕様の承認（SPEC-… を承認）、Memory はプロジェクト内だけ、
@@ -28,11 +31,22 @@ REVIEW = os.path.join(ROOT, "bench", "review")
 sys.path.insert(0, REVIEW)
 PLUGIN = os.path.join(ROOT, "plugins", "aq-dlc")
 
-TASK = """docs/spec.md の仕様と docs/contract.md のインターフェースの契約に従って、notes パッケージ（notes/service.py・
+TASK_SPEC = """docs/spec.md の仕様と docs/contract.md のインターフェースの契約に従って、notes パッケージ（notes/service.py・
 notes/ratelimit.py・notes/share.py）と、そのテスト（tests/ に unittest。`python3 -m unittest discover -s tests -t .` で実行）を作ってください。
 notes/db.py と notes/errors.py は用意済みで、変えないでください。Python 3 の標準ライブラリだけを使います。
 進め方: Memory を使う場合はプロジェクト内だけにしてください。選択肢のある質問は、推奨の選択で進めてください。
 PR の作成とリモートへの push は不要です（ローカルで完了まで進めてください）。"""
+HOW = TASK_SPEC[TASK_SPEC.index("進め方:"):]
+TASKS = {
+    "spec": TASK_SPEC,
+    "vague": "docs/request.md の依頼を実現してください。\n" + HOW,
+    "archive": "docs/request-archive.md の依頼を実現してください。\n" + HOW,
+}
+# 隠しテストのうち、仕様書に明記がなく、参照実装の振る舞いを正解にしているもの（「参考」として別に数える）
+REFERENCE_ONLY = ("test_huge_page_returns_no_items", "test_permission_is_checked_again_inside_the_write",
+                  "test_permission_is_checked_inside_the_delete", "test_hidden_after_check_is_not_found",
+                  "test_original_error_is_not_hidden_when_rollback_is_impossible",
+                  "test_repro_res_authz_toctou", "test_repro_res_page_overflow", "test_repro_res_rollback_mask")
 
 # 人の役の返答（台本）。仕様の承認を求められたら、承認だけを1行で返す。E-AQDL は、承認と他の指示・否定の表現が混ざった返答を
 # 承認として扱わない（最初の試行で、混ぜた台本が受理されないことを確かめた。results/pilot/ANALYSIS.md）
@@ -48,10 +62,26 @@ def git(cwd, *a):
     subprocess.run(["git", *a], cwd=cwd, check=True, capture_output=True, text=True)
 
 
-def setup_project(dest):
+def setup_project(dest, task="spec"):
     shutil.copytree(os.path.join(HERE, "starter"), dest)
+    readme = "# notes\n組織ごとのメモのライブラリ。仕様は docs/spec.md、契約は docs/contract.md。\n"
+    if task == "vague":
+        os.remove(os.path.join(dest, "docs", "spec.md"))
+        shutil.copy(os.path.join(HERE, "tasks", "vague", "request.md"), os.path.join(dest, "docs", "request.md"))
+        cp = os.path.join(dest, "docs", "contract.md")
+        with open(cp, encoding="utf-8") as f:
+            c = f.read()
+        with open(cp, "w", encoding="utf-8") as f:
+            f.write(c.replace("仕様は `docs/spec.md`。", "依頼は `docs/request.md`。"))
+        readme = "# notes\n組織ごとのメモのライブラリ。依頼は docs/request.md、契約は docs/contract.md。\n"
+    elif task == "archive":
+        app = os.path.join(REVIEW, "app_clean")
+        for fn in ("service.py", "ratelimit.py", "share.py"):
+            shutil.copy(os.path.join(app, "notes", fn), os.path.join(dest, "notes", fn))
+        shutil.copytree(os.path.join(app, "tests"), os.path.join(dest, "tests"), ignore=shutil.ignore_patterns("__pycache__"))
+        shutil.copy(os.path.join(HERE, "tasks", "archive", "request.md"), os.path.join(dest, "docs", "request-archive.md"))
     with open(os.path.join(dest, "README.md"), "w", encoding="utf-8") as f:
-        f.write("# notes\n組織ごとのメモのライブラリ。仕様は docs/spec.md、契約は docs/contract.md。\n")
+        f.write(readme)
     git(dest, "init", "-q", "-b", "main")
     git(dest, "-c", "user.name=bench", "-c", "user.email=bench@local", "add", "-A")
     git(dest, "-c", "user.name=bench", "-c", "user.email=bench@local", "commit", "-q", "-m", "初期状態")
@@ -108,20 +138,20 @@ def finished(cond, project, last):
     return not re.search(r"[?？]\s*$|どちら|よろしいですか|確認させて|教えてください", text.strip()[-300:])
 
 
-def run(cond, rep, out, max_turns, budget):
-    tag = f"{cond}-{rep}"
+def run(cond, rep, out, max_turns, budget, task="spec"):
+    tag = f"{task}-{cond}-{rep}"
     dest = os.path.join(out, "runs", tag + ".json")
     if os.path.exists(dest):
         print(tag, "skip")
         return
     project = os.path.join(out, "work", tag)
     shutil.rmtree(project, ignore_errors=True)
-    setup_project(project)
+    setup_project(project, task)
     home = os.path.join(out, "home", tag)  # E-AQDL の全体の Memory を、試行ごとに分ける
     os.makedirs(home, exist_ok=True)
     env = dict({k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}, AQDLC_HOME=home)
     turns, session, spent, prev_cum = [], None, 0.0, 0.0
-    prompt = ("/aq-dlc:start " if cond == "eaqdl" else "") + TASK
+    prompt = ("/aq-dlc:start " if cond == "eaqdl" else "") + TASKS[task]
     for i in range(max_turns):
         left = max(budget - spent, 0.5)
         t = claude(project, prompt, cond, session, left, env)
@@ -140,7 +170,7 @@ def run(cond, rep, out, max_turns, budget):
         ids = sorted(set(re.findall(r"SPEC-[0-9A-Za-z-]+", t.get("result") or "")))
         st = t["state_after"] or {}
         prompt = HUMAN_APPROVE.format(ids=" ".join(ids)) if ids and not st.get("spec_approved") else HUMAN_REPLY
-    rec = {"cond": cond, "rep": rep, "turns": turns, "human_replies": len(turns) - 1,
+    rec = {"task": task, "cond": cond, "rep": rep, "turns": turns, "human_replies": len(turns) - 1,
            "cost_usd": round(spent, 4), "sec": round(sum(t["sec"] for t in turns), 1),
            "final_state": eaqdl_state(project), "budget_hit": spent >= budget,
            "stopped_by": "max_turns" if len(turns) == max_turns and not finished(cond, project, turns[-1]) else "done"}
@@ -150,8 +180,11 @@ def run(cond, rep, out, max_turns, budget):
 
 
 # ------------------------------------------------------------------ evaluate
-def hidden_suite(project):
-    """隠しテストを、出来上がったコードのコピーに対して実行する（作業フォルダは変えない）。"""
+def hidden_suite(project, task="spec"):
+    """隠しテストを、出来上がったコードのコピーに対して実行する（作業フォルダは変えない）。
+
+    spec・vague: app_clean/tests の63件 + repro 38件。archive: アーカイブの隠しテスト + repro 38件（既存の振る舞いの回帰）。
+    """
     import cases as CS
     import clean_cases as CL
     import sql_cases as SQ
@@ -159,7 +192,9 @@ def hidden_suite(project):
         work = os.path.join(tmp, "p")
         shutil.copytree(project, work, ignore=shutil.ignore_patterns(".git", ".aq-dlc", "__pycache__"))
         hid = os.path.join(work, "hidden_tests")
-        shutil.copytree(os.path.join(REVIEW, "app_clean", "tests"), hid)
+        src = os.path.join(HERE, "tasks", "archive", "hidden") if task == "archive" else os.path.join(REVIEW, "app_clean", "tests")
+        shutil.copytree(src, hid, ignore=shutil.ignore_patterns("__pycache__"))
+        open(os.path.join(hid, "__init__.py"), "a").close()
         repros = [c for c in CS.CASES + SQ.CASES if c["defect"]] + [{"id": k, "repro": v} for k, v in CL.RESIDUAL_REPROS.items()]
         # SEC-03 の repro は assertLogs を使い、ログが1行も出ないと失敗する。契約ではログは任意なので、
         # ログを出さない実装を誤って不合格にしないよう、ここではログを集めて確かめる形に置き換える
@@ -187,7 +222,9 @@ def hidden_suite(project):
         m = re.search(r"Ran (\d+) test", own.stderr)
         bad = set(res["failures"]) | set(res["errors"])
         repro_ids = [t for t in bad if ".test_repro_" in t]
+        ref_only = sorted(t for t in bad if any(k in t for k in REFERENCE_ONLY))
         return {"hidden_run": res["run"], "hidden_failed": len(bad), "hidden_pass_rate": 1 - len(bad) / res["run"],
+                "failed_reference_only": len(ref_only), "failed_required": len(bad) - len(ref_only),
                 "repro_failed": sorted({t.split(".test_repro_")[1].split(".")[0] for t in repro_ids}),
                 "failed": sorted(bad), "own_tests": int(m.group(1)) if m else 0, "own_tests_ok": own.returncode == 0}
 
@@ -197,7 +234,7 @@ def evaluate(out):
         p = os.path.join(out, "runs", fn)
         with open(p, encoding="utf-8") as f:
             rec = json.load(f)
-        rec["evaluation"] = hidden_suite(os.path.join(out, "work", fn[:-5]))
+        rec["evaluation"] = hidden_suite(os.path.join(out, "work", fn[:-5]), rec.get("task", "spec"))
         with open(p, "w", encoding="utf-8") as f:
             json.dump(rec, f, ensure_ascii=False, indent=1)
         print(fn, {k: v for k, v in rec["evaluation"].items() if k != "failed"})
@@ -210,14 +247,15 @@ def report(out):
             r = json.load(f)
         ev = r.get("evaluation") or {}
         fs = r.get("final_state") or {}
-        rows.append(f"| {r['cond']} | {r['rep']} | {ev.get('hidden_pass_rate', 'not_measured'):.3f} "
+        rows.append(f"| {r.get('task', 'spec')} | {r['cond']} | {r['rep']} | {ev.get('hidden_pass_rate', 0):.3f} "
                     f"({ev.get('hidden_run', 0) - ev.get('hidden_failed', 0)}/{ev.get('hidden_run', 0)}) | "
+                    f"{ev.get('failed_required', '-')} / {ev.get('failed_reference_only', '-')} | "
                     f"{', '.join(ev.get('repro_failed', [])) or '-'} | {ev.get('own_tests', '-')}"
                     f"{'' if ev.get('own_tests_ok') else '（失敗あり）'} | ${r['cost_usd']} | {r['sec'] / 60:.1f} 分 | "
                     f"{len(r['turns'])} | {r['human_replies']} | {fs.get('status', '-')} | {fs.get('reviews', '-')} | "
                     f"{fs.get('fix_iterations', '-')} | {r['stopped_by']}{'・予算の上限' if r['budget_hit'] else ''} |")
-    md = ("# PERF-01 パイロットの結果\n\n| 条件 | 回 | 隠しテストの合格率 | 失敗した repro | 自作テスト | 費用 | 時間 | 実行の回数 | "
-          "人の返答 | E-AQDL の状態 | レビュー | 修正の回数 | 終わり方 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
+    md = ("# PERF-01 の結果\n\n| 課題 | 条件 | 回 | 隠しテストの合格率 | 失敗（必須 / 参考） | 失敗した repro | 自作テスト | 費用 | 時間 | 実行の回数 | "
+          "人の返答 | E-AQDL の状態 | レビュー | 修正の回数 | 終わり方 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
           + "\n".join(rows) + "\n")
     with open(os.path.join(out, "report.md"), "w", encoding="utf-8") as f:
         f.write(md)
@@ -227,7 +265,8 @@ def report(out):
 if __name__ == "__main__":
     cmd, out = sys.argv[1], os.path.abspath(arg("--out", os.path.join(HERE, "results", "pilot")))
     if cmd == "run":
-        run(arg("--cond"), int(arg("--rep", "1")), out, int(arg("--max-turns", "10")), float(arg("--budget", "30")))
+        run(arg("--cond"), int(arg("--rep", "1")), out, int(arg("--max-turns", "10")), float(arg("--budget", "30")),
+            arg("--task", "spec"))
     elif cmd == "evaluate":
         evaluate(out)
     elif cmd == "report":
