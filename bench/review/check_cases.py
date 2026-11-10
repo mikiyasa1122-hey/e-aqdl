@@ -55,7 +55,9 @@ def failing_tests(cwd):
               "s=unittest.defaultTestLoader.discover('tests',top_level_dir='.')\n"
               "r=unittest.TestResult();s.run(r)\n"
               "print(json.dumps([t.id() for t,_ in r.failures+r.errors]))\n")
-    p = subprocess.run([sys.executable, "-c", runner], cwd=cwd, capture_output=True, text=True, timeout=180)
+    # 作業フォルダに __pycache__ を残さない（ケースのファイルとして取り込まれないように）
+    p = subprocess.run([sys.executable, "-B", "-c", runner], cwd=cwd, capture_output=True, text=True, timeout=180,
+                       env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
     return json.loads(p.stdout.strip().splitlines()[-1])
 
 
