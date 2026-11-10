@@ -30,10 +30,14 @@ PLUGIN = os.path.join(ROOT, "plugins", "aq-dlc")
 
 TASK = """docs/spec.md の仕様と docs/contract.md のインターフェースの契約に従って、notes パッケージ（notes/service.py・
 notes/ratelimit.py・notes/share.py）と、そのテスト（tests/ に unittest。`python3 -m unittest discover -s tests -t .` で実行）を作ってください。
-notes/db.py と notes/errors.py は用意済みで、変えないでください。Python 3 の標準ライブラリだけを使います。"""
+notes/db.py と notes/errors.py は用意済みで、変えないでください。Python 3 の標準ライブラリだけを使います。
+進め方: Memory を使う場合はプロジェクト内だけにしてください。選択肢のある質問は、推奨の選択で進めてください。
+PR の作成とリモートへの push は不要です（ローカルで完了まで進めてください）。"""
 
-HUMAN_REPLY = ("（人の返答・台本）確認しました。{approve}Memory はプロジェクト内だけで使ってください。"
-               "選択肢がある質問は、推奨の選択で進めてください。PR の作成とリモートへの push はしないで、ローカルで完了まで進めてください。")
+# 人の役の返答（台本）。仕様の承認を求められたら、承認だけを1行で返す。E-AQDL は、承認と他の指示・否定の表現が混ざった返答を
+# 承認として扱わない（最初の試行で、混ぜた台本が受理されないことを確かめた。results/pilot/ANALYSIS.md）
+HUMAN_APPROVE = "承認 {ids}"
+HUMAN_REPLY = "推奨の選択で進めてください。"
 
 
 def arg(name, default=None):
@@ -78,7 +82,7 @@ def eaqdl_state(project):
     runs = os.path.join(project, ".aq-dlc", "runs")
     if not os.path.isdir(runs):
         return None
-    latest = sorted(os.listdir(runs))
+    latest = sorted(d for d in os.listdir(runs) if os.path.isfile(os.path.join(runs, d, "state.json")))
     if not latest:
         return None
     try:
@@ -87,8 +91,10 @@ def eaqdl_state(project):
     except (OSError, ValueError):
         return None
     return {"status": s.get("status"), "reviews": len(s.get("reviews", [])), "fix_iterations": s.get("fix_iterations", 0),
-            "impl_rounds": len(s.get("impl", {}).get("rounds", [])), "gate_runs": len(s.get("gate_runs", []) or []),
-            "human_events": len(s.get("human_events", []) or []), "spec_version": s.get("spec", {}).get("version")}
+            "impl_rounds": len((s.get("impl") or {}).get("rounds", [])),
+            "human_events": len(s.get("human_events", []) or []), "spec_version": (s.get("spec") or {}).get("version"),
+            "spec_approved": bool(s.get("approvals")), "asks_total": s.get("asks_total"),
+            "stop_blocks_total": s.get("stop_blocks_total")}
 
 
 def finished(cond, project, last):
@@ -114,11 +120,15 @@ def run(cond, rep, out, max_turns, budget):
     home = os.path.join(out, "home", tag)  # E-AQDL の全体の Memory を、試行ごとに分ける
     os.makedirs(home, exist_ok=True)
     env = dict({k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}, AQDLC_HOME=home)
-    turns, session, spent = [], None, 0.0
+    turns, session, spent, prev_cum = [], None, 0.0, 0.0
     prompt = ("/aq-dlc:start " if cond == "eaqdl" else "") + TASK
     for i in range(max_turns):
         left = max(budget - spent, 0.5)
         t = claude(project, prompt, cond, session, left, env)
+        # total_cost_usd は、resume したセッションの累計。この回の分は差で出す
+        cum = t["cost_usd"] or 0
+        t["cost_cumulative_usd"], t["cost_usd"] = cum, round(max(cum - prev_cum, 0), 4) if cum >= prev_cum else cum
+        prev_cum = max(cum, prev_cum)
         t["prompt"] = prompt
         t["state_after"] = eaqdl_state(project)
         turns.append(t)
@@ -128,8 +138,8 @@ def run(cond, rep, out, max_turns, budget):
         if finished(cond, project, t) or spent >= budget:
             break
         ids = sorted(set(re.findall(r"SPEC-[0-9A-Za-z-]+", t.get("result") or "")))
-        approve = f"{'・'.join(ids)} を承認します（この仕様で進めてください）。" if ids else ""
-        prompt = HUMAN_REPLY.format(approve=approve)
+        st = t["state_after"] or {}
+        prompt = HUMAN_APPROVE.format(ids=" ".join(ids)) if ids and not st.get("spec_approved") else HUMAN_REPLY
     rec = {"cond": cond, "rep": rep, "turns": turns, "human_replies": len(turns) - 1,
            "cost_usd": round(spent, 4), "sec": round(sum(t["sec"] for t in turns), 1),
            "final_state": eaqdl_state(project), "budget_hit": spent >= budget,
