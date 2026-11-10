@@ -161,6 +161,14 @@ def hidden_suite(project):
         hid = os.path.join(work, "hidden_tests")
         shutil.copytree(os.path.join(REVIEW, "app_clean", "tests"), hid)
         repros = [c for c in CS.CASES + SQ.CASES if c["defect"]] + [{"id": k, "repro": v} for k, v in CL.RESIDUAL_REPROS.items()]
+        # SEC-03 の repro は assertLogs を使い、ログが1行も出ないと失敗する。契約ではログは任意なので、
+        # ログを出さない実装を誤って不合格にしないよう、ここではログを集めて確かめる形に置き換える
+        sec03 = ("    def test(self):\n        import logging\n        out = []\n"
+                 "        h = logging.Handler()\n        h.emit = lambda r: out.append(r.getMessage())\n"
+                 "        lg = logging.getLogger('notes.share')\n        lg.addHandler(h)\n        lg.setLevel(logging.DEBUG)\n"
+                 "        link = share.make_link('s3cret', 7, ttl_sec=60, now=1000)\n        lg.removeHandler(h)\n"
+                 "        self.assertNotIn(link.split('.')[2], '\\n'.join(out))\n")
+        repros = [dict(c, repro=sec03) if c["id"] == "SEC-03" else c for c in repros]
         for c in repros:
             with open(os.path.join(hid, f"test_repro_{c['id'].replace('-', '_').lower()}.py"), "w", encoding="utf-8") as f:
                 f.write(CS.REPRO_HEAD + c["repro"])

@@ -1,0 +1,60 @@
+{
+ "cond": "plain",
+ "rep": 1,
+ "turns": [
+  {
+   "sec": 117.7,
+   "exit": 0,
+   "cost_usd": 0.36225680000000005,
+   "num_turns": 5,
+   "session_id": "4e06d868-d986-4e62-836c-053737ff1800",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "is_error": false,
+   "result": "`notes/service.py`・`notes/ratelimit.py`・`notes/share.py` と、tests/ の unittest 38 件を作りました。`python3 -m unittest discover -s tests -t .` で全件通ります。`db.py` と `errors.py` は変えていません。\n\nratelimit・share は `tests/test_ratelimit_share.py`、service は `tests/test_service.py` です。テストは各 AC（受け入れ条件）に沿っています。並行の閲覧・更新は、別々の接続と別々のスレッドで再現しています。\n\n仕様や契約に書かれていなかった点は、次のように決めました。\n\n- **書き込みの流れ:** 書き込みは `BEGIN IMMEDIATE` で始め、例外ならロールバックして例外をそのまま伝えます。確認から書き込みまでの間に状態が変わりうる操作（閲覧・更新・削除）は、ロックを取った後にもう一度確かめます。\n- **`transfer_notes` の引数:** `from_user` と `to_user` には、利用者の dict でも id でも渡せます。組織は dict ではなく DB の値で確かめます。存在しない利用者は組織が違う場合と同じく Forbidden にしています。\n- **`transfer_notes` の更新内容:** 非公開のメモも含めてすべて移します。更新するのは owner と version だけで、`updated_at` は変えません。\n- **検索:** 検索は LIKE を使い、`\\`・`%`・`_` をエスケープします。このため英字の大文字小文字は区別されません。\n- **`RateLimiter.hit`:** 判定した後にロックを離して `hook` を呼び、数える所でもう一度判定します。時刻は呼び出しごとに1回だけ読みます。これで `hook` の中で同時の呼び出しを待たせても上限を超えません。\n- **`verify_link`:** リンクの形は ASCII の10進数字と小文字の16進だけを認めます。署名を先に確かめ、期限は「期限の時刻ちょうど以降は無効」で判定します。\n- **共有リンクのログ:** 拒否の理由（形の崩れ・署名の不一致・期限切れ）だけを、INFO で `notes.share` に出します。署名は出しません。\n\n`notes/__pycache__/` が未追跡のまま残っています。`.gitignore` は作っていません。",
+   "usage": {
+    "input_tokens": 10,
+    "cache_creation_input_tokens": 35716,
+    "cache_read_input_tokens": 240128,
+    "output_tokens": 19536,
+    "output_tokens_details": {
+     "thinking_tokens": 4445
+    },
+    "server_tool_use": {
+     "web_search_requests": 0,
+     "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 35716,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [
+     {
+      "input_tokens": 2,
+      "output_tokens": 807,
+      "cache_read_input_tokens": 65381,
+      "cache_creation_input_tokens": 332,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 332
+      },
+      "type": "message"
+     }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+   },
+   "prompt": "docs/spec.md の仕様と docs/contract.md のインターフェースの契約に従って、notes パッケージ（notes/service.py・\nnotes/ratelimit.py・notes/share.py）と、そのテスト（tests/ に unittest。`python3 -m unittest discover -s tests -t .` で実行）を作ってください。\nnotes/db.py と notes/errors.py は用意済みで、変えないでください。Python 3 の標準ライブラリだけを使います。",
+   "state_after": null
+  }
+ ],
+ "human_replies": 0,
+ "cost_usd": 0.3623,
+ "sec": 117.7,
+ "final_state": null,
+ "budget_hit": false,
+ "stopped_by": "done"
+}
