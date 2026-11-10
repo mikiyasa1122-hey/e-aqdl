@@ -1,0 +1,49 @@
+{
+ "case": "EXC-01",
+ "rep": 2,
+ "sec": 35.4,
+ "exit": 0,
+ "cost_usd": 0.1132908,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13924,
+  "cache_read_input_tokens": 122888,
+  "output_tokens": 4529,
+  "output_tokens_details": {
+   "thinking_tokens": 817
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13924,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3182,
+    "cache_read_input_tokens": 37308,
+    "cache_creation_input_tokens": 3480,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3480
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2e25bbfa\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1, notes/service.py:100-101 / 対応区分: 修正必須 / 内容: `get_note` は、見られないメモ（他の組織・他人の非公開）に `Forbidden(\"note N を見る権限がない\")` を送出する。仕様 R2 は、存在しない場合も含めてすべて NotFound にし、存在を明かさないと定めている。 / 成立条件: 他の組織の利用者、または同じ組織の他人が、非公開メモの ID で `get_note` を呼ぶ。 / 影響: 存在しない ID は NotFound、存在する ID は Forbidden になる。そのため例外の型の違いから、他組織・他人の非公開メモの存在を推測できる。K1 の漏えいにあたる。 / 根拠: service.py:96-101。`_visible` が False のときに Forbidden を送出している。`update_note` と `delete_note` は同じ状況で NotFound を返しており、実装の中でも不統一である。この経路を防ぐ上流の検証や既存のテストはない。 / 提案: 101行目を `raise NotFound(f\"note {note_id}\")` に変える。行96-101を「行がない、または見えない場合は NotFound」の1つの分岐にまとめてもよい。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件の正常系の確認が中心で、受け入れ条件の大半について異常系・境界値・失敗の再現を検証していない。次の検証が欠けている。AC1/AC4/AC5/K4 のロールバック（`hooks.before_write` で障害を差し込み、何も残らないことを確かめる）、AC2/K3 の閲覧数の同時増加と他組織・非公開メモの NotFound、AC3/K2 の `%`・`_`・`\\` を含む検索語・タグの OR・範囲外の入力、AC4 の Conflict と Forbidden、AC6 の api_key 伏せ字（8文字未満・ちょうど8文字）、AC7 の枠の境界と複数スレッド、AC8 の期限ちょうど・形の崩れたリンク・期限切れ、AC9 の機密情報がログに出ないこと、AC10 の例外後の接続の再利用。 / 根拠: 設計がテスト用の差し込み口（`hooks`・`RateLimiter.hook`）を用意しているにもかかわらず、テストはそれを一度も使っていない。そのため、重大1の NotFound の違反もテストで検出できなかった。`test_tampered` は `7.` を `8.` に置換するだけで、改ざんの検証としては弱い。`test_export_audit` は api_key の伏せ字を確かめていない。 / 提案: 上記の各条件に対し、条件を外すと失敗する決定論的なテスト（スレッドと hook で競合を再現し、sleep は使わない）を追加する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3, K1, notes/service.py:158-182 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、可視性と権限を取引の外で確認する。取引の中ではメモの存在と version しか再確認しない（`update_note` は version だけ）。`delete_note` は、権限を確認した後に BEGIN IMMEDIATE で取引を始め、その中の `DELETE` は `id` だけを条件にしている。 / 成立条件: 権限確認と取引開始の間に、別の接続が `transfer_notes` で所有者を変える、または非公開に切り替える。 / 影響: 変更後のメモを、元の所有者が更新・削除できてしまう。`delete_note` は version を持たないため、Conflict でも防げない。`update_note` は、`transfer_notes` が version を+1 するので、古い version を渡していれば Conflict になる。それでも、`delete_note` の取引内の再確認が欠けていることが根本原因である。 / 根拠: 取引内で再取得して `_visible`・`_can_modify` を適用しているのは `get_note` だけである。認可の判定が TOCTOU になっている。上流や DB の制約による防止はない。この競合は未実行で、コード経路からの指摘である。 / 提案: 取引の中（BEGIN IMMEDIATE の後）でメモを再取得し、`_visible`・`_can_modify` を適用してから UPDATE/DELETE する。\n- [重大4] 区分: テスト / 対象: R7, AC7, K3 / 対応区分: 証拠不足 / 内容: RateLimiter の枠の境界（ちょうど window 秒で新しい枠になる）と、複数スレッドでの同時呼び出し（上限を超えて許さない）を確かめるテストがない。 / 根拠: AC7 が明示的に枠の境界と同時の呼び出しを要求している。`test_limit` は61秒で確認しているだけで、境界（60秒ちょうど、59.99秒）と並行実行のどちらも検証していない。 / 提案: clock を差し替えて60秒ちょうど（新しい枠）と59.99秒（同じ枠）を確かめる。N 個のスレッドで `hit` を同時に呼び、成功がちょうど `limit` 回になることを確かめる。`hook` で割り込みを再現する。\n- [軽微1] 区分: 実装 / 対象: R5, notes/service.py:205-206 / 対応区分: 改善提案 / 内容: `transfer_notes` は `owner_id` と `version` を更新するが `updated_at` を更新しない。一覧の「新しい順」の並びとの整合は仕様に書かれていないため、確認が必要。 / 提案: 仕様で更新扱いとするかを決める。\n- [軽微2] 区分: 実装 / 対象: R4, notes/service.py:146-152 / 対応区分: 改善提案 / 内容: 検索の `tags` の検証が `_validate` と重複している。 / 提案: `_validate_tags` に共通化する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名だけを確かめており、不十分。上限値・タグの規則・ロールバックの検証がない。\n- AC2: 同一組織の閲覧だけを確かめており、不十分。実装も NotFound の規則に違反している（重大1）。閲覧数の同時増加の検証もない。\n- AC3: 一覧と検索のそれぞれ1件の正常系だけで、不十分。`%`・`_`・`\\`・範囲外の入力・タグの OR の検証がない。SQL の組み立ては、プレースホルダーと ESCAPE 句（実装側の確認では適切）を使っている。\n- AC4: 更新・削除の正常系だけで、不十分。Conflict・Forbidden・競合を確かめるテストがない。実装に認可の再確認の欠落がある（重大3）。\n- AC5: 正常系と管理者でない場合の拒否だけで、不十分。組織をまたぐ移管と途中失敗のロールバックの検証がない。\n- AC6: 伏せ字を確かめておらず、不十分。\n- AC7: 不十分（重大4）。\n- AC8: 往復と改ざん1件だけで、不十分。期限ちょうど・形の崩れたリンク・期限切れの検証がない。実装の `>=` と fullmatch は適切に見える。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのファイルは見つからなかった。\n\n### E2E の要否\n- 不要。HTTP がなく、ライブラリを SQLite で直接呼ぶ構成のため、単体テストと結合テストで足りる。\n\n### 不足しているリスク\n- K1: 非公開メモの NotFound の統一と、取引内の認可の再確認が不足している（重大1・3）。\n- K3, K4, K5, K7, K8: これらを確かめる検証が不足している（重大2・4）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が通過した（0.003秒）。\n- `git status`・`history` を確認した。検証条件の削除や弱体化は見つからなかった（実装担当による bind の登録のみ）。\n- service.py・db.py・ratelimit.py・share.py の全行を読んだ。`gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 3,
+ "sec": 28.3,
+ "exit": 0,
+ "cost_usd": 0.12514589999999998,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19999,
+  "cache_read_input_tokens": 115339,
+  "output_tokens": 3360,
+  "output_tokens_details": {
+   "thinking_tokens": 788
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19999,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2313,
+    "cache_read_input_tokens": 36831,
+    "cache_creation_input_tokens": 3400,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3400
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 対応区分: 修正必須 / 内容: `create_note` がメモの本文をログに出している。 / 成立条件: メモを1件作成するたびに、`notes` ロガーの INFO が有効な環境で発生する（root ロガーの設定で十分）。 / 影響: 仕様 R9「ログに本文を出さない」に違反する。機密の本文がログに残る。 / 確認した保証: 本文を伏せる処理や、ログ出力を抑える処理は見当たらない。設計書の「ログには ID だけを出す」とも食い違う。 / 根拠: `notes/service.py:92` の `log.info(\"note created id=%s owner=%s body=%r\", note_id, user[\"id\"], body)`。 / 提案: `body` をログの引数から外し、ID だけを出す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC2・AC4・AC5・AC7・AC8, K1・K2・K3・K4・K6・K8） / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` の12件はほぼ正常系だけで、各受け入れ条件・リスクの検証が空洞化している。次の検証がない。\n  - K1: 他組織・他人の非公開メモが NotFound になること、一覧・検索に含まれないこと、管理者の越権が拒否されること。\n  - K2/R3: `%` と `_` を普通の文字として探すこと、タグ絞り込み、page・per_page・sort の範囲外。\n  - K3: `before_write` や `RateLimiter.hook` を使った、閲覧数・更新・回数制限の同時実行テスト。\n  - K4/AC10: Conflict（古い version、読み出しと書き込みの間の割り込み）、途中失敗でのロールバックと接続の再利用、移管が全部か何もしないか。\n  - AC1: 題名・本文・タグの境界値と拒否。\n  - AC6: api_key の伏せ字の確認。`test_export_audit` は action と actor しか見ていない。\n  - AC7: 枠の境界（ちょうど window 秒）の確認。\n  - AC8: 期限ちょうどの境界、形の崩れたリンク。\n  - AC9/K5: ログに機密が出ないこと。これがないために重大1が見逃されている。\n  / 根拠: これらは仕様が明示するリスクと受け入れ条件で、現状のテストはそれぞれの条件を外しても通る。ロールバックと並行の挙動は、設計書が `hooks.before_write` と `RateLimiter.hook` を差し込み口として用意している。 / 提案: 上記の項目ごとに、異常系・境界値・並行（決定論的な差し込み口を使う）のテストを追加する。特に、ログに本文が出ないことを `assertLogs` で確認するテストを入れる。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` のタグ検査が `_validate` と重複している。 / 提案: 検査を共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成の正常系と空題名の拒否だけを確認しており不十分。本文・タグの境界、失敗時に何も残らないこと（K4）は未検証。\n- AC2: 閲覧の正常系だけで不十分。他組織・非公開の NotFound、閲覧数の同時加算（K1・K3）が未検証。\n- AC3: 一覧の1ページ目と単純な検索だけで不十分。`%`・`_`・ESCAPE（K2）、タグ OR、範囲外入力、他人の非公開の除外が未検証。\n- AC4: 作成者による更新・削除だけで不十分。Conflict、Forbidden、管理者の扱い、削除の失敗が未検証。\n- AC5: 件数だけを確認しており不十分。他組織への移管の拒否、途中失敗で元のままか（K6）が未検証。\n- AC6: マスクの内容を確認していないため不十分（K7）。\n- AC7: 枠の再開だけで不十分。ちょうど window 秒の境界と同時の呼び出しが未検証。\n- AC8: 往復と改ざん1パターンだけで不十分。期限切れ、期限ちょうど、形の崩れが未検証（K8）。\n- AC9: 検証がなく、実際に違反が混入している（重大1）。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし。history では、検証条件を弱めた変更は見当たらない（bind の追加のみ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、リスクは単体・統合のテストで確認できる。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K6・K8・K5: 上記の重大2のとおり、検証が不足している。\n- 実装では、読み出しから書き込みまでの更新の競合は、UPDATE の version 条件で防がれている。`get_note` の閲覧数も `BEGIN IMMEDIATE` の中で更新されており、実装自体の欠陥は見つからなかった。ただし検証はない。\n\n### 確認したこと\n- `notes/*.py` と `tests/test_notes.py` を全文読んだ。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。\n- `aqdlc history --since 0`: 検証の改ざん・弱体化は見当たらなかった。\n- SQL はすべてプレースホルダーで、LIKE は `ESCAPE '\\'` とエスケープ関数を使っており、`search_notes` では題名と本文の両方に適用されていた。ORDER BY は固定辞書からのみ組み立てており、インジェクションの経路は見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SQL-07",
+ "rep": 3,
+ "sec": 29.0,
+ "exit": 0,
+ "cost_usd": 0.09822600000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12658,
+  "cache_read_input_tokens": 122180,
+  "output_tokens": 3536,
+  "output_tokens_details": {
+   "thinking_tokens": 752
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12658,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2339,
+    "cache_read_input_tokens": 37058,
+    "cache_creation_input_tokens": 2475,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2475
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d55828fe\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2（notes/service.py の search_notes） / 対応区分: 修正必須 / 内容: 検索で、本文（body）の LIKE パターンだけエスケープされていない。題名側は `_like_escape(q)` を通しているが、本文側は `f\"%{q}%\"` のまま `ESCAPE '\\\\'` 付きで渡している。 / 成立条件: 検索語に `%`、`_`、`\\` を含めたとき。 / 影響: `%` と `_` がワイルドカードとして働き、「% と _ も普通の文字として部分一致で探す」に反する。`\\` を含む語はエスケープ文字として解釈され、意図しないメモが一致する。他の組織や他人の非公開メモは WHERE 句で除外されているので、漏えいはしない。 / 確認した保証: 上流に検索語の検証はなく、`q` の長さと型を見るだけ。既存テストはこの経路を通らない。 / 根拠: 再現した。本文 \"100abc body\" のメモがあるとき `search_notes(c, u, \"100%\")` が一致した（題名が \"t\" で本文だけ一致する）。`_z` で本文 \"zz\" のメモも一致した。 / 提案: 本文側も `f\"%{_like_escape(q)}%\"` にし、`pattern` を題名と本文の両方に使う。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC7, AC8, AC10, K1, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py（12件、正常系が中心）に次の検証がない。 (a) 他の組織・他人の非公開メモが NotFound になること。更新と削除の Forbidden と NotFound の区別。移管の組織またぎの拒否。 (b) 楽観的ロックの Conflict と、閲覧数の同時加算。`hooks.before_write` は設計でテスト用の差し込み口とされているが、使っていない。 (c) 途中で失敗したときのロールバック（作成、移管、削除）と、その後に接続を使い続けられること。 (d) 検索の `%` と `_`（重大1を見逃した原因）、一覧の境界値（page=0、per_page=51、不正な sort）、タグの検査。 (e) RateLimiter の枠の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出し。 (f) 共有リンクの期限ちょうど、形の崩れ、期限切れ。 (g) api_key の伏せ字（AC6）、R9 のログに機密情報が出ないこと（AC9）。 / 根拠: 仕様がこれらを受け入れ条件・リスクとして明示している。ここでは認可・競合・SQL の欠陥を検出できない。テストにはどれも書かれていない。 / 提案: 上記 (a)〜(g) の異常系・境界値のテストを追加する。競合は sleep ではなく `hooks.before_write` と `RateLimiter.hook` で決定論的に再現する。\n- [重大3] 区分: テスト / 対象: AC6, R6, K7 / 対応区分: 証拠不足 / 内容: 監査ログの api_key の伏せ字を確かめるテストがまったくない。`test_export_audit` は action と actor しか見ておらず、`actor_key` は未検証。 / 根拠: 機密情報の漏えいを防ぐ要求（K7）で、受け入れ条件 AC6 そのもの。8文字未満、ちょうど8文字、それ以上の各境界が必要。 / 提案: 長さ 3、7、8、12 の鍵で `actor_key` の期待値を厳密に比較するテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R8（notes/share.py の verify_link） / 対応区分: 改善提案 / 内容: note_id を int 化して署名を検証するので、先頭に0を付けた \"007.exp.sig\" も有効と判定される。 / 提案: 標準形（`str(int)` と一致するもの）だけを受け付けるか、仕様に許容すると書く。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名と正常系だけで、不十分。長さ・タグ・本文の境界とロールバックの検証がない。\n- AC2: 閲覧の正常系だけで、不十分。他組織・非公開・同時閲覧の検証がない。\n- AC3: 正常系の1件だけで不十分。実装にも本文側の `%` と `_` のバグがある（重大1）。\n- AC4: 更新・削除の正常系だけで不十分。Conflict と Forbidden の検証がない。\n- AC5: 管理者でない場合の拒否と正常系だけで不十分。組織またぎと途中失敗の検証がない。\n- AC6: 未検証（重大3）。\n- AC7: 上限超過と枠の再開（61秒後）だけで不十分。ちょうど window 秒の境界と並行の検証がない。\n- AC8: 往復と改ざん1件だけで不十分。期限の境界、期限切れ、形の崩れの検証がない。\n- AC9: 未検証。\n- AC10: 未検証。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリ。単体・結合テストで足りる）。\n### 不足しているリスク\n- K1, K3, K4, K6, K8: 検証がない（重大2）。\n- K5, K7: 検証がない（重大3）。\n- K2: 実装に本文側のエスケープ漏れがある（重大1）。\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py の全ソースを通して読んだ。`git status` では notes/ と tests/ はすべて未追跡で、`git diff` による検証条件の弱体化の比較はできない。\n- `python3 -m unittest discover -s .`: 12件が合格。\n- 再現スクリプト（読み取りのみ、`:memory:` DB）で、本文側の `%` と `_` がワイルドカードとして働くことを確かめた。\n- `$AQ trace` / `history` と gate のログは参照していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 1,
+ "sec": 30.5,
+ "exit": 0,
+ "cost_usd": 0.1246006,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18660,
+  "cache_read_input_tokens": 113946,
+  "output_tokens": 3855,
+  "output_tokens_details": {
+   "thinking_tokens": 435
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18660,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2903,
+    "cache_read_input_tokens": 36521,
+    "cache_creation_input_tokens": 2140,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2140
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "判定は要修正です。RateLimiter に実バグが1件あり、仕様のリスクを確かめるテストも欠けています。\n\n## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7 / 対応区分: 修正必須 / 内容: `RateLimiter.hit` の枠の境界が仕様と食い違っている。`notes/ratelimit.py:21` が `now - start > self.window` で判定しており、ちょうど window 秒たった時点がまだ古い枠の扱いになる。仕様は「ちょうど window 秒たったら新しい枠」。 / 成立条件: 枠の開始からちょうど window 秒後に、limit に達しているユーザーが呼ぶ。 / 影響: 新しい枠で許可されるべき呼び出しが誤って RateLimited になる。上限を超えて許すことはないので、安全性ではなく仕様違反。 / 根拠: 実行して確認した。`limit=1, window=10` でクロックを `t=0` で1回呼び、`t=10` でもう1回呼ぶと \"limited\" になった。呼び出し元や上流の検証にこの条件を補う箇所はない。 / 提案: 判定を `>=` に直し、境界のテストを追加する。\n- [重大2] 区分: テスト / 対象: AC7, K3, R7 / 対応区分: 証拠不足 / 内容: RateLimiter について、枠の境界（window ちょうど、window の直前）と、複数スレッドからの同時呼び出しで上限を超えないことを確かめるテストがない。現在のテストは 0→61 秒の1ケースだけで、これは重大1のバグを通してしまう。`RateLimiter.hook` による再現も使われていない。 / 根拠: AC7 が「枠の境界・同時の呼び出しを含む」と明記している。K3 のリスクにも関係する。 / 提案: 境界値（window-ε、window ちょうど）のテストと、`hook` や Barrier を使って決定論的に並行させ、成功数が limit 以下になることを確かめるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 負の経路を確かめるテストがほとんどなく、検証が空洞化している。実在しないことを確認済みのものは次のとおり。 (a) 他組織・他人の非公開メモが NotFound になること（K1）。 (b) 一覧・検索で他人の非公開メモが含まれないこと。 (c) 更新・削除の Forbidden と Conflict（古い version、`hooks.before_write` による競合）。 (d) 閲覧数の同時加算。 (e) create・delete・transfer の途中失敗でのロールバックと、その後の接続の再利用（K4, AC10）。 (f) 移管の組織またぎ（K6）。 (g) api_key のマスク（8文字未満・ちょうど8文字、K7）。 (h) 共有リンクの期限切れ・期限ちょうど・形の崩れ（K8）。 (i) SQL の `%`・`_`・インジェクション文字列、タグでの絞り込み（K2）。 (j) ログに機密情報が出ないこと（AC9）。 / 根拠: 12件のテストはほぼ正常系だけである。`test_export_audit` は action と actor しか見ておらず、マスクを確かめていない。`test_tampered` は改ざんの1種類だけ。仕様が受け入れ条件として要求しているのは、これらの規則どおりに決まることである。 / 提案: 上の各項目について、認可の条件や WHERE 条件、マスク、境界を外したら失敗するテストを追加する。並行・途中失敗の再現には既存の `hooks.before_write` と `RateLimiter.hook` を使う。\n- [重大4] 区分: テスト / 対象: AC2, AC4, K3, R4 / 対応区分: 証拠不足 / 内容: 楽観的ロックの競合（読み出しと書き込みの間に他の更新が入る場合）と、閲覧数の同時加算を、決定論的に再現する検証がない。 / 根拠: R2・R4 は「数え漏れがない」「後から書いた側が先の更新を消さない」を要求している。実装は `UPDATE ... WHERE version = ?` と BEGIN IMMEDIATE で妥当に見えるが、実際に確かめたテストはない。 / 提案: `hooks.before_write(\"update\")` の中で別接続から更新し、Conflict になることを確かめるテストを追加する。別スレッド・別接続で N 回閲覧し、views が N になることも確かめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と空題名の1件だけ。100文字や101文字、空白だけの題名、タグの個数・形式・重複、tags が文字列の場合、タグ挿入中の失敗（`create:tags` hook）で何も残らないことは未検証のため不十分。\n- AC2: 正常な閲覧しか確かめておらず不十分。他組織・他人の非公開メモ・存在しないメモの NotFound、閲覧数の加算、同時閲覧は未検証。実装（`_visible`）はコード上は妥当に見える。\n- AC3: 一覧の1ページ目と検索1件だけで不十分。範囲外の page・per_page・sort、`%`・`_`、タグの OR、非公開の除外は未検証。実装は ESCAPE とプレースホルダーを使っており妥当に見える。\n- AC4: 作成者による更新と削除の正常系だけで不十分。Forbidden、Conflict、管理者の操作、非公開、更新時の検証、削除失敗の伝播は未検証。\n- AC5: 管理者の拒否と成功の件数だけで不十分。組織またぎ、移管後の所有者の確認、途中失敗での巻き戻しは未検証。\n- AC6: 不十分。`test_export_audit` はマスクを検証していない。\n- AC7: 不十分。重大1・重大2のとおり。境界のバグを通してしまうテストで、並行の検証もない。\n- AC8: 往復と改ざん1種類だけで不十分。期限切れ、期限ちょうど、形の崩れは未検証。実装は `fullmatch` と `compare_digest` を使っており妥当に見える。\n- AC9: 未検証。ログや例外メッセージに機密情報が出ないことを確かめるテストがない。\n- AC10: 未検証。例外後に同じ接続を再利用できるかを確かめるテストがない。\n- エンジンが検出した兆候（skip・.only・アサーションなし）はなし。tests/test_notes.py に弱体化や skip は見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、`unittest` の統合テスト（実 SQLite、別接続・別スレッド）で足りる。\n\n### 不足しているリスク\n- K1〜K8 のうち、実装でカバーされているように見えるものも、ほぼすべて検証がない。重大2〜4のとおり。\n- 共有リンクの `note_id` に先頭ゼロを許す（例: \"007.…\"）。署名は int に正規化した値に対して検証されるため、同一メモを指す別表記が有効になる。仕様の形式には合致しており、深刻ではないため指摘にはしていない（未確認）。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py をすべて読んだ。\n- gate のログを確認した。`python3 -m unittest discover` が 12 件で OK、exit=0。\n- RateLimiter の境界を python3 で再現した。`limit=1, window=10, t=0` で1回、`t=10` でもう1回呼ぶと \"limited\" になった。\n- `git status` で、notes/ と tests/ はすべて未追跡（コミット前）であることを確認した。`$AQ trace` と `$AQ history` は実行していない。そのため、検証条件の改ざん・弱体化は確認できていない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 1,
+ "sec": 32.6,
+ "exit": 0,
+ "cost_usd": 0.131505,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19516,
+  "cache_read_input_tokens": 116250,
+  "output_tokens": 4180,
+  "output_tokens_details": {
+   "thinking_tokens": 625
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19516,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2798,
+    "cache_read_input_tokens": 37302,
+    "cache_creation_input_tokens": 2446,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2446
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 対応区分: 修正必須 / 内容: `RateLimiter.hit` が `with threading.Lock():` で呼び出しのたびに新しいロックを作っている。このため排他になっていない（`self._lock` は使われていない）。 / 成立条件: 同じ利用者の `hit` が複数スレッドから同時に呼ばれる（比較して加算するまでの間に他のスレッドが入る）。 / 影響: 上限を超えて許可される。確認実行では limit=3 に対して 8 スレッドが全員許可された。仕様 R7「同時でも上限を超えて許さない」の違反。 / 根拠: notes/ratelimit.py:20 の `with threading.Lock():`。`hook` を `Barrier` にして 8 スレッドから `hit(1)` を呼ぶと `allowed 8 limit 3` になった。上流や DB の保証はなく、呼び出し元も排他していない。 / 提案: `with self._lock:` に直す。ただし `hook()` がロック内にあるので、並行テストでは `hook` をロックの外で呼ぶか、判定と更新の間に割り込めるよう再設計する。\n- [重大2] 区分: テスト / 対象: AC7, AC3, K2, K3 / 対応区分: 証拠不足 / 内容: 同時実行・SQL 周りの検証がない。RateLimiter の複数スレッド、閲覧数の同時加算、検索の `%` `_` `\\` を普通の文字として探すこと、SQL インジェクション文字列の入力、がいずれも未検証。 / 根拠: 重大1のバグがあるのに 12 件すべてが通っている。AC3・AC7 と K2・K3 は必須の受け入れ条件・リスクであり、設計も差し込み口（`hooks.before_write` と `RateLimiter.hook`）を用意しているが使われていない。 / 提案: `hook` を使って決定論的に競合を再現するテストを加える（制限が limit 回を超えないこと、複数スレッドでの閲覧数）。`%` `_` を含む検索の検証と、注入文字列で全件が返らないことの検証も加える。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC6, AC8, AC9, AC10, K1, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 正常系しか確かめておらず、異常系と境界値の検証がほとんどない。具体的には次が未検証。 / 根拠: 重要なリスクごとの未検証項目は次のとおり。 / 提案: 各項目につき、条件を外すと失敗するテストを足す。\n  - K1: 他組織・他人の非公開メモが NotFound になること、一覧・検索から除外されること、他人のメモで Forbidden になること。\n  - K4: `hooks.before_write` で失敗させて create・delete・transfer がロールバックされること、更新の Conflict（古い version、読み出しから書き込みの間の割り込み）、失敗後も接続を使えること（AC10）。\n  - K6: 移管で他組織の利用者を指定したときの Forbidden。\n  - K7: `export_audit` の api_key の伏せ方（末尾4文字、8文字未満、ちょうど8文字）。\n  - K8: 期限ちょうど・期限切れ・形の崩れたリンク・改ざんの境界。`test_tampered` は note_id を書き換える1件だけ。\n  - AC1・AC3: タグの上限や形式、題名・本文・検索語の境界値、page・per_page・sort の範囲外。\n  - AC9: ログや例外メッセージに機密情報が出ないこと。\n  - R7: 枠の境界（ちょうど window 秒）。`test_limit` は 61 秒後しか見ていない。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `verify_link` の正規表現は桁数を最大 18 桁に制限している（仕様は「数字だけ」）。先頭ゼロのリンク（例 `007.…`）も、整数化した値で署名を検証するため通る。 / 提案: 先頭ゼロの扱いと桁数の上限を設計に明記するか、正規化した文字列と一致するか確認する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけ。タグの規則、上限、失敗時に何も残らないこと、境界値は未検証で不十分。実装は仕様どおり（トランザクションと検証あり）。\n- AC2: 同組織の閲覧と閲覧数の増加は未検証。NotFound の分岐（他組織・他人の非公開）、同時加算も未検証で不十分。実装は BEGIN IMMEDIATE のため正しいと読める。\n- AC3: 最初のページと単純な検索だけ。範囲外の入力、sort、`%` `_`、タグの OR、他人の非公開の除外は未検証で不十分。実装は ESCAPE とプレースホルダーを使っており問題なし。\n- AC4: 作成者による更新と削除の正常系だけ。Conflict、Forbidden、管理者、検証、失敗時の巻き戻しは未検証で不十分。\n- AC5: 正常系と非管理者の拒否だけ。他組織の拒否と途中失敗での元どおりは未検証で不十分。\n- AC6: `test_export_audit` は action と actor しか見ておらず、伏せ字は未検証で不十分。\n- AC7: 逐次の境界手前だけ。同時呼び出しは未検証で、実装にバグがある（重大1）。\n- AC8: 往復と1種類の改ざんだけ。期限の境界、期限切れ、形の崩れは未検証で不十分。\n- AC9: 検証なしで不十分。\n- AC10: 検証なしで不十分。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。テストの改ざんや弱体化は、`tests/` が未追跡の新規ファイルで比較対象がなく、確認できなかった。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリ）。ただし、ファイル DB を使った複数接続・複数スレッドの結合テストは必要（重大2）。\n### 不足しているリスク\n- K3: RateLimiter の排他が効いていない（重大1）。複数接続での同時更新の Conflict と、閲覧数の同時加算は検証がない。\n- K1・K4・K6・K7・K8: 検証がほとんどない（重大3）。\n- K5: ログ・例外・出力に機密情報が出ないことの検証がない。コードを読んだ範囲では、本文・署名・api_key をログに出す箇所は見当たらなかった。\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py と tests/test_notes.py の全体を読んだ。\n- `python3 -m unittest discover -s tests -t .`: 12 件が成功。\n- 並行再現スクリプト（`hook` を Barrier にして 8 スレッドから `hit(1)`、limit=3）: 8 件が許可され、バグを確認。\n- SQL は検索の LIKE で ESCAPE とプレースホルダー、`_like_escape` が `\\` `%` `_` を処理していることを確認した。一覧の ORDER BY は固定のマップだけ。SQL の組み立てに問題は見つからなかった。\n- `$AQ trace`・`history`・`gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

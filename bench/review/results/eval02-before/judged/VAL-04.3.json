@@ -1,0 +1,33 @@
+{
+ "case": "VAL-04",
+ "rep": 3,
+ "judge_cost_usd": 0.06363819999999999,
+ "judge_raw": "## 判定\n\n- **重大1**: 埋め込んだ欠陥そのものを指摘しています。update_note が `_validate(new_title, new_body, [])` と空リストを渡しており、タグを検査していません。箇所も原因も影響も一致します。\n- **重大2**: `TAG_RE.match` と `$` の組み合わせで、末尾に改行の付いたタグが通るという指摘です。`$` は末尾の `\\n` の直前にも一致するので、コードに実在する欠陥です。ただし埋め込んだ欠陥ではありません。\n- **重大3**: テスト不足だけを指摘しています。\n- **軽微1**: 検査ロジックの重複を共通化する提案で、保守性の話です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note が _validate に空リストを渡し、更新時のタグ検査が抜けているという、埋め込んだ欠陥そのものの指摘。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match と $ で使うため末尾改行のタグが通る、実在する別の欠陥で、再現も示している。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値・並行のテストが足りないという指摘で、コードの欠陥ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が update_note でタグを検査していない欠陥を、原因と影響まで正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note が _validate に空リストを渡し、更新時のタグ検査が抜けているという、埋め込んだ欠陥そのものの指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match と $ で使うため末尾改行のタグが通る、実在する別の欠陥で、再現も示している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "異常系・境界値・並行のテストが足りないという指摘で、コードの欠陥ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が update_note でタグを検査していない欠陥を、原因と影響まで正しく特定している。"
+ }
+}

@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-09",
+ "rep": 1,
+ "judge_cost_usd": 0.0688943,
+ "judge_raw": "各指摘の判定です。\n\n- **重大1**: `TAG_RE` は `$` と `.match` の組み合わせなので、末尾が改行のタグが通ります。これは実在するバグで、仕様の「英小文字・数字・ハイフン」にも反します。ただし、埋め込んだ欠陥ではありません。本ケースは欠陥なしなので、matches_defect にはならず real_other です。\n- **重大2**: テストの不足だけを指摘しています。コードの欠陥の主張ではないので test_gap です。\n- **重大3**: 認可の判定がトランザクションの外にあるため、判定と書き込みの間に所有者が変わる、または削除されると、更新・削除が通ります。`delete_note` は rowcount も確認していないので、行がなくても監査ログが残ります。仕様の R4「読み出しから書き込みの間に他の更新が入った場合も Conflict」と、K1 に関わる実在の競合です。ただし update は version で一部防がれます。実在の問題として real_other とします。\n- **軽微1**: unhashable な `sort`（list など）は `in` の判定で TypeError になり、ValidationError になりません。実在する入力検証の漏れで、real_other です。\n- **軽微2**: 存在しない移管先は FK 制約の IntegrityError になります。ただし仕様は、移管先が同じ組織の既存の利用者であることを呼び出し側が確かめて渡す前提です。仕様上の例外型も指定されていません。保守性の提案に近いので style とします。\n\n欠陥なしのケースなので、defect_detected は n/a です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と `.match` により末尾が改行のタグが通る実在のバグだが、埋め込んだ欠陥ではない（欠陥なしのケース）。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"認可判定がトランザクションの外にあり、delete の rowcount も確認しないため、判定後の変更が通る実在の競合。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"unhashable な sort で ValidationError ではなく TypeError になる、実在する入力検証の漏れ。\"},\n{\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"移管先の存在は呼び出し側が確かめる前提で、例外型も仕様にないため、改善提案にとどまる。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、実在の別の欠陥が3件指摘されている（重大1・重大3・軽微1）。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と `.match` により末尾が改行のタグが通る実在のバグだが、埋め込んだ欠陥ではない（欠陥なしのケース）。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "認可判定がトランザクションの外にあり、delete の rowcount も確認しないため、判定後の変更が通る実在の競合。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "unhashable な sort で ValidationError ではなく TypeError になる、実在する入力検証の漏れ。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "移管先の存在は呼び出し側が確かめる前提で、例外型も仕様にないため、改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、実在の別の欠陥が3件指摘されている（重大1・重大3・軽微1）。"
+ }
+}

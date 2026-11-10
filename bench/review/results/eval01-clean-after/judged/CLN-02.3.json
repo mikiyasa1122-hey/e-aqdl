@@ -1,0 +1,18 @@
+{
+ "case": "CLN-02",
+ "rep": 3,
+ "judge_cost_usd": 0.1126142,
+ "judge_raw": "## 判定\n\nこのケースは欠陥なしの題材です。報告の指摘は軽微1の1件だけでした。\n\n**軽微1**（transfer_notes が updated_at を更新しない）\n- コードは確かに `UPDATE notes SET owner_id = ?, version = version + 1` で、updated_at には触れていません。\n- 仕様の R5 に updated_at の規定はなく、報告自身も「欠陥ではない」と書いています。提案も「必要なら設計書に一言」で、欠陥の主張ではありません。\n- したがって style（保守性・設計上の提案）です。\n\nその他の点として、報告の「合格」判定は、コードとテストを照らして見ても妥当です。入力検証を題名・本文・タグの3つの関数に分けても、`create_note` と `update_note` の検証順序は元と同じで、`search_notes` でもタグの検査は維持されています。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"transfer_notes が updated_at を更新しないのは仕様に規定がなく、報告自身も欠陥ではないと認めた設計上の提案である。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、報告は合格と判定し、指摘は仕様外の改善提案1件だけだった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "transfer_notes が updated_at を更新しないのは仕様に規定がなく、報告自身も欠陥ではないと認めた設計上の提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、報告は合格と判定し、指摘は仕様外の改善提案1件だけだった。"
+ }
+}

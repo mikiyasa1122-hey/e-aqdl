@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 3,
+ "sec": 33.0,
+ "exit": 0,
+ "cost_usd": 0.1336752,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20121,
+  "cache_read_input_tokens": 115452,
+  "output_tokens": 4163,
+  "output_tokens_details": {
+   "thinking_tokens": 628
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20121,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2694,
+    "cache_read_input_tokens": 37658,
+    "cache_creation_input_tokens": 2464,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2464
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K1, K6 / 対応区分: 修正必須 / 内容: `transfer_notes`（notes/service.py:194-207）が移す先 `to_user` の組織を確認していない。確認しているのは管理者の role と `from_user` の org だけ。 / 成立条件: 同じ組織の管理者が、同じ組織の利用者のメモを別組織の利用者へ移そうとするとき。 / 影響: 組織 1 のメモが組織 2 の利用者に渡る。ただし `notes.org_id` は更新されず、所有者だけが別組織の利用者になる。仕様の「移す先も同じ組織」と、K6「組織の外にメモが渡る」に反する。組織がずれた行は、元の組織からも新しい所有者からも整合して扱えなくなる。 / 確認した保証: 呼び出し元の検証はなく、ライブラリは利用者 dict を信用する前提。FK は `users.id` の存在しか見ない。既存テストにも拒否の検証はない。 / 根拠: 再現した。org1 の admin が org1 の利用者のメモを org2 の利用者へ `transfer_notes` すると、例外なく 2 を返し、`owner_id` が 3 になった。org_id は 1 のまま。 / 提案: 移す前に `to_user[\"org_id\"] != admin[\"org_id\"]` なら Forbidden を送出する。`to_user` が存在することも確かめる。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾に改行を付けたタグ（例 `\"ab\\n\"`）が検証を通る。`$` は末尾の改行の手前にも一致する。share.py は同じ問題を避けて `fullmatch` を使っており、service.py は対応が漏れている。 / 成立条件: `create_note`・`update_note`・`search_notes` に、末尾が `\\n` のタグを渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という規則を破るタグが保存される。 / 確認した保証: ほかに検証する層はない。 / 根拠: 再現した。`create_note(..., [\"ab\\n\"])` が成功した（service.py:14,64,150）。 / 提案: `TAG_RE.fullmatch` を使う（3箇所）。境界値のテストも足す。\n- [重大3] 区分: テスト / 対象: AC1, AC4, AC5, AC10, R1, R4, R5, R10, K4 / 対応区分: 証拠不足 / 内容: 途中失敗でロールバックされることを確かめるテストが1件もない。設計が用意した `hooks.before_write` は、どのテストからも使われていない。特に次が未検証: create のタグ挿入失敗、delete の途中失敗、transfer の一部失敗、失敗後に同じ接続を使い続けられること（AC10）。 / 根拠: 「何も残さない」「全部か何もしないか」は受け入れ条件そのもの。tests/test_notes.py は正常系が中心。 / 提案: hook で例外を起こし、DB の状態が元のままで、同じ接続が次の操作に使えることを検証する。\n- [重大4] 区分: テスト / 対象: AC2, AC4, AC7, K3, AC9, AC6, K1, K2, K7, K8 / 対応区分: 証拠不足 / 内容: 必須の検証が欠けている。 (a) 同時の閲覧数・更新の Conflict・RateLimiter の同時呼び出し。決定論的に再現する仕組みである `hooks` と `RateLimiter.hook` が、どこでも使われていない。 (b) 他組織・他人の非公開メモが NotFound になること、一般利用者が他人のメモを更新・削除して Forbidden になること。 (c) 検索の `%`・`_` と SQL 文字列の入力。 (d) api_key のマスク（AC6）。8文字未満の鍵と末尾4文字の検証がなく、既存の `test_export_audit` は鍵を見ていない。 (e) 共有リンクの期限ちょうど・期限切れ・形の崩れ。 (f) 長さの境界値。 (g) ログ・例外に本文・署名・鍵が出ないこと（AC9）。 / 根拠: AC2・AC4・AC6〜AC9 と、K1・K2・K3・K7・K8 に対応するテストがなく、実装の正しさを確かめる証拠がない。実装は読んだ範囲でおおむね妥当に見えるが、証拠がない。 / 提案: 上の各項目についてテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` が、タグの検査を `_validate` と重複して書いている（service.py:146-151）。 / 提案: 検査を共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常系だけ。ロールバック・境界値・タグ規則がなく、不十分（重大2・3）。\n- AC2: 正常系で閲覧するだけで、閲覧数の増加も他組織・非公開の拒否も同時閲覧も検証していない。不十分。\n- AC3: 一覧の最初のページと基本の検索だけ。範囲外・`%` `_`・タグ OR・非公開の除外がなく、不十分。\n- AC4: 作成者の更新と削除だけ。Conflict・Forbidden・検証が未検証で、不十分。\n- AC5: 正常系と非管理者の拒否だけ。別組織・ロールバックがなく、不十分（重大1）。\n- AC6: マスクを見ていないテストで、不十分。\n- AC7: 時刻の境界は部分的に確認できている。ちょうど window 秒の境界と同時呼び出しは未検証。\n- AC8: 往復と改ざんだけで、期限の境界・形の崩れが未検証。\n- AC9・AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。標準ライブラリだけのライブラリで UI・HTTP がない。ただし単体テストで並行・障害の検証が必要（重大3・4）。\n\n### 不足しているリスク\n- K1: テストで未確認。コードの読みでは、`_visible` による NotFound は妥当に見える。\n- 並行処理: `get_note` の閲覧数は UPDATE の式で数え漏れを防ぐ設計だが、確かめるテストがない。\n- 軽微（指摘なし）: `update_note` の認可判定は、トランザクションの外で読んでいる。version の条件が最終的に Conflict で守るため、重大とはしない。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` → 12 件すべて通過（ただし上記の欠陥は検出されない）。\n- 再現スクリプトで、別組織への移管の成功とタグの末尾改行の通過を確認した。\n- git 履歴は、未コミットの新規ファイルのみで、検証条件の弱体化は見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

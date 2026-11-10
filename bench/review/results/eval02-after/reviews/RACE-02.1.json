@@ -1,0 +1,49 @@
+{
+ "case": "RACE-02",
+ "rep": 1,
+ "sec": 30.3,
+ "exit": 0,
+ "cost_usd": 0.12370950000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18762,
+  "cache_read_input_tokens": 115355,
+  "output_tokens": 3711,
+  "output_tokens_details": {
+   "thinking_tokens": 522
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18762,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2821,
+    "cache_read_input_tokens": 36843,
+    "cache_creation_input_tokens": 2151,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2151
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d865c6b5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3 / 対応区分: 修正必須 / 内容: `get_note` が閲覧数を数え漏らす。 / 成立条件: 別々の接続・スレッドが同じメモを同時に閲覧する。A と B が同じ `views` を読み、どちらも同じ `views+1` を書き込む。 / 影響: 閲覧数が実際より少なくなる。仕様の「同時に閲覧されても数え漏れがないこと」に違反する。 / 根拠: `notes/service.py` の `get_note` は、トランザクションの外で `views = row[\"views\"]` を読んでいる。その後 `UPDATE notes SET views = ? WHERE id = ?` に古い値 `views + 1` を渡している。`BEGIN IMMEDIATE` は書き込みを直列にするが、読み取りがロックの外にあるため古い値を防げない。`before_write(\"view\")` の差し込み口は、まさにこの隙間に置かれている。上流の保証や DB の制約は見当たらない。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` に変える。読み取りと可視性の確認はトランザクションの中で行う。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 仕様の受け入れ条件を確かめるテストが、ほぼ正常系の1本ずつしかない（全12本）。異常系・境界値・競合の検証が空洞になっている。具体的には次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること、管理者でも非公開は見えないこと。(b) Conflict（古い version、読み書きの間の割り込み）。(c) 作成・削除・移管の途中失敗でロールバックされること、例外の後に接続を使い続けられること。(d) LIKE の `%` `_` `\\` の扱いと、タグの OR 絞り込み。(e) 入力の上限・下限（題名100/101文字、タグ5/6個、`page=0`、`per_page=51`、`sort` の不正値）。(f) `api_key` の伏せ字（8文字未満・ちょうど8文字）。(g) 共有リンクの期限ちょうど・形の崩れ。(h) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドからの同時呼び出し。(i) 閲覧数の同時加算。 / 根拠: 漏えい・競合・不整合・鍵の漏えい・リンク偽造は、仕様のリスク K1〜K8 で重要とされているが、テストがない。重大1の欠陥も現在のテストでは検出できない。`service.hooks.before_write` と `RateLimiter.hook` は設計書でテスト用に用意された差し込み口だが、一度も使われていない。 / 提案: 上の (a)〜(i) について、決定論的なテストを追加する。並行系は `hooks`・`hook`・`threading.Barrier` で再現し、`sleep` に頼らない。\n- [重大3] 区分: 実装 / 対象: R4, K1, K3 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` の認可・可視性の確認が、書き込みのトランザクションの外にある。 / 成立条件: 認可の確認後、書き込みまでの間に `transfer_notes` が所有者を変える。または、非公開に切り替えられる。 / 影響: 変更後は権限のない呼び出し側が、そのまま更新・削除できる。`update_note` は、確認時の行を使って検証・更新する。 / 根拠: `service.py` の `_row` → `_visible` → `_can_modify` が `transaction()` の前にある。`UPDATE` の条件は `version` だけである。ただし `transfer_notes` は version を +1 するため、`update_note` では、確認後に移管が入ると version が不一致になり Conflict になる。このため `update_note` の影響は限定的で、実害が出るのは version を取り直した場合などである。`delete_note` には version の条件がなく、確認後に所有者が変わっても、古い確認結果のまま削除される。 / 提案: 少なくとも `delete_note` では、トランザクションの中で行を読み直して `_visible` と `_can_modify` を確認してから削除する。`update_note` も同様に、中で確認する。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` の検索対象は題名・本文の `LIKE ... ESCAPE '\\'` で、`_like_escape` がエスケープ文字・`%`・`_` を処理し、プレースホルダーも使っている。実装は妥当である。ただし R1 と同じタグ検査が `_validate` と二重に書かれている。 / 提案: タグ検査を共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。上限・下限、タグの規則、失敗時に何も残らないことの検証がない。\n- AC2: 同時閲覧の検証がなく、実装に欠陥がある（重大1）。見え方の拒否のテストもない。不十分。\n- AC3: `test_list_first_page` と `test_search` の2本だけ。範囲外、`%` `_`、タグ OR の検証がなく、不十分。\n- AC4: 所有者の更新・削除の正常系だけ。Conflict と Forbidden、ロールバックの検証がなく、不十分。\n- AC5: `test_transfer` と `test_transfer_requires_admin` の2本だけ。組織をまたぐ拒否と、途中失敗で元のままであることの検証がなく、不十分。\n- AC6: `test_export_audit` は action と actor しか見ていない。`api_key` の伏せ字を確かめておらず、不十分。\n- AC7: 上限超過と窓の経過の正常系は確かめている。ちょうど window 秒の境界と、同時呼び出しがなく、不十分。\n- AC8: 往復と改ざんの1本ずつ。期限ちょうど、形の崩れがなく、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。skip や弱体化は確認していない。ただし、そもそも検証が薄い。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest による結合テストで足りる）。ただし、並行系のテストは必須。\n\n### 不足しているリスク\n- K1: 他の組織・非公開メモの NotFound の検証がない。\n- K2: SQL は全て `?` で渡しており実装は妥当だが、`%` や `'` を含む入力のテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行の検証がない。実装には重大1の欠陥がある。\n- K4: 途中の失敗によるロールバックの検証がない。\n- K5・K7: `api_key` の伏せ字と、ログ・例外への機密の混入の検証がない。\n- K6: 組織をまたぐ移管と、一部だけ移るケースの検証がない。\n- K8: 期限ちょうど・形の崩れ・長さの検証がない。\n\n### 確認したこと\n- `spec.md` と `design.md`、`notes/*.py` と `tests/test_notes.py` を全文読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12本が通った。\n- `$AQ trace` と `$AQ history` は実行していない。検証条件の弱体化は未確認。\n- 並行処理の欠陥は、コードの経路から判断した。再現の実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

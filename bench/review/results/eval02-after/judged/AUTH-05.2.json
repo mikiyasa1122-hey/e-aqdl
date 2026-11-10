@@ -1,0 +1,28 @@
+{
+ "case": "AUTH-05",
+ "rep": 2,
+ "judge_cost_usd": 0.060234300000000005,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `search_notes` の SQL に非公開メモの除外条件がなく、同じ組織の他人の非公開メモが検索結果に出るという指摘です。埋め込んだ欠陥と箇所・原因・影響がすべて一致します。\n- **重大2**: コードの欠陥ではなく、テストの不足を指摘しています。\n- **軽微1**: タグ検査が重複していて保守しにくいという提案で、欠陥の主張ではありません。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes に private/owner_id の除外がなく、同じ組織の他人の非公開メモが検索に出るという、埋め込んだ欠陥と同じ箇所・原因・影響の指摘。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストが異常系・境界・並行・漏えいを確かめていないというテスト不足だけの指摘。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"検索のタグ検査が _validate と重複しているという保守性の提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\",\n\"matched_label\": \"重大1\",\n\"note\": \"重大1が search_notes の非公開メモ除外の欠落を、原因・影響とも正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes に private/owner_id の除外がなく、同じ組織の他人の非公開メモが検索に出るという、埋め込んだ欠陥と同じ箇所・原因・影響の指摘。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストが異常系・境界・並行・漏えいを確かめていないというテスト不足だけの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "検索のタグ検査が _validate と重複しているという保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が search_notes の非公開メモ除外の欠落を、原因・影響とも正しく特定している。"
+ }
+}

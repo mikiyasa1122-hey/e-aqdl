@@ -1,0 +1,43 @@
+{
+ "case": "SQL-05",
+ "rep": 1,
+ "judge_cost_usd": 0.0663883,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- 重大1: TAG_RE を `.match` で使うため、末尾に改行を付けたタグが通ります。これは埋め込んだ欠陥とは別の、実在する欠陥です（real_other）。\n- 重大2: `_like_escape` が `\\` 自体をエスケープしていない点を、箇所・原因・影響まで正しく指摘しています。埋め込んだ欠陥そのものです（matches_defect）。\n- 重大3: テストの不足だけを指摘しています（test_gap）。\n- 重大4: テストの不足だけを指摘しています（test_gap）。\n- 重大5: テストの不足だけを指摘しています（test_gap）。\n- 軽微1: `delete_note` がトランザクション内で再確認しないため、他者が先に削除していても成功扱いになります。仕様の R4（楽観的ロック）の趣旨に照らして実在する欠陥と言えますが、軽微です（real_other）。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE を .match で使うため末尾改行のタグが通る実在のバグで、埋め込み欠陥とは別物。\"},\n{\"label\": \"重大2\", \"class\": \"matches_defect\", \"reason\": \"_like_escape が \\\\ 自体をエスケープしない点を、箇所・原因・影響（\\\\% がワイルドカードになる等）まで正しく指摘している。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"異常系・境界・認可・競合のテスト不足の指摘のみ。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"api_key 伏せ字・機密非出力のテスト不足の指摘のみ。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"RateLimiter・共有リンクの境界・同時実行のテスト不足の指摘のみ。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note が削除の rowcount を確認せず、競合時に何もせず成功して監査ログだけが残る実在の欠陥。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大2\", \"note\": \"重大2が埋め込み欠陥（_like_escape の \\\\ 未エスケープ）を原因・影響とも正しく捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE を .match で使うため末尾改行のタグが通る実在のバグで、埋め込み欠陥とは別物。"
+   },
+   {
+    "label": "重大2",
+    "class": "matches_defect",
+    "reason": "_like_escape が \\ 自体をエスケープしない点を、箇所・原因・影響（\\% がワイルドカードになる等）まで正しく指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "異常系・境界・認可・競合のテスト不足の指摘のみ。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "api_key 伏せ字・機密非出力のテスト不足の指摘のみ。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "RateLimiter・共有リンクの境界・同時実行のテスト不足の指摘のみ。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note が削除の rowcount を確認せず、競合時に何もせず成功して監査ログだけが残る実在の欠陥。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大2",
+  "note": "重大2が埋め込み欠陥（_like_escape の \\ 未エスケープ）を原因・影響とも正しく捉えている。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 2,
+ "sec": 30.3,
+ "exit": 0,
+ "cost_usd": 0.1298996,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20319,
+  "cache_read_input_tokens": 122776,
+  "output_tokens": 3633,
+  "output_tokens_details": {
+   "thinking_tokens": 1258
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20319,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1941,
+    "cache_read_input_tokens": 37399,
+    "cache_creation_input_tokens": 9867,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9867
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, notes/share.py:`verify_link` / 対応区分: 改善提案 / 内容: リンクの note_id を `int()` に変換してから署名を検証している。そのため「007.期限.署名」のような先頭ゼロ付きの表記も、「7.期限.署名」の署名で有効になる。偽造はできず、同じメモを指すだけである。 / 提案: 「0 以外で始まる」か「0 だけ」の正規形に限る（正規表現を `0|[1-9][0-9]*` にする）。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当と判断した。作成の正常系・異常系を `tests/test_ac1_create.py` で検証している。`service.hooks.before_write` でタグ挿入時に失敗させて、何も残らないこともコードの経路から確認した（このテストの中身は通読していない）。\n- AC2: V2 は妥当。他の組織・他人の非公開・存在しないメモがすべて NotFound になることを確かめている。NotFound のときは閲覧数が増えない。確認の後に非公開へ変えられた場合も NotFound になる。閲覧の割り込みと、別接続の 4 スレッド×10 回で 40 になることも確かめている。\n- AC3: V3 は妥当。スコープ、並び順、ページ、巨大な page、不正な page・per_page・sort（bool・文字列・小数を含む）を検査している。`%`・`_`・`\\` をそのまま文字として探すこと、タグの OR 検索、SQL 文字列、不正なタグ（末尾の改行を含む）も検査している。\n- AC4: V4 は妥当。作成者・管理者・他人・他の組織・非公開、古い version、読み出しから書き込みの間の割り込み、書き込み内での認可の再確認、更新時の入力検証、削除途中の失敗によるロールバックを確かめている。\n- AC5: V5 / VK6 の `tests/test_ac5_transfer.py` は存在し、63 件の実行で通過した。実装は `BEGIN IMMEDIATE` のトランザクションと同一組織の判定で、設計と整合している。\n- AC6: V6 / VK7 の `tests/test_ac6_audit.py` は存在し、通過した。実装は 8 文字未満なら全部伏せ、8 文字以上なら末尾 4 文字以外を伏せており、仕様どおりである。\n- AC7: V7 は妥当。枠の境界は 159.999 と 160.0 で確かめている。拒否した呼び出しが枠を延ばさないこと、20 スレッドの同時呼び出しで 5 回だけ許されること、`hook` による割り込みの直列化も確かめている。sleep には頼っていない。\n- AC8: V8 / VK8 の `tests/test_ac8_share.py` は存在し、通過した。実装は 64 桁の小文字 16 進と `fullmatch`、`compare_digest`、期限ちょうど以降の無効を備えている。\n- AC9: V9 / VK5 の `tests/test_ac9_secrets.py` は存在し、通過した。ログ・例外のメッセージには ID とタグ名だけが出ており、本文・署名・api_key は出ていない。\n- AC10: V10 の `tests/test_ac10_recovery.py` は存在し、通過した。`transaction()` は `BaseException` でロールバックし、ロールバック自体の失敗でも元の例外を隠さない。\n- エンジンが検出したテストの兆候はなかった。`history` を見ても、検証条件を弱めた変更はなく、`bind` の追加だけだった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite への実 DB を使う単体テスト（別接続・別スレッドの並行テストを含む）で、リスクに見合う検証ができている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて通過した。\n- `notes/*.py` を全文読み、仕様 R1〜R10 と設計に照らして確認した。\n  - SQL はすべてプレースホルダーを使っている。`ORDER BY` はホワイトリスト化した辞書の値だけを埋め込んでいる。LIKE は `ESCAPE '\\'` を使っていて、`\\`・`%`・`_` を先にエスケープしている。題名と本文の両方に同じパターンを渡している。\n  - 認可は `_visible` と `_can_modify` に集約している。更新・削除ではトランザクション内で行を読み直して再判定している。\n  - 楽観的ロックは UPDATE の WHERE に version を入れ、`rowcount` で判定している。\n- `aqdlc.py history --since 0` を確認した。テストや検証条件を弱めた形跡はなかった。\n- `aqdlc trace` と `tests/test_ac5`・`test_ac6`・`test_ac8`・`test_ac9`・`test_ac10` の中身は個別に精査していない（通過と、実装コードとの整合のみ確認）。",
+ "files_changed": [],
+ "valid": true
+}

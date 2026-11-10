@@ -1,0 +1,49 @@
+{
+ "case": "SQL-01",
+ "rep": 3,
+ "sec": 35.3,
+ "exit": 0,
+ "cost_usd": 0.1468196,
+ "num_turns": 9,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 20462,
+  "cache_read_input_tokens": 195276,
+  "output_tokens": 4542,
+  "output_tokens_details": {
+   "thinking_tokens": 464
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20462,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2797,
+    "cache_read_input_tokens": 40038,
+    "cache_creation_input_tokens": 425,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 425
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 676349a2\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, K2, K1, AC3, notes/service.py:141-142 `search_notes` / 対応区分: 修正必須 / 内容: 検索語 q を f 文字列で SQL に直接埋め込んでおり、SQL インジェクションが成立する。`%` と `_` のエスケープ（`_like_escape`）も定義だけで使われておらず、ESCAPE 句もない。 / 成立条件: 利用者が `q` に `') OR 1=1 --` のような文字列を渡す。 / 影響: 他の組織のメモや他人の非公開メモの題名と ID が漏れる（K1・K2）。`%` や `_` を普通の文字として探す要件（R3）も満たしていない。`a'` を渡すと OperationalError になる。 / 根拠: 次を実行して確認した。他組織(org 2)の非公開メモを作り、org 1 の利用者で `search_notes(c, u, \"zzz%') OR 1=1 --\")` を呼ぶと `[{'id': 1, 'title': 'secret-other-org'}]` が返った。`a'` では `sqlite3.OperationalError` になった。確認した保証: 入力検証は長さと空白だけで、q の文字種は制限されていない。呼び出し元の防御もない。 / 提案: q を `?` で渡し、`title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'` とする。引数は `f\"%{_like_escape(q)}%\"` にする。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py:14 `TAG_RE` / 対応区分: 修正必須 / 内容: `^...$` と `re.match` の組み合わせで、末尾の改行付きタグを通す。タグは英小文字・数字・ハイフンの1〜20文字と定められている。 / 成立条件: tags に `\"abc\\n\"` を渡す。 / 影響: 不正なタグが保存される。`create_note(..., ['abc\\n'])` が成功した（実行で確認）。search_notes のタグ検査にも同じ穴がある。 / 根拠: 次を実行して確認した。`create_note(c, u, 't', 'b', ['abc\\n'])` が例外にならず ID 2 を返した。 / 提案: `TAG_RE.fullmatch` を使うか、`\\Z` で終わる正規表現にする。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py（12件、正常系中心）は、次の必須の検証をほとんど持たない。(a) 他組織・他人の非公開メモが NotFound になること。(b) 異常系の入力（境界値・タグ・不正な page と per_page と sort）。(c) 検索の SQL インジェクション・`%` と `_`。(d) 楽観的ロックの Conflict と、競合する書き込み。(e) ロールバック（`hooks.before_write` を使った途中の失敗）。(f) 移管の組織またぎ。(g) api_key の伏せ字。(h) ログへの機密情報の出力。(i) 閲覧数の同時加算。(j) RateLimiter の枠の境界と複数スレッドの同時実行。(k) 共有リンクの期限の境界・形の崩れ。(l) 例外の後の接続の再利用。 / 根拠: 仕様がこれらを受け入れ条件・リスクとして明示している。設計書もそのために `hooks.before_write` と `RateLimiter.hook` を用意したが、どのテストからも使われていない。重大1・2の欠陥は、この検証の空洞化のため通っている。 / 提案: 上の (a)〜(l) を、決定論的なテスト（フックによる並行実行・失敗の再現）で追加する。\n- [重大4] 区分: 実装 / 対象: R5, K6, notes/service.py:193-206 `transfer_notes` / 対応区分: 修正必須 / 内容: 移管の更新が `WHERE id = ?` だけで、メモの org_id を条件にしていない。また from_user と to_user が実在するか、DB 上の組織と一致するかを確かめていない。 / 成立条件: 呼び出し側が渡した from_user・to_user の dict の org_id が、DB の値と食い違う場合。 / 影響: 利用者の dict を信用する前提（仕様の対象外）の範囲であれば、悪用の経路は未確認。ただし、存在しない to_user.id では外部キー違反で全体がロールバックされるだけで、NotFound ではなく生の IntegrityError が返る。 / 根拠: 仕様は dict の role・org_id を信用すると明記しているため、組織またぎの発生は未確認。この指摘の確実な部分は、to_user が存在しないときの例外が業務エラーでない点だけ。 / 提案: 移す先を DB で引いて存在と組織を確かめ、UPDATE にも `AND org_id = ?` を付ける。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。タグ・本文・題名の境界、ロールバックは未検証で不十分。実際に `abc\\n` を通す欠陥がある。\n- AC2: 組織違い・非公開・存在しないメモの NotFound と、同時閲覧の数え漏れが未検証で不十分。コード上は `views = views + 1` を `BEGIN IMMEDIATE` で囲んでおり妥当に見える。\n- AC3: 正常系の2件のみ。インジェクションや LIKE のエスケープ、入力の拒否が未検証で不十分。実装も未達（重大1）。\n- AC4: 更新・削除の正常系のみ。Conflict、Forbidden、他人の非公開メモ、削除の失敗が未検証で不十分。\n- AC5: 正常系と非管理者の拒否のみ。組織またぎ、途中の失敗での巻き戻しが未検証で不十分。\n- AC6: 伏せ字の検証が一つもなく不十分。実装は仕様どおりに見える。\n- AC7: 枠の境界（ちょうど window 秒）と複数スレッドが未検証で不十分。\n- AC8: 期限の境界（期限ちょうどで無効）と形の崩れが未検証で不十分。\n- AC9: ログ・出力の機密情報のテストがなく不十分。\n- AC10: 例外の後の接続の再利用が未検証で不十分。\n- エンジンが検出したテストの兆候: なし。skip や `.only` もないが、検証そのものが薄い。\n\n### E2E の要否\n- 不要（HTTP のないライブラリで、SQLite を使う単体・統合テストで足りる）。ただし、複数スレッド・別々の接続での並行テストは必要。\n\n### 不足しているリスク\n- K1: 検索経由の他組織・非公開メモの漏えいを防ぐ検証がない。\n- K2: SQL インジェクションの検証がない（実装も脆弱）。\n- K3: 同時の更新・閲覧・呼び出しの検証がない。\n- K4・K5・K6・K7・K8: 対応するテストがない。\n\n### 確認したこと\n- spec.md と design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が成功した。\n- 実装報告（impl.md）は読んでいない。\n- インジェクションの再現を実行した。`') OR 1=1 --` で他組織の非公開メモが返った。\n- `abc\\n` のタグが通ることを実行で確認した。\n- `trace`・`history`・`gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

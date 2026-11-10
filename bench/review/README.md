@@ -11,3 +11,11 @@
 | `run_bench.py` | build（run をレビューの直前まで進める）・review・judge・report |
 | `report.py` | 集計（TP・FP・FN・precision・recall・費用・時間） |
 | `results/` | 計測の生データ・条件・判定の手での確認・分析 |
+
+## 追加のケース群（既存の40ケースとは別に集計する）
+
+- **クリーンケース群**（EVAL-01）: `clean_cases.py`・`app_clean/`。欠陥がなく、受け入れ条件ごとのテストがある題材。
+  - 確認: `python3 bench/review/check_cases.py --set clean`
+  - 計測: `run_bench.py build|review|judge|report --set clean --out DIR`（集計は `clean_report.py`）
+- **SQL の追加ケース**（EVAL-02）: `sql_cases.py`。`--set with-sql` で既存の40ケースに足す。
+- 結果: `results/eval01-clean-rev02/ANALYSIS.md`・`results/EVAL02-ANALYSIS.md`

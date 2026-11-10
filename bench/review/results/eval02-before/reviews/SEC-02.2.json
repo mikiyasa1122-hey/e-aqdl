@@ -1,0 +1,49 @@
+{
+ "case": "SEC-02",
+ "rep": 2,
+ "sec": 32.8,
+ "exit": 0,
+ "cost_usd": 0.10530389999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13296,
+  "cache_read_input_tokens": 120039,
+  "output_tokens": 4010,
+  "output_tokens_details": {
+   "thinking_tokens": 775
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13296,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2963,
+    "cache_read_input_tokens": 36301,
+    "cache_creation_input_tokens": 3397,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3397
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c4a8b4e4\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5, R9 / 対応区分: 修正必須 / 内容: `export_audit` が api_key を伏せていない。返却値の `actor_key` に `users.api_key` の生の値をそのまま入れている。 / 成立条件: 管理者が `export_audit` を呼ぶだけで起きる。監査ログに1件でも行があればよい。 / 影響: 組織内の全利用者の api_key が平文で出力に載る。仕様の「末尾4文字以外を * で伏せる、8文字未満はすべて伏せる」を満たさず、認証情報が漏れる。 / 確認した保証: 呼び出し元や上流にマスク処理はない（`notes/service.py` の `export_audit` 末尾の dict 組み立てのみ。db.py にもない）。既存テスト `test_export_audit` は `action` と `actor` しか見ておらず、これを防いでいない。 / 根拠: notes/service.py の `export_audit` 末尾（`\"actor_key\": r[\"api_key\"]`）。 / 提案: マスク関数を追加する。`len(k) < 8` なら `\"*\" * len(k)`、それ以外は `\"*\" * (len(k) - 4) + k[-4:]` を `actor_key` に入れる。あわせて AC6 のテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系の1ケースずつにとどまる。仕様が必須とした次の検証がない。(a) 他組織・他人の非公開メモが NotFound になること（K1）。(b) Forbidden（非作成者・非管理者の更新・削除、組織またはロールの違反の移管）。(c) 閲覧数の同時加算とスレッド競合（K3）。(d) 更新の Conflict（version 不一致、読み出しから書き込みの間の割り込みを `hooks.before_write` で再現）。(e) `create` や `delete` の途中失敗でロールバックされ、接続を再利用できること（K4, AC10）。(f) 移管の途中失敗で元のまま残ること、組織またはロール違反の拒否（K6, AC5）。(g) 一覧・検索の境界値（page=0、per_page=0・51、不正な sort）。(h) `%` と `_` を文字として探すこと、SQL インジェクション文字列、タグの OR 絞り込み（K2）。(i) 監査ログの api_key のマスク（K7）。(j) RateLimiter の枠の境界（ちょうど window 秒）と同時呼び出し。(k) 共有リンクの期限ちょうど、形の崩れ、署名の改ざん。(l) ログ・例外に本文・署名・api_key が出ないこと。 / 根拠: AC と K の多くに対応する検証が実質ない。設計書がテスト用に用意した `hooks.before_write` と `RateLimiter.hook` もテストで一度も使われていない。実際、重大1の api_key 漏えいも既存テストをすり抜けた。 / 提案: 上の (a)〜(l) を決定論的に追加する。並行処理は sleep ではなくフックと Barrier で再現する。意図的に条件を外した場合に失敗することも確認する。\n- [軽微1] 区分: 実装 / 対象: R4, K4 / 対応区分: 改善提案 / 内容: `delete_note` は、存在確認の後、トランザクション開始前に別接続でメモが削除されると、0件削除でも監査ログ `delete` を書く。権限と存在の確認がトランザクションの外にある。 / 提案: トランザクション内で `DELETE` の rowcount を確認し、0件なら NotFound にする。\n- [軽微2] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `verify_link` は note_id を `int` に直してから署名を検証する。そのため、先頭ゼロ付きの `007.…` が `7.…` と同じ署名で通る（仕様の「10進の数字だけ」には反しない）。 / 提案: 署名の対象を文字列のまま使うか、先頭ゼロを拒否して、リンクの表現を一意にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は空の題名の拒否と正常な作成だけを確かめており、不十分。タグ6個・不正タグ・本文超過・tags が文字列の場合・途中失敗でのロールバックがない。実装は仕様どおりに見える。\n- AC2: 不十分。他組織・他人の非公開メモ・存在しないメモの NotFound、閲覧数の加算、同時閲覧の検証がない。\n- AC3: 不十分。一覧は1ページ目の件数だけ、検索は1件の一致だけ。範囲外の入力、`%` と `_`、タグの OR、SQL インジェクションの検証がない。\n- AC4: 不十分。所有者による正常な更新・削除だけ。Forbidden、Conflict、管理者の操作、非公開メモの NotFound、削除の失敗伝播の検証がない。\n- AC5: 不十分。管理者以外の拒否と正常な移管だけ。他組織の拒否と途中失敗時のロールバックの検証がない。\n- AC6: 検証が空洞で、実装も不合格。マスクを確かめるアサーションがなく、実際にマスクされていない（重大1）。\n- AC7: 不十分。上限超過と61秒後の新しい枠だけ。ちょうど window 秒の境界と同時呼び出しの検証がない。\n- AC8: 不十分。往復と note_id の改ざんだけ。期限ちょうどと期限切れ、形の崩れ、署名の改ざんの検証がない。\n- AC9: 検証なし。ログと例外にメッセージが出ていないことを確かめるテストがない。\n- AC10: 検証なし。例外の後に同じ接続を再利用できることを確かめるテストがない。\n- 重要なリスク（K1〜K8）は、いずれも専用の検証が実質ない（重大2）。\n- エンジンが検出したテストの兆候はなし。skip や `.only` はない。ただし、そもそも検証が少ない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の in-memory／一時ファイルを使う単体・結合テストで足りる。ただし、複数接続・複数スレッドによる並行テストは必要（重大2）。\n\n### 不足しているリスク\n- K1, K2, K3, K4, K5, K6, K7, K8: 上記のとおり、対応するテストがない。\n- K7, K5: 実装自体が未達（重大1）。\n\n### 確認したこと\n- spec.md と design.md、notes/*.py の全ファイル、tests/test_notes.py を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。12件が OK で、これは正常系中心の検証であることを意味する。\n- `aqdlc.py history --since 0` で履歴を見た。検証条件を弱める変更は見当たらず、V1〜V10 と VK への `unit` の紐付けだけだった。\n- `export_audit` のコードを確認した。api_key がそのまま返ることをコードの経路で立証した。実行による再現はしていない。\n- 検証を除く実装は、SQL のプレースホルダー化・`ESCAPE`・`BEGIN IMMEDIATE` と rowcount による楽観的ロック・`_visible` による NotFound の統一などが設計どおりであることを読んで確認した。",
+ "files_changed": [],
+ "valid": true
+}

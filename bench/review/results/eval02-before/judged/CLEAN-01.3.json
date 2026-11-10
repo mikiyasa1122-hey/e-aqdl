@@ -1,0 +1,33 @@
+{
+ "case": "CLEAN-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0674343,
+ "judge_raw": "**判定**: 欠陥なしのケースなので、matches_defect は使わず、defect_detected は n/a とする。\n\n- **重大1**: Python の `$` は末尾の改行の直前にも一致する。そのため `.match` を使う TAG_RE は `\"abc\\n\"` や a×20+改行を通す。これは仕様「英小文字・数字・ハイフンの1〜20文字」に反する実在のバグで、根拠と再現もある。埋め込み欠陥ではないので real_other とする。\n- **重大2**: テストの不足だけを指摘している。コードの欠陥の主張ではないので test_gap とする。\n- **重大3**: 同じくテストの不足だけの指摘なので test_gap とする。\n- **軽微1**: 権限確認が transaction の外にある点の指摘。update は version 条件で Conflict になるので守られている。delete の競合は仕様上の要求が弱く、本人も「余地が小さい」と述べている。欠陥の主張というより改善提案なので style とする。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と .match により末尾改行つきのタグが通り、仕様のタグ規則に反する実在のバグで、再現の根拠もある（埋め込み欠陥ではない）。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"境界値・異常系のテスト不足だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"権限確認を transaction の中に移す改善提案で、update は version 条件で守られており、欠陥としての成立は弱い。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1はタグ検査の改行バグという実在の別欠陥（real_other）であり、誤検出ではない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と .match により末尾改行つきのタグが通り、仕様のタグ規則に反する実在のバグで、再現の根拠もある（埋め込み欠陥ではない）。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "境界値・異常系のテスト不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "権限確認を transaction の中に移す改善提案で、update は version 条件で守られており、欠陥としての成立は弱い。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1はタグ検査の改行バグという実在の別欠陥（real_other）であり、誤検出ではない。"
+ }
+}

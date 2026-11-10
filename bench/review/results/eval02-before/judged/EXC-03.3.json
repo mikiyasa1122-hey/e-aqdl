@@ -1,0 +1,53 @@
+{
+ "case": "EXC-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0667423,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- 重大1 は埋め込んだ欠陥そのものです。箇所は `verify_link` で、分解の失敗を `None` で返している点も、影響として挙げた「None が note_id として扱われる」点も一致します。\n- 重大2 は実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせで、末尾に改行のあるタグが通ります。再現も示されています。\n- 重大3〜7 はテストの不足だけを指摘しています。コードの欠陥の主張ではありません。\n- 軽微1 は、判定をトランザクションの外で行う点と、削除が version を見ない点を挙げる改善提案です。更新は楽観的ロックで守られ、削除に version は仕様上求められていないため、欠陥の主張ではなく style にしました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link が形の崩れたリンクで Forbidden でなく None を返す点を、原因・影響とも正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match により末尾改行のタグが通るのは実在する仕様違反で、埋め込んだ欠陥とは別である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"ロールバックのテスト不足の指摘であり、コードの欠陥ではない。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"同時実行のテスト不足の指摘にとどまる。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"認可拒否のテスト不足の指摘にとどまる。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"境界・異常系のテスト不足の指摘にとどまる。\"},\n{\"label\": \"重大7\", \"class\": \"test_gap\", \"reason\": \"伏せ字やログのテスト不足の指摘にとどまる。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"判定をトランザクション内に置く検討を促す改善提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥を原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link が形の崩れたリンクで Forbidden でなく None を返す点を、原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match により末尾改行のタグが通るのは実在する仕様違反で、埋め込んだ欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "ロールバックのテスト不足の指摘であり、コードの欠陥ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "同時実行のテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "認可拒否のテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "境界・異常系のテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "重大7",
+    "class": "test_gap",
+    "reason": "伏せ字やログのテスト不足の指摘にとどまる。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "判定をトランザクション内に置く検討を促す改善提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥を原因・影響とも正確に捉えている。"
+ }
+}

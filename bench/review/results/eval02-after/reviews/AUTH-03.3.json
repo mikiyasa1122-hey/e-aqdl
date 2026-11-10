@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-03",
+ "rep": 3,
+ "sec": 32.1,
+ "exit": 0,
+ "cost_usd": 0.13006279999999998,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19329,
+  "cache_read_input_tokens": 115508,
+  "output_tokens": 4118,
+  "output_tokens_details": {
+   "thinking_tokens": 793
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19329,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2731,
+    "cache_read_input_tokens": 36929,
+    "cache_creation_input_tokens": 2632,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2632
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 73cf7484\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1, notes/service.py:_can_modify（約64行） / 対応区分: 修正必須 / 内容: `_can_modify` が `row[\"owner_id\"] == user[\"id\"] or not row[\"private\"] or (admin かつ同じ組織)` になっている。`not row[\"private\"]` があるため、公開メモなら同じ組織の一般メンバーでも誰でも更新・削除できる。仕様は「作成者と同じ組織の管理者だけ（それ以外は Forbidden）」。 / 成立条件: 同じ組織の非作成者の member が、公開メモに対して update_note / delete_note を呼ぶ。 / 影響: 他人のメモを無権限で書き換えたり削除したりできる。認可の欠陥。 / 根拠: 実際に実行して確認した。alice が作った公開メモを bob（member）が update_note すると version 2 が返り、delete_note もそのまま成功した。Forbidden にならない。呼び出し元の update_note / delete_note は `_visible` の後に `_can_modify` だけで判定しており、ほかに防ぐ処理はない。 / 提案: `_can_modify` を `owner_id == user[\"id\"] or (user[\"role\"] == \"admin\" and row[\"org_id\"] == user[\"org_id\"])` にする。非公開メモの扱いは `_visible` が先に NotFound にするので、そのままでよい。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py:TAG_RE と TAG_RE.match（`_validate` と search_notes） / 対応区分: 修正必須 / 内容: `^[a-z0-9-]{1,20}$` を `match` で使っているため、末尾が改行のタグ（例: \"abc\\n\"）が通る。`$` は末尾の改行の手前にも一致する。仕様は英小文字・数字・ハイフンだけ。 / 成立条件: tags に \"abc\\n\" のように末尾に改行を付けた文字列を渡す。 / 影響: 規則外のタグがそのまま保存され、同じ見た目の別タグができる。タグ検索の入力検査も抜ける。 / 根拠: 実際に実行すると `create_note(..., [\"abc\\n\"])` が成功してメモ ID 1 が返った。 / 提案: `TAG_RE.fullmatch(t)` を使う。`_validate` と search_notes の両方を直す。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7, AC8, AC9, AC10, K1〜K4, K6, K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心で、必須の受け入れ条件を確かめるものが大半ない。次が足りない。(a) 他の組織・他人の非公開メモが NotFound になること、一般メンバーによる他人のメモの更新・削除が Forbidden になること（これがあれば重大1を検出できた）。(b) version 違いの Conflict と、読み書きの間に更新が入った場合の Conflict。(c) 閲覧数の同時加算（hooks.before_write）。(d) 途中で失敗したときの全巻き戻し（create・delete・transfer）と、失敗後に接続を使い続けられること。(e) 検索での % と _ のエスケープ、タグの OR 絞り込み、一覧の範囲外 ValidationError。(f) 移管の組織またぎ Forbidden。(g) api_key の伏せ字（8文字未満・8文字以上）。(h) RateLimiter の枠の境界（ちょうど window 秒）と同時呼び出し。(i) 共有リンクの期限ちょうど、形の崩れ、期限切れ。(j) ログに本文・署名・api_key が出ないこと。 / 根拠: 設計書が hooks.before_write と RateLimiter.hook を用意しているのに、テストで一度も使っていない。現在の 12 件のテストはどれも、認可・並行処理・巻き戻しのリスクを確かめていない。重大1・重大2の欠陥もテストをすり抜けている。 / 提案: 上の (a)〜(j) を決定論的なテスト（フックを使い、sleep に頼らない）で追加する。\n- [重大4] 区分: テスト / 対象: AC6, K7, R6 / 対応区分: 証拠不足 / 内容: test_export_audit は action と actor だけを検査していて、actor_key の伏せ字を一度も検査していない。 / 根拠: AC6 と K7 の検証が空洞になっている。コードを読む限り伏せ字は正しそうだが、テストは実装を変えても検出できない。 / 提案: 8文字未満（全部 *）、ちょうど8文字、それより長い鍵で、末尾4文字だけが残ることを確かめるテストを足す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。タグの規則違反・境界値・失敗時に何も残らないことの検証がなく、不十分。実装にも改行タグの欠陥がある。\n- AC2: 見え方（他の組織・他人の非公開が NotFound）も、閲覧数の同時加算も未検証で、不十分。コードは `_visible` を使っており、実装は妥当に見える。\n- AC3: test_list_first_page と test_search だけ。範囲外の入力拒否、% と _、タグの OR 絞り込みは未検証で、不十分。実装のプレースホルダーと ESCAPE は問題なし。\n- AC4: test_update_by_owner と test_delete_by_owner だけ。Forbidden・Conflict・競合は未検証で、不十分。実装に重大1の欠陥がある。\n- AC5: test_transfer と test_transfer_requires_admin だけ。組織またぎ・途中失敗の巻き戻しは未検証で、不十分。\n- AC6: 上の重大4のとおり未検証で、不十分。\n- AC7: test_limit は上限と枠が過ぎた後の再開だけ。ちょうど window 秒の境界と並行呼び出しは未検証で、不十分。\n- AC8: 往復と改ざんだけ。期限ちょうど・期限切れ・形の崩れは未検証で、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest と SQLite のテスト用データベースで十分）。\n### 不足しているリスク\n- K1: 公開メモに対する一般メンバーの更新・削除（重大1）。\n- K2: プレースホルダーと ESCAPE は実装されている。% と _ の注入を確かめるテストがない。\n- K3: 同時の閲覧・更新・RateLimiter のテストがない。\n- K4: 途中の失敗による巻き戻しのテストがない。\n- K5, K8: 機密情報の出力、期限・形の崩れのテストがない。\n- K6: 組織またぎの移管のテストがない。\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s . -t .` を実行し、12件が OK だった。\n- 一時スクリプトで 3 つを実行した。(1) 末尾改行のタグ \"abc\\n\" が作成できた。(2) 同じ組織の member が、他人の公開メモを update_note できた。(3) 同じ member が delete_note もできた。\n- コードは変更していない。gate は実行していない。\n```",
+ "files_changed": [],
+ "valid": true
+}

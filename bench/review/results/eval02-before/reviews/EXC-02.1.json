@@ -1,0 +1,49 @@
+{
+ "case": "EXC-02",
+ "rep": 1,
+ "sec": 30.5,
+ "exit": 0,
+ "cost_usd": 0.13062780000000002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20167,
+  "cache_read_input_tokens": 114638,
+  "output_tokens": 3848,
+  "output_tokens_details": {
+   "thinking_tokens": 657
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20167,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2682,
+    "cache_read_input_tokens": 36864,
+    "cache_creation_input_tokens": 3304,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3304
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 763c4b09\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4, R10 / 対応区分: 修正必須 / 内容: `delete_note` が失敗を握りつぶす。`notes/service.py` の `delete_note` 末尾の `except Exception as e: log.warning(...)` が例外を飲み込み、呼び出し側には正常終了に見える。仕様 R4「失敗したら例外を呼び出し側に伝える（握りつぶさない）」に違反する。 / 成立条件: 削除中に例外が起きたとき。例は、DB のロック待ちが5秒を超えた場合、`hooks.before_write(\"delete:note\")` が例外を送出した場合、外部キー違反。`transaction()` は ROLLBACK 後に再送出するが、直後の except がそれを捕まえる。 / 影響: 削除に失敗しても成功と区別できない。利用者はメモが消えたと誤認し、メモが残る。 / 根拠: `service.py` の `delete_note` の `try/except Exception`。例外を再送出する経路がない。上流や呼び出し元にこれを防ぐ保証はない。`tests/test_notes.py` に削除失敗のテストもない。 / 提案: try/except を外して例外を伝える。ログが必要なら `log.warning` のあとに `raise` する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、正常系が中心。仕様が求める異常系・境界・並行の検証がほぼない。無い検証は次のとおり。(a) R1 の境界（題名100/101文字、空白だけの題名、タグ6個、タグの文字種、tags に文字列を渡す）と、途中失敗でのロールバック（`hooks.before_write(\"create:tags\")`）。(b) K1 の漏えい（他組織・他人の非公開メモが get/list/search に出ない、NotFound になる）。(c) 閲覧数の同時加算（K3）。(d) R3 の範囲外入力、`%`・`_` のエスケープ、SQL インジェクション文字列（K2）、タグ OR 検索。(e) R4 の Forbidden、Conflict（古い version、読み出しと書き込みの間の割り込み）、管理者の扱い、更新時のタグ検証。(f) R5 の組織外 Forbidden と途中失敗での元のまま。(g) R6 の api_key の伏せ字（8文字未満・8文字以上）。(h) R7 の枠の境界ちょうど（`now-start == window`）と複数スレッドの同時呼び出し。(i) R8 の期限ちょうど、形の崩れ、署名改ざん。(j) R9 のログに本文・署名・api_key が出ないこと。(k) R10 の例外後に接続を再利用できること。 / 根拠: これらは AC と K1〜K8 が明示する必須の検証で、テストが実装の欠陥を検出できる状態にない。実際に[重大1]の欠陥もテストをすり抜けている。設計書が用意した `hooks` と `RateLimiter.hook` の差し込み口を使うテストがない。 / 提案: 上記 (a)〜(k) を、sleep に頼らず hooks とスレッドの Barrier で決定論的に書く。削除失敗の例外伝播のテストも加える。\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `LINK_RE` は先頭ゼロ付きの数字（例 `007.…`）を通し、`int()` に変換して署名する。そのため同じ署名が別の文字列表現でも有効になる。署名の偽造にはならないが、リンクの形は厳密でない。 / 提案: 先頭ゼロを拒否する（`0|[1-9][0-9]*`）か、`str(int)` と元の文字列が一致するか確認する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけ。境界値、タグ規則、ロールバックが未検証で不十分。実装は `transaction` で囲まれており妥当に見える。\n- AC2: 閲覧数の増加も同時閲覧も、NotFound のケースも未検証で不十分。実装は `_visible` とトランザクション内の UPDATE で正しく見える。\n- AC3: 最初のページと単純な検索だけ。範囲外入力、エスケープ、インジェクション、タグ OR、他人の非公開メモが未検証で不十分。実装は ESCAPE とプレースホルダーを使い妥当に見える。\n- AC4: owner の更新と削除の正常系だけ。Conflict、Forbidden、削除失敗の伝播が未検証で不十分。実装は削除で違反している（[重大1]）。\n- AC5: 正常系と非管理者の拒否だけ。組織外と途中失敗が未検証で不十分。\n- AC6: 伏せ字の検証がない。`test_export_audit` は action と actor しか見ておらず不十分。\n- AC7: 上限超過と枠の再開だけ。境界ちょうどと並行が未検証で不十分。\n- AC8: 往復と ID の改ざんだけ。期限の境界、形の崩れ、署名の改ざんが未検証で不十分。\n- AC9: 検証がなく不十分。\n- AC10: 検証がなく不十分。\n- エンジンが検出したテストの兆候: なし。skip や弱体化は見つからなかった。テストが少ないだけである。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest 相当の結合テスト（実 SQLite とスレッド）で足りる。\n### 不足しているリスク\n- K1〜K8 の大半に、それを確かめる検証がない（[重大2]）。\n- R4 の「読み出しから書き込みの間に他の更新が入った場合」の Conflict は、実装が UPDATE の WHERE に version を入れており正しく見える。ただし検証がない。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功（0.004秒）。\n- `git status` と `aqdlc.py history --since 0`: 履歴は実装担当の bind のみで、検証条件を弱めた形跡は見つからなかった。\n- `notes/*.py` を全文確認した。\n  - SQL はすべてプレースホルダーで、LIKE は ESCAPE を使っている。ORDER BY は固定の辞書から取っている。\n  - 認可は `_visible` と `_can_modify` にまとまっている。\n  - RateLimiter はロック内で判定している。\n  - 共有リンクは `compare_digest` を使い、期限は `>=` で判定している。\n  - 監査ログの伏せ字の計算は仕様どおり。\n- 実行しなかったこと: 並行・ロールバック・インジェクションの再現テスト。削除失敗の例外握りつぶしはコードから立証できる。",
+ "files_changed": [],
+ "valid": true
+}

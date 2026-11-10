@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-02",
+ "rep": 3,
+ "sec": 27.9,
+ "exit": 0,
+ "cost_usd": 0.115874,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 6,
+  "cache_creation_input_tokens": 18280,
+  "cache_read_input_tokens": 78720,
+  "output_tokens": 3487,
+  "output_tokens_details": {
+   "thinking_tokens": 261
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18280,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3058,
+    "cache_read_input_tokens": 30786,
+    "cache_creation_input_tokens": 7726,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7726
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7a4e3663\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, R2, K1, AC3 / 対応区分: 修正必須 / 内容: `list_notes` が他人の非公開メモを一覧に含める。 / 成立条件: 同じ組織の利用者 A が private=True のメモを作成し、同じ組織の別の利用者 B が `list_notes` を呼ぶ。 / 影響: B に A の非公開メモの id と題名が見える。仕様 R3「他人の非公開メモは含めない」の違反で、K1（漏えい）が現実になる。 / 根拠: notes/service.py:270-274 の where が `org_id = ?` だけ。`private = 0 OR owner_id = ?` がなく、`_visible` も使っていない。`search_notes`（285行）には条件がある。COUNT の total にも非公開メモが入るので、件数も漏れる。上流で絞る処理は見当たらない。 / 提案: where を `org_id = ? AND (private = 0 OR owner_id = ?)` にして args に user[\"id\"] を足す。COUNT にも同じ条件を使う。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査が `TAG_RE = ^[a-z0-9-]{1,20}$` と `.match` の組み合わせで、末尾の改行を通す。 / 成立条件: tags に `\"abc\\n\"` を渡す（create・update・search のどれでも）。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。20文字＋改行の21文字も通る。share.py は同じ問題を避けるために fullmatch を使っており、同じ手当てが tags に入っていない。 / 根拠: notes/service.py:158 の `$` は末尾の `\\n` の直前にも一致する。使用箇所は 208行と 294行。コードの読みで立証した。実行はしていない。 / 提案: `TAG_RE.fullmatch(t)` に変える。または `\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC5, AC7, K3, K4, R10, AC10 / 対応区分: 証拠不足 / 内容: 設計書が用意した差し込み口（`hooks.before_write`、`RateLimiter.hook`）を使うテストが1つもない。tests/test_notes.py は12件だけ。次の検証がない。(1) 同時の閲覧数、(2) 同時・読み出し後の更新で Conflict、(3) 古い version での Conflict、(4) 作成・削除・移管の途中失敗でのロールバック、(5) 例外の後に接続を使い続けられること、(6) RateLimiter の並行と枠の境界（ちょうど window 秒）、(7) 共有リンクの期限の境界。 / 根拠: これらは受け入れ条件 AC2・AC4・AC5・AC7・AC8・AC10 とリスク K3・K4 の中心で、仕様が「同時」「途中で失敗したら何も残さない」と明記している。正常系だけでは、これらの条件を外しても失敗しない。 / 提案: hooks を使って決定論的に再現するテストを足す。具体的には、before_write 内で別の接続から更新する Conflict テスト、例外を送出させてロールバックと接続再利用を確かめるテスト、Barrier を使った複数スレッドの閲覧・hit のテスト、期限と枠の境界値のテストを書く。\n- [重大4] 区分: テスト / 対象: AC1, AC3, AC4, AC5, AC8, AC9, K1, K2, K8 / 対応区分: 証拠不足 / 内容: 拒否・境界・漏えいを確かめる異常系のテストがない。欠けているもの: 他の組織・他人の非公開メモが NotFound になること、一覧の非公開メモの除外（重大1がテストで見つからなかった理由）、Forbidden（他人の更新・削除、組織をまたぐ移管）、`%` `_` `\\` を含む検索語、ValidationError の境界値（題名101文字、タグ6個、per_page 51、page 0、不正な sort、改行付きのタグ）、改ざん・形の崩れたリンク、api_key の伏せ方（8文字未満・8文字）、ログに本文・署名・api_key が出ないこと。 / 根拠: 受け入れ条件 AC1・AC3・AC4・AC5・AC8・AC9 と、K1・K2・K8 の対策が正しく働くことを確かめる唯一の手段で、現状は2件の異常系（空の題名、管理者でない移管）だけ。 / 提案: 上記を unittest で追加する。認可の条件を外したら失敗するテストにする。\n- [軽微1] 区分: 実装 / 対象: R4, R5 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、トランザクションの外で `_visible` と `_can_modify` を判定している。`get_note` はトランザクションの中でも再確認している。 / 提案: 一貫性のために、トランザクション内でも再確認するか、設計書にその旨を書く。version の条件があるので、更新の整合性は守られている。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。長さの境界、タグの規則、ロールバックの検証がなく不十分。\n- AC2: 閲覧の同時実行も、他の組織・非公開の NotFound も検証がなく不十分。\n- AC3: test_list_first_page と test_search だけ。非公開の除外がなく、実装の欠陥（重大1）を見逃している。検証は不十分。\n- AC4: 所有者の更新と削除の正常系だけ。Conflict・Forbidden・同時更新がなく不十分。\n- AC5: 正常系と非管理者の拒否だけ。組織をまたぐ移管と途中失敗がなく不十分。\n- AC6: test_export_audit が伏せ字の基本を確かめているが、8文字の境界と未満の鍵は未確認。やや不十分。\n- AC7: test_limit だけ。並行実行と枠の境界がなく不十分。\n- AC8: 往復と改ざんの2件だけ。期限の境界と形の崩れがなく不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要。HTTP や画面がないライブラリで、リスクは単体・統合テスト（SQLite と複数スレッド）で確かめられる。\n### 不足しているリスク\n- K1: 一覧での漏えい（重大1）。\n- K3: 同時の閲覧・更新・hit の検証が未実施。\n- K4: 途中失敗でのロールバックの検証が未実施。\n- K5: ログと例外メッセージへの機密情報の混入が未検証。\n- K8: 形の崩れたリンクと期限の境界が未検証。\n- K2: `%` `_` `\\` のエスケープは実装済み（ESCAPE 句とプレースホルダー）だが、検証がない。\n### 確認したこと\n- spec.md と design.md、notes/ の全ソースを読んだ。\n- `python3 -m unittest discover -s . -t .` を実行し、12件が通った（出力は標準出力のみ）。\n- tests/test_notes.py のテスト名を一覧した。\n- git status では全ファイルが未追跡で、検証条件を弱めた履歴は確認できなかった。\n- `$AQ trace` と `$AQ history` は実行していない。\n- 重大2は、正規表現の仕様からコードの読みで立証した。実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

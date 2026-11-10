@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-01",
+ "rep": 1,
+ "sec": 37.5,
+ "exit": 0,
+ "cost_usd": 0.1547657,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23119,
+  "cache_read_input_tokens": 123037,
+  "output_tokens": 4997,
+  "output_tokens_details": {
+   "thinking_tokens": 894
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23119,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3558,
+    "cache_read_input_tokens": 40735,
+    "cache_creation_input_tokens": 2616,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2616
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3985b563\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `notes/service.py` の `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾が改行のタグ（例: \"abc\\n\"）を通してしまう。 / 成立条件: `create_note`・`update_note`・`search_notes` の tags に末尾 \"\\n\" 付きの文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存され、検査の抜けになる。20文字を超える入力も、改行込みなら21文字で通る。 / 根拠: service.py の `_validate` と `search_notes` はどちらも `TAG_RE.match(t)` を使う。実行して、`create_note(..., ['abc\\n'])` が成功し、DB に `'abc\\n'` が保存されることを確認した。上流に別の検証はなく、DB 側に CHECK 制約もない。 / 提案: `TAG_RE.fullmatch(t)` に変える（share.py の LINK_RE と同じ扱い）。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系だけである。次の必須の検証がない。①トランザクションの失敗時の巻き戻し（`hooks.before_write`）：create・delete・transfer・R10 の接続再利用。②スレッドを使った競合：閲覧数の数え漏れ、RateLimiter の同時呼び出し、更新の Conflict（version 不一致と、読み出しから書き込みの間の割り込み）。③非公開・他組織メモの NotFound、管理者の扱い、Forbidden。④入力の境界値（題名100文字・101文字、本文10000文字、タグ5個・6個、page・per_page・sort の範囲外）。⑤検索の `%`・`_`・`\\`、タグの OR 絞り込み、プレースホルダー。⑥共有リンクの期限ちょうど、形の崩れ。⑦監査ログの api_key を伏せる処理（8文字未満と、末尾4文字だけ残す境界）。⑧R9 のログ・例外に本文・署名・api_key が出ないこと。 / 根拠: 受け入れ条件 AC1〜AC10 と、リスク K1〜K8（特に認可・並行・LIKE・共有リンクの検証）の大半を確かめるテストがない。これらは要求として明示され、設計も差し込み口を用意している。問題 [重大1] のタグの欠陥もテストで検出できていない。 / 提案: 上の項目ごとに、異常系・境界値のテストを追加する。並行処理は sleep に頼らず `hooks.before_write` や `RateLimiter.hook` で決定論的に再現する。\n- [重大3] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` が受け取った `version` を検証していない。非 int や bool が渡されると、UPDATE の条件が成立せず Conflict になるか、`version + 1` を返す。 / 成立条件: 通常の利用ではほぼ起きない。 / 影響: 軽微なため、重大としては扱わない。→取り下げ。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id に先頭ゼロ（例: \"07.…\"）を許している。int 化してから署名するので、正規形と同じ署名を持つ別表記のリンクが有効になる。 / 提案: 正規形（`str(int)` と一致する形）だけを通す。\n\n### 補足（取り下げ）\n重大3は確証がなかったため取り下げる。ただし、この取り下げでラベルが連番になっていない。**エンジンが受け付ける形に直した、正しい報告は以下のとおり。**\n\n## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3985b563\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `notes/service.py` の `TAG_RE`（`^[a-z0-9-]{1,20}$`）を `.match` で使っているため、末尾が改行のタグ（例: \"abc\\n\"）を通してしまう。 / 成立条件: `create_note`・`update_note`・`search_notes` の tags に末尾 \"\\n\" 付きの文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。 / 根拠: `_validate` と `search_notes` はどちらも `TAG_RE.match(t)` を使う。実行して `create_note(..., ['abc\\n'])` が成功し、DB に `'abc\\n'` が保存されることを確認した。上流の検証や DB の制約はない。 / 提案: `TAG_RE.fullmatch(t)` に変える。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、ほぼ正常系だけである。次の検証がない。①失敗時の巻き戻しと R10 の接続再利用（`hooks.before_write`）。②スレッドを使った競合（閲覧数、RateLimiter、更新の Conflict）。③非公開・他組織メモの NotFound と Forbidden。④入力の境界値（題名・本文・タグ数・page・per_page・sort）。⑤検索の `%`・`_`・`\\` とタグの OR 絞り込み。⑥共有リンクの期限ちょうどと形の崩れ。⑦api_key の伏せ字の境界。⑧R9 のログ・例外に機密情報が出ないこと。 / 根拠: AC1〜AC10 と K1〜K8（認可・並行・LIKE・共有リンクの検証）の大半を確かめるテストがない。タグの欠陥 [重大1] も検出できていない。 / 提案: 上の項目ごとに異常系・境界値のテストを追加する。競合は sleep に頼らず、`hooks.before_write` と `RateLimiter.hook` で決定論的に再現する。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id の先頭ゼロ（\"07.…\"）を許している。int 化してから署名するので、正規形と同じ署名を持つ別表記のリンクが有効になる。 / 提案: `str(int)` と一致する正規形だけを通す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。境界値、タグ検査（[重大1] を見逃している）、失敗時に何も残らないことが未確認。\n- AC2: 閲覧数の増加、見え方（他組織・非公開）、同時の閲覧を確かめるテストがなく不十分。\n- AC3: `test_list_first_page` と `test_search` の正常系だけ。範囲外の入力、LIKE のワイルドカード、タグの OR 絞り込み、非公開の除外が未確認で不十分。\n- AC4: 作成者による更新・削除の正常系だけ。Conflict、Forbidden、管理者の扱い、削除の失敗が未確認で不十分。\n- AC5: 管理者の正常系と、管理者以外の拒否だけ。他組織の拒否と、失敗時にすべて元のままになることが未確認で不十分。\n- AC6: 行の action と actor しか見ていない。api_key の伏せ字は未確認で不十分。\n- AC7: `test_limit` は枠の外へ出る正常系だけ。枠の境界ちょうどと同時の呼び出しがなく不十分。\n- AC8: 往復と改ざんの1例だけ。期限ちょうど、期限切れ、形の崩れが未確認で不十分。\n- AC9: テストなし。\n- AC10: テストなし。\n- エンジンが検出したテストの兆候: なし。skip・弱いアサーションはないが、網羅が足りない。\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、単体・結合テストで足りる）。\n### 不足しているリスク\n- K1: 認可（他組織・非公開・管理者）を拒否するテストがない。\n- K2: LIKE のエスケープと SQL の組み立てを確かめるテストがない。実装は ESCAPE とプレースホルダーを使っており、コードを読んで問題は見つからなかった。\n- K3: 並行テストがない。実装は `BEGIN IMMEDIATE` とバージョン条件の UPDATE で守られている。\n- K4・K6: 巻き戻しを確かめるテストがない。\n- K5・K7: 伏せ字とログのテストがない。\n- K8: 期限の境界と改ざんの検証が薄い。\n### 確認したこと\n- `trace` と `history` を確認した。検証条件の弱体化は見当たらない。\n- `git status` を確認した。notes/ と tests/ は未追跡のファイルで、コミットはない。\n- notes/ 全ファイルを読んだ。SQL はプレースホルダーを使い、LIKE は ESCAPE 付き。\n- `python3 -m unittest -q` を実行した。12件が OK だった。\n- タグに \"abc\\n\" を渡して `create_note` が成功し、DB に `'abc\\n'` が保存されることを実行して確認した。",
+ "files_changed": [],
+ "valid": true
+}

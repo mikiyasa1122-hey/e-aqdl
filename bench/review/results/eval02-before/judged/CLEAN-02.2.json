@@ -1,0 +1,53 @@
+{
+ "case": "CLEAN-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0726623,
+ "judge_raw": "## 判定\n\nこのケースは欠陥なしです。変更点は入力検証の順序の入れ替えだけで、振る舞いは変わりません。matches_defect は使えず、defect_detected は n/a です。\n\n各指摘の分類は次のとおりです。\n\n- **重大1〜5**: どれもテストの不足を指摘しているだけで、コードの欠陥の主張ではありません。reviewer 自身も「実装に重大な欠陥は見つからない」と書いています。分類は test_gap です。\n- **軽微1**: `delete_note` が認可判定をトランザクションの外で行っているという指摘です。判定後に別の接続が transfer すると、古い owner の判定で削除が実行される可能性があり、実在します。ただし管理者は同じ組織のメモを削除できるので、影響は限定的です。埋め込んだ欠陥ではないため、real_other とします。なお、行番号 235-245 は実際のコードと合っていません。\n- **軽微2**: sort に unhashable な値を渡すと、`sort not in SORT_COLUMNS` が TypeError になります。list を渡せば実際に起きるので、R3 の「範囲外は ValidationError」に反します。real_other とします。行番号 178 も実際のコードと合っていません。\n- **軽微3**: ROLLBACK が失敗すると元の例外が隠れる可能性がある、という指摘です。`except BaseException` 側の ROLLBACK は `in_transaction` で守られていません。そのため、SQLite が自動でロールバック済みの場合は ROLLBACK がエラーになり、元の例外を隠し得ます。コードに実在する弱点ですが、可能性は低いです。real_other とします。行番号 88-97 も実際のコードと合っていません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"test_gap\", \"reason\": \"同時実行テストの不足のみを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"ロールバックを確かめるテストの不足のみの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"認可拒否テストの不足のみの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"境界値・悪意ある入力のテスト不足のみの指摘。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字と機密情報の非露出を確かめるテストの不足のみの指摘。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の認可判定がトランザクション外にあり、判定後の transfer で古い owner のまま削除され得る点は実在する。\"},\n{\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"unhashable な sort で TypeError になり、R3 の ValidationError に反する点は実在する。\"},\n{\"label\": \"軽微3\", \"class\": \"real_other\", \"reason\": \"例外時の ROLLBACK が in_transaction で守られておらず、ROLLBACK 失敗が元の例外を隠し得る点は実在する。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大はすべてテスト不足の指摘であり、誤検出は無い。軽微は実在する弱点の指摘である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "test_gap",
+    "reason": "同時実行テストの不足のみを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "ロールバックを確かめるテストの不足のみの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "認可拒否テストの不足のみの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "境界値・悪意ある入力のテスト不足のみの指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字と機密情報の非露出を確かめるテストの不足のみの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の認可判定がトランザクション外にあり、判定後の transfer で古い owner のまま削除され得る点は実在する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "unhashable な sort で TypeError になり、R3 の ValidationError に反する点は実在する。"
+   },
+   {
+    "label": "軽微3",
+    "class": "real_other",
+    "reason": "例外時の ROLLBACK が in_transaction で守られておらず、ROLLBACK 失敗が元の例外を隠し得る点は実在する。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大はすべてテスト不足の指摘であり、誤検出は無い。軽微は実在する弱点の指摘である。"
+ }
+}

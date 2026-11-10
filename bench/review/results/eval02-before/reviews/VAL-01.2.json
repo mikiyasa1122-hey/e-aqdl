@@ -1,0 +1,49 @@
+{
+ "case": "VAL-01",
+ "rep": 2,
+ "sec": 32.5,
+ "exit": 0,
+ "cost_usd": 0.11069639999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13951,
+  "cache_read_input_tokens": 122064,
+  "output_tokens": 4267,
+  "output_tokens_details": {
+   "thinking_tokens": 817
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13951,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2662,
+    "cache_read_input_tokens": 38090,
+    "cache_creation_input_tokens": 2267,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2267
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a9a69178\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: 空白だけの題名を拒否していない。`_validate` は `not title`（空文字）しか見ておらず、`strip()` をしていない。 / 成立条件: `create_note` または `update_note` に title=\"   \" を渡す。 / 影響: 仕様の「空白だけは不可」に反して保存される。 / 根拠: notes/service.py:201。`create_note(c,u,'   ','b',[])` が例外にならず id 1 を返すことを実行して確認した。上流に同じ検査はない。 / 提案: `not title.strip()` を条件に加える。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, K2 / 対応区分: 修正必須 / 内容: タグの正規表現が `^...$` を `match` で使っているため、末尾に改行が付いたタグ（\"abc\\n\"）を通す。 / 成立条件: tags=[\"abc\\n\"] を create、update、search に渡す。 / 影響: 英小文字・数字・ハイフンだけという規則が破れ、不正なタグが保存される。 / 根拠: notes/service.py:158, 208, 294。`create_note` に ['abc\\n'] を渡すと成功し、DB に 'abc\\n' が入ったことを実行して確認した。共有リンク側は fullmatch を使っており、対応が揃っていない。 / 提案: `TAG_RE.fullmatch` を使うか、`\\Z` に変える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件の正常系中心で、受け入れ条件の中核を確かめていない。確認できなかった項目は次のとおり。 / 根拠: tests/test_notes.py の全テスト名を確認した。上の欠陥（重大1・重大2）はこのためテストで検出されていない。以下は仕様が必須とする検証で、設計がテスト用に用意した `hooks.before_write` と `RateLimiter.hook` もテストから使われていない。 ・他組織・他人の非公開メモが NotFound になること（K1）、管理者が非公開メモを更新・削除できないこと ・閲覧数の並行カウント（K3） ・楽観的ロックの Conflict と、読み出しと書き込みの間に他の更新が入った場合（AC4） ・途中で失敗したときのロールバック（create・delete・transfer、K4・K6・AC1・AC5） ・失敗後も接続を使い続けられること（AC10） ・LIKE の `%` と `_`、SQL インジェクション文字列、一覧の境界値（page・per_page・sort）、タグの OR 絞り込み（K2・AC3） ・RateLimiter の枠の境界と並行呼び出し（AC7） ・共有リンクの期限ちょうど、形の崩れ、改ざん（AC8、K8） ・api_key の8文字未満の伏せ字（AC6） ・ログ・例外に本文・署名・api_key が出ないこと（AC9）。 / 提案: 上記を、フック差し込みを使って決定論的に再現するテストとして追加する。sleep には頼らない。\n- [重大4] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: 範囲外の page に対する検証が不完全。非常に大きい整数を渡すと ValidationError ではなく OverflowError になる。 / 成立条件: `list_notes(page=10**30)`。 / 影響: 「範囲外は ValidationError」に違反し、呼び出し側が業務エラーとして扱えない。 / 根拠: notes/service.py:264-274。実行して OverflowError を確認した。 / 提案: page に上限（例: OFFSET が 2^63 未満になる範囲）を設けて ValidationError にする。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: 認可の判定（`update_note`・`delete_note`）がトランザクションの外にあり、判定後に `transfer_notes` で所有者が変わっても、古い判定のまま更新される。更新自体は version で保護されている。 / 提案: 認可判定をトランザクション内で再確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。空白だけの題名、タグの上限・形式、tags に文字列そのものを渡す場合、ロールバックが未検証で不十分。実装にも欠陥がある（重大1・2）。\n- AC2: test_create_and_get 程度で、他組織・非公開・存在しない場合の NotFound と並行の閲覧数が未検証で不十分。実装の経路自体は妥当に見える。\n- AC3: test_list_first_page と test_search だけ。境界値・不正値・`%`・`_`・OR 絞り込み・インジェクションが未検証で不十分。実装にも欠陥がある（重大2・4）。\n- AC4: test_update_by_owner と test_delete_by_owner だけ。Conflict・Forbidden・管理者・非公開・競合が未検証で不十分。\n- AC5: test_transfer と test_transfer_requires_admin だけ。他組織・失敗時の巻き戻しが未検証で不十分。\n- AC6: test_export_audit があるが、8文字未満の鍵の伏せ字は未確認のため不十分。\n- AC7: test_limit だけ。枠の境界と並行呼び出しが未検証で不十分。\n- AC8: test_roundtrip と test_tampered だけ。期限ちょうど・形の崩れが未検証で不十分。\n- AC9: 検証するテストが見当たらず不十分。\n- AC10: 検証するテストが見当たらず不十分。\n- エンジンが検出したテストの兆候（skip・.only・アサーションなし）はなし。history では、バインドの追加のみで検証の弱体化は見当たらなかった。\n\n### E2E の要否\n- 不要。UI や HTTP のないライブラリで、unittest による単体・統合テストで足りる。ただし、並行処理と途中失敗の再現テストは必須。\n\n### 不足しているリスク\n- K1: 非公開・他組織の漏えいを確かめるテストがない。\n- K3: 閲覧数・更新・RateLimiter の並行テストがない。\n- K4: 途中失敗のロールバックを確かめるテストがない。\n- K2: インジェクションを確かめるテストがない。\n- K6: 移管で一部だけ移ったり組織外に渡ったりしないことを確かめるテストがない。\n- K8: 期限切れ・改ざん・形の崩れを網羅するテストがない。\n- K5, K7: 機密情報の露出を確かめるテストが不十分。\n\n### 確認したこと\n- spec.md と design.md、notes/*.py をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した（12件 OK）。\n- 再現スクリプトで、空白だけの題名の受理、改行付きタグの受理、page=10**30 での OverflowError を確認した。\n- `git status` と `history --since 0` を確認した。検証の弱体化は見当たらなかった。\n- `gate` は実行していない。依存関係のインストールもしていない。",
+ "files_changed": [],
+ "valid": true
+}

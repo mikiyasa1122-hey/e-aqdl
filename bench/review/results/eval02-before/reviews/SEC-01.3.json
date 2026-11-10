@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 3,
+ "sec": 28.3,
+ "exit": 0,
+ "cost_usd": 0.13022229999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 19987,
+  "cache_read_input_tokens": 153543,
+  "output_tokens": 3490,
+  "output_tokens_details": {
+   "thinking_tokens": 661
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19987,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2259,
+    "cache_read_input_tokens": 39804,
+    "cache_creation_input_tokens": 184,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 184
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 対応区分: 修正必須 / 内容: `create_note` がメモの本文をログに出している。 / 成立条件: メモを作成すると必ず発生する。logging を INFO 以下で有効にしていれば出力される。 / 影響: 仕様 R9 は「ログにメモの本文を出さない」と定めており、設計書も「ログには ID だけを出す」としている。どちらにも違反している。本文が機密情報としてログに残る。 / 根拠: notes/service.py:93 `log.info(\"note created id=%s owner=%s body=%r\", note_id, user[\"id\"], body)`。上流でこの出力を防ぐ仕組みはない。 / 提案: `body=%r` と引数 `body` を削除し、ID だけを出す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 検証が正常系の12件に限られ、受け入れ条件とリスクを確かめていない。 / 根拠: tests/test_notes.py に次のテストがない。\n  - R2 の漏えい防止: 他の組織・他人の非公開メモが NotFound になること。一覧・検索への混入がないこと。\n  - R2 の同時閲覧: 閲覧数が数え漏れしないこと。\n  - R3 の入力検証: per_page や sort の範囲外、% や _ のエスケープ、タグの OR 絞り込み、SQL インジェクション文字列。\n  - R4: Forbidden、Conflict（古い version、`hooks.before_write(\"update\")` を使った競合）、更新時の検証、削除の失敗時ロールバック。\n  - R5: 別組織への移管で Forbidden になること、途中で失敗したときに元のままであること。\n  - R6: api_key のマスク内容。既存の `test_export_audit` は action と actor しか見ていない。\n  - R7: 枠の境界ちょうどの挙動、同時呼び出し。\n  - R8: 期限ちょうど、形の崩れ、短い署名。\n  - R9: ログに機密情報が出ないこと。これがあれば重大1を検出できた。\n  - R10: 例外の後も接続を使い続けられること。\n  - R1: タグの上限と重複、失敗時に何も残らないこと。`hooks.before_write(\"create:tags\")` が未使用。\n  \n  これらは受け入れ条件・リスクそのもので、現状ではほとんどが空洞化している。 / 提案: 上記を決定論的に検証するテストを追加する。並行処理は `hooks.before_write` と `RateLimiter.hook` で、別々の接続・スレッドを使って再現する。ログは `assertLogs` で確認する。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 対応区分: 改善提案 / 内容: `delete_note` は、可視性と権限を確認した後、`BEGIN IMMEDIATE` に入ってから再確認していない。確認とトランザクションの間に所有者や公開状態が変わると、古い判定で削除できる。`update_note` も、権限の判定がトランザクションの外にある。 / 提案: トランザクション内で `_row` を取り直し、`_visible` と `_can_modify` を再判定する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、不十分。タグの規則・上限・重複、本文の長さ、失敗時のロールバックを確かめていない。実装は規則どおりに見える。\n- AC2: 不十分。他の組織・非公開・存在しないメモの NotFound と、閲覧数の増加を確かめていない。\n- AC3: 不十分。`test_list_first_page` と `test_search` の2件だけで、範囲外の入力、`%` と `_`、タグの絞り込み、インジェクションを確かめていない。\n- AC4: 不十分。`test_update_by_owner` と `test_delete_by_owner` の正常系だけで、Forbidden・Conflict・管理者・検証を確かめていない。\n- AC5: 不十分。`test_transfer` と `test_transfer_requires_admin` は、件数と管理者の拒否だけを見ている。組織をまたぐ移管の拒否と、失敗時の巻き戻しがない。\n- AC6: 不十分。マスクの内容を一切検証していない。\n- AC7: 不十分。`test_limit` は単純な上限と枠のリセットだけで、境界ちょうどと同時呼び出しがない。\n- AC8: 不十分。`test_roundtrip` と `test_tampered` だけで、期限の境界と形の崩れがない。\n- AC9: 検証なし。実装は R9 に違反している（重大1）。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。履歴を見ても、検証条件の弱体化は見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと統合テスト（SQLite のインメモリ、またはファイル、複数接続）で十分に確かめられる。\n\n### 不足しているリスク\n- K1: 漏えいを防ぐ実装は正しく見えるが、確かめるテストがない。\n- K2: SQL はプレースホルダーを使っており、`LIKE ... ESCAPE` も正しい。確かめるテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時動作を確かめるテストがない。\n- K4: ロールバックを確かめるテストがない。\n- K5: 実装に違反あり（重大1）。確かめるテストもない。\n- K6, K7, K8: 実装は仕様どおりに見えるが、確かめるテストがない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った。\n- `grep -n 'body=%r' notes/service.py` で、service.py:93 の本文ログ出力を確認した。\n- `aqdlc.py history --since 0` を確認した。検証条件の弱体化は見当たらなかった。\n- gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,63 @@
+{
+ "case": "BND-04",
+ "rep": 1,
+ "judge_cost_usd": 0.0710943,
+ "judge_raw": "各指摘の分類です。\n\n- 重大1は埋め込んだ欠陥そのものです。share.py:36 の `>` が期限ちょうどを有効にしており、箇所・原因・影響が一致します。\n- 重大2は実在する欠陥です。`re.match` と `$` の組み合わせで、末尾に改行のあるタグが通ります。仕様に反します。\n- 重大3から重大9は、テスト不足だけの指摘です。コードの欠陥の主張はありません。\n- 軽微1は、トランザクション外で判定した結果が古くなる問題で、delete に保護がないという実在の競合です。ただし仕様上の厳密な違反かは弱いため、real_other としました。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link の `now > expires` が期限ちょうどを有効にする点を、再現付きで指摘しており、埋め込み欠陥と一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match と `$` で使うため末尾改行付きタグが通り、仕様違反の実在バグである。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"作成系テストの不足のみを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"閲覧と閲覧数のテスト不足のみを指摘している。\"},\n{\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"一覧・検索のテスト不足のみを指摘している。\"},\n{\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"更新・削除の異常系テストの不足のみを指摘している。\"},\n{\"label\": \"重大7\", \"class\": \"test_gap\", \"reason\": \"移管のテスト不足のみを指摘している。\"},\n{\"label\": \"重大8\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ処理とログのテスト不足のみを指摘している。\"},\n{\"label\": \"重大9\", \"class\": \"test_gap\", \"reason\": \"境界・並行・例外後のテスト不足を指摘している。重大1の欠陥への言及は、テスト不足の根拠としてだけ使っている。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"update/delete の権限判定がトランザクション外で、transfer との競合により古い判定で delete できる。実在する競合だが、仕様違反としては弱い。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が期限ちょうどを有効にする `>` の欠陥を、箇所・原因・影響とも正しく指摘した。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link の `now > expires` が期限ちょうどを有効にする点を、再現付きで指摘しており、埋め込み欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match と `$` で使うため末尾改行付きタグが通り、仕様違反の実在バグである。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "作成系テストの不足のみを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "閲覧と閲覧数のテスト不足のみを指摘している。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "一覧・検索のテスト不足のみを指摘している。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "更新・削除の異常系テストの不足のみを指摘している。"
+   },
+   {
+    "label": "重大7",
+    "class": "test_gap",
+    "reason": "移管のテスト不足のみを指摘している。"
+   },
+   {
+    "label": "重大8",
+    "class": "test_gap",
+    "reason": "api_key の伏せ処理とログのテスト不足のみを指摘している。"
+   },
+   {
+    "label": "重大9",
+    "class": "test_gap",
+    "reason": "境界・並行・例外後のテスト不足を指摘している。重大1の欠陥への言及は、テスト不足の根拠としてだけ使っている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "update/delete の権限判定がトランザクション外で、transfer との競合により古い判定で delete できる。実在する競合だが、仕様違反としては弱い。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が期限ちょうどを有効にする `>` の欠陥を、箇所・原因・影響とも正しく指摘した。"
+ }
+}

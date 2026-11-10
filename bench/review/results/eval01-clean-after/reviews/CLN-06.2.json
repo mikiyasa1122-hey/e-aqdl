@@ -1,0 +1,49 @@
+{
+ "case": "CLN-06",
+ "rep": 2,
+ "sec": 25.5,
+ "exit": 0,
+ "cost_usd": 0.1095411,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 16731,
+  "cache_read_input_tokens": 124811,
+  "output_tokens": 3012,
+  "output_tokens_details": {
+   "thinking_tokens": 878
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16731,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1760,
+    "cache_read_input_tokens": 38905,
+    "cache_creation_input_tokens": 4773,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4773
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8e643ace\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R3, R4 / 対応区分: 改善提案 / 内容: タグの検査（個数と各タグの形）が、`_validate`（service.py:225-229）と `search_notes`（service.py:312-317）に別々に書かれている。 / 提案: 共通の関数にまとめる。今は動作に問題はない。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。作成の規則、題名・本文・タグの境界、トランザクションの巻き戻しは、`hooks.before_write(\"create:tags\")` で途中の失敗を起こして確かめている。実装側は、`create_note` が検査を通してから `transaction()` に入り、メモ・タグ・監査ログを1つのトランザクションで書いていて、設計と一致している。\n- AC2: 妥当。他組織・他人の非公開・存在しないメモがすべて NotFound になることを subTest で確かめている。確認後に非公開へ変わった場合も確かめている。閲覧数は、割り込み（hook）と、4スレッド×10回で別々の接続を使うテストの両方で確かめている。実装は `UPDATE views = views + 1` を `BEGIN IMMEDIATE` の中で行っており、数え漏れは起きない。\n- AC3: 妥当。page・per_page・sort の範囲外は ValidationError になる。LIKE は `ESCAPE '\\\\'` を使い、`\\`・`%`・`_` を事前にエスケープしている。題名と本文の両方に同じパターンを渡している。SQL はプレースホルダーで値を渡し、f文字列で埋め込むのは固定の列名の辞書と `?` だけで、インジェクションの経路はない（K2）。\n- AC4: 妥当。更新と削除の認可は `_check_modify` が担っていて、非公開は NotFound、権限のない操作は Forbidden になる。更新ではトランザクション内で行を読み直し、`WHERE version = ?` と rowcount で Conflict を判定している。割り込みで競合を再現するテストもある。削除は途中で失敗すると例外を伝え、元のまま残ることを確かめている。\n- AC5: 妥当。管理者だけが移せる。移す元・移す先・管理者の組織が同じでなければ Forbidden になる。途中で失敗したときは全体を巻き戻す。\n- AC6: 妥当。api_key は末尾4文字以外を伏せ、8文字未満はすべて伏せる。境界のテストがある。\n- AC7: 妥当。枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、20スレッドが同時に呼んでも成功が5回になることを確かめている。ロックの中に hook を置いた差し込みで、割り込みの順序を決定論的に再現している。sleep には頼っていない。\n- AC8: 妥当。`fullmatch` と ASCII の数字・16進の小文字に限った正規表現、`hmac.compare_digest`、`now >= expires` で無効にする判定を実装している。期限の境界・改ざん・形の崩れのテストがある。\n- AC9: 妥当。ログと例外のメッセージに本文・署名・api_key が出ていないことを、コードと test_ac9 で確認した。\n- AC10: 妥当。`transaction()` は例外のときに ROLLBACK し、ROLLBACK 自体が失敗しても元の例外を隠さない。例外の後も同じ接続を使い続けられることを確かめている。\n- リスク K1〜K8 は、上記の各テストで確かめられている。検証条件の弱体化は、history を `--since 0` で確認して見当たらなかった。エンジンが検出したテストの兆候はなし。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実データベースとスレッドを使った統合に近いテストが揃っている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行して、63件すべて成功した。\n- spec.md と design.md を、notes/ の全ソース（service.py・db.py・ratelimit.py・share.py・errors.py）と照合した。\n- `$AQ history --since 0` を読み、検証条件が後から弱められた形跡のないことを確認した。\n- test_ac2 と test_ac7 の本文を読み、検証が空洞化していないことを確認した。",
+ "files_changed": [],
+ "valid": true
+}

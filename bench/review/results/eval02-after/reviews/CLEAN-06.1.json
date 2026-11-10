@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-06",
+ "rep": 1,
+ "sec": 34.9,
+ "exit": 0,
+ "cost_usd": 0.1394085,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20382,
+  "cache_read_input_tokens": 117145,
+  "output_tokens": 4615,
+  "output_tokens_details": {
+   "thinking_tokens": 724
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20382,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3128,
+    "cache_read_input_tokens": 38161,
+    "cache_creation_input_tokens": 2453,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2453
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f7150041\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査に `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っている。Python の `$` は末尾の改行の直前にも一致するため、`\"abc\\n\"` が有効なタグとして通る。 / 成立条件: タグ文字列の末尾に `\\n` を1つ付けるだけ。create_note・update_note・search_notes のタグ絞り込みのどれでも起きる。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という R1 の規則に違反する。不正なタグ（改行入り、21文字目が改行の場合を含む）が DB に保存される。 / 確認した保証: 上流に別の検証はない。`_validate`（notes/service.py:64）と `search_notes`（同:150）の両方が同じ正規表現を使っている。 / 根拠: notes/service.py:14, 64, 150。実行結果: `create_note(c,u,'t','b',['abc\\n'])` が成功し、`get_note` の tags が `['abc\\n']` になった。 / 提案: `TAG_RE.fullmatch` に変える（share.py と同じ方式）。または `\\Z` を使う。\n- [重大2] 区分: テスト / 対象: AC1, AC3, AC4, K1, K2, R1, R3, R4 / 対応区分: 証拠不足 / 内容: 検証が正常系中心で、規則そのものを確かめていない。足りないのは次の証拠。(a) 題名・本文・タグ数・タグ形式の境界と拒否（空白だけの題名、101文字、タグ6個、重複タグ、改行入りタグ。重大1はこの欠落のため検出されなかった）。(b) 検索の `%`・`_`・`\\` を普通の文字として探すこと。タグの OR 絞り込み。page・per_page・sort の範囲外。(c) 他の組織・他人の非公開メモの NotFound（get・list・search・update・delete）。(d) 更新・削除の Forbidden と、管理者でも非公開は NotFound になること。(e) version 不一致と、読み出しから書き込みの間に更新が入った場合の Conflict（`hooks.before_write` を使って再現する）。 / 根拠: K1 の漏えい、K2 の LIKE の扱い、R4 の楽観的ロックが核心の要求なのに、条件を外しても失敗するテストがない。テストは12件で、否定系は空題名と transfer の非管理者だけ。 / 提案: 上の (a)〜(e) を unittest で追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC5, AC6, AC7, AC8, AC9, AC10, K3, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。(AC2) 同時閲覧で閲覧数が数え漏れしないこと（複数スレッド・別接続）。(AC5・K6) 別の組織への移管が Forbidden になること。途中で失敗したときに元の状態に戻ること。(AC1・K4) create・delete の途中失敗で何も残らないこと。(AC6・K7) api_key のマスク（8文字未満・ちょうど8文字）。現在のテストは `actor` だけを見ていて、マスク後の鍵を確かめていない。(AC7) 枠の境界（ちょうど window 秒）と、複数スレッドの同時呼び出し。(AC8) 期限の境界（`now == expires`）、期限切れ、形の崩れ・末尾改行・非 str。(AC9) ログや例外に本文・署名・鍵が出ないこと。(AC10) 例外の後に同じ接続を使えること。 / 根拠: これらは受け入れ条件そのもの、または K3〜K8 の重要リスク。設計書が用意した `hooks.before_write` と `RateLimiter.hook` の差し込み口を、テストが1つも使っていない。 / 提案: 差し込み口を使い、sleep に頼らず決定論的に再現するテストを追加する。例えば、`RateLimiter.hook` から別スレッドで割り込ませ、上限を超えて許さないことを確かめる。`before_write` で例外を投げ、ROLLBACK 後に件数が変わらないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 対応区分: 改善提案 / 内容: update_note と delete_note の認可（`_visible`・`_can_modify`）をトランザクションの外で判定している。その後に transfer_notes で owner が変わると、古い owner 情報で認可される余地が残る。update は version で守られる。delete には version がなく、判定が古くなる可能性がある。仕様は delete にこの競合の扱いを求めていない。 / 提案: delete_note の認可判定を `transaction()` の中で再取得した行に対して行う。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空題名だけで、境界・タグ規則・ロールバックを確かめていない。実装にも不具合がある（重大1）。\n- AC2: 不十分。同時閲覧・NotFound の隠蔽・組織違いを確かめていない。実装は `views = views + 1` を BEGIN IMMEDIATE の中で実行しており、コードの上では妥当に見える（未検証）。\n- AC3: 不十分。ページング正常系と単純な検索だけで、`%`・`_` のエスケープ・範囲外・タグ OR・他人の非公開メモの除外を確かめていない。実装は ESCAPE 句とプレースホルダーを使っており、コードを読む限りでは妥当（未実行）。\n- AC4: 不十分。所有者による更新・削除の成功だけで、Forbidden・Conflict・競合を確かめていない。\n- AC5: 不十分。成功と非管理者の拒否だけで、組織違いと途中失敗を確かめていない。\n- AC6: 不十分。マスクを確かめていない。\n- AC7: 不十分。単一スレッドの基本的な制限と枠の経過だけで、ちょうど window 秒の境界と同時呼び出しを確かめていない。\n- AC8: 不十分。往復と改ざんの1ケースだけで、期限境界・期限切れ・形の崩れを確かめていない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。`git diff` では、テストを弱めた形跡は確認できなかった。変更履歴は未確認で、コードはすべて新規の未追跡ファイル。\n\n### E2E の要否\n- 不要。DB 付きのライブラリで、UI や HTTP がない。結合は SQLite を使った unittest で足りる。ただし並行・ロールバックの再現テストは必須（重大3）。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない（重大2）。\n- K2: LIKE のワイルドカードの扱いを確かめるテストがない（重大2）。\n- K3: 同時の閲覧・更新・呼び出しを確かめるテストがない（重大3）。\n- K4: 途中失敗で何も残らないことを確かめるテストがない（重大3）。\n- K5・K7: マスクとログの検証がない（重大3）。\n- K6: 別の組織への移管の拒否と、途中失敗の巻き戻しを確かめるテストがない（重大3）。\n- K8: 期限の境界と形の崩れたリンクを確かめるテストがない（重大3）。\n\n### 確認したこと\n- spec.md と design.md、`notes/*.py` と `tests/test_notes.py` を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK だった。\n- 再現: `create_note(c,u,'t','b',['abc\\n'])` が成功し、`get_note` の tags が `['abc\\n']` になった。\n- SQL の確認:\n  - 値はすべてプレースホルダーで渡している。\n  - sort は固定の辞書から選んでいる。\n  - LIKE は `\\`・`%`・`_` を ESCAPE '\\\\' でエスケープしており、題名・本文の両方に同じパターンが渡る。\n  - タグ絞り込みの IN は `?` を並べて組み立てている。\n- `$AQ trace` と `$AQ history` は実行していない。判断はコードの通読に基づく。\n- `$AQ gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

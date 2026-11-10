@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-07",
+ "rep": 1,
+ "sec": 38.3,
+ "exit": 0,
+ "cost_usd": 0.1490079,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22147,
+  "cache_read_input_tokens": 115739,
+  "output_tokens": 4883,
+  "output_tokens_details": {
+   "thinking_tokens": 1048
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22147,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3058,
+    "cache_read_input_tokens": 38172,
+    "cache_creation_input_tokens": 3976,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3976
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d524f16c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py:158 `TAG_RE`、`_validate`（208行）、`search_notes`（294行） / 対応区分: 修正必須 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` を `re.match` で使っている。Python の `$` は末尾の改行の直前にも一致する。そのため `\"abc\\n\"` のように末尾に改行が付いたタグが「英小文字・数字・ハイフンの1〜20文字」の検査を通る。同じ検査を作成・更新・検索の絞り込みで使っているので、3か所とも通る。 / 成立条件: tags に末尾が `\\n` の文字列を渡す（長さ20文字ちょうどの `\"a\"*20 + \"\\n\"` も通る）。 / 影響: 仕様に反する文字が note_tags に保存される。保存されたタグと、検査を通ったタグとで形が一致しなくなる。呼び出し側が確かめていても防げない。`share.py` は同じ落とし穴を `fullmatch` で避けているが、service.py は避けていない。 / 確認した保証: 上流の検証も DB の制約も（note_tags.tag に CHECK なし）、この改行を防いでいない。 / 根拠: 次のコマンドで再現した。`create_note(c,u,'t','b',['abc\\n'])` が成功して note_id=1 を返し、`note_tags` に `'abc\\n'` が入り、`search_notes(..., ['abc\\n'])` も通った。 / 提案: `TAG_RE.fullmatch(t)` を使う（`re.fullmatch` か `\\Z` でもよい）。`_validate` と `search_notes` の両方を直す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8, R2〜R10 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件、90行のみで、ほとんどが正常系の1回確認になっている。受け入れ条件・リスクを確かめる検証がない。足りない検証は次のとおり。(a) AC1/K4: 途中の失敗（`hooks.before_write(\"create:tags\")`）で何も残らないこと、タグ・題名・本文の境界値、タグの不正な形（上記の改行の欠陥を見つけられたはず）。(b) AC2/K1/K6: 他の組織・他人の非公開メモが NotFound になること、閲覧数が同時に正確に増えること。(c) AC3/K2: `%`・`_` の部分一致、SQL インジェクション文字列、page・per_page・sort の範囲外。(d) AC4/K3: Conflict、Forbidden、管理者が非公開メモを扱えず NotFound になること、読み出しと書き込みの間に更新が入った場合、削除の失敗が呼び出し側に伝わること。(e) AC5/K6: 組織をまたぐ移管の Forbidden、途中で失敗したときに元のままであること。(f) AC6/K7: 8文字未満・8文字ちょうど・長い api_key の伏せ方。（既存の test_export_audit は api_key を一切確かめていない。）(g) AC7/K3: 枠の境界（ちょうど window 秒）、複数スレッドからの同時呼び出し（`RateLimiter.hook` を使う）。(h) AC8/K8: 期限の境界（期限ちょうどが無効）、署名の改ざん、形の崩れたリンク、改行を含むリンク。(i) AC9/K5: ログ・例外のメッセージに本文・署名・api_key が出ないこと。(j) AC10: 例外の後も同じ接続で次の操作ができること。 / 根拠: 設計書のテスト方針で `hooks.before_write` と `RateLimiter.hook` を並行・障害の再現用に用意しているのに、テストが一度も使っていない。これらの検証が必須なのは、受け入れ条件がそれぞれ境界・異常系・同時実行を明示しているため、また、リスク K1〜K8 のうち認可・SQL・競合・機密に関するものが検証なしでは確かめられないため。重大1の欠陥が検証をすり抜けた事実がその裏付けになる。`$AQ history` では、V1〜V10・VK1〜VK8 を後から `unit` に結び付けただけで、テストは弱められていないが、中身が空洞のまま結び付けられている。 / 提案: 上記の項目ごとに、決定論的なテスト（sleep に頼らず、hooks とスレッド＋バリアで再現）を追加する。認可の条件・WHERE 条件・ロックを外したら失敗する形にする。\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py:302-322 `update_note` / 対応区分: 改善提案 / 内容: 認可の判断と、title・body が未指定のときの引き継ぎ値は、トランザクションの外で読んだ `row` に基づいている。呼び出し側が最新の version を渡し、かつ読み出し後に別の更新が入った、という稀な順序では、古い title・body で上書きしうる。通常の version 不一致は WHERE の version 条件で Conflict になる。 / 提案: トランザクション（BEGIN IMMEDIATE）の中で行を読み直して判断する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系1件と空の題名の拒否だけで不十分。境界値・タグの規則・ロールバックを確かめていない（重大1・重大2）。\n- AC2: 不十分。他の組織・非公開・同時の閲覧がなく、閲覧数も確かめていない。\n- AC3: 不十分。部分一致の1件と一覧の1ページ目だけ。範囲外の拒否・`%` `_`・インジェクション・タグの OR がない。\n- AC4: 不十分。正常系の更新・削除だけで、Conflict・Forbidden・競合がない。\n- AC5: 不十分。件数の確認と管理者以外の拒否だけ。組織をまたぐ拒否・全部か何もしないか、がない。\n- AC6: 不十分。api_key の伏せ方を確認していない。\n- AC7: 不十分。時間枠の再設定は確認しているが、ちょうど window 秒の境界と同時の呼び出しがない。\n- AC8: 不十分。往復と note_id の差し替えだけ。期限の境界・署名の改ざん・形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからず、私も確認した）。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest の単体・結合テストで足りる）。ただし、並行処理は決定論的な複数スレッドのテストが必要。\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる検証がない。コードは `_visible` で妥当に見える（未検証）。\n- K2: 実装は ESCAPE とプレースホルダーを使っており妥当に見えるが、インジェクションと `%` `_` の検証がない。\n- K3: 閲覧数・更新・RateLimiter は、コード上はロックで守られているが、並行のテストがない。\n- K4: 途中の失敗でロールバックされることを確かめる検証がない。\n- K5・K7・K8: 検証がない（コードは妥当に見える）。\n- K6: 組織をまたぐ移管の拒否と、途中で失敗したときに元のままであることの検証がない。\n### 確認したこと\n- spec.md・design.md、notes/*.py の全ファイルとテストを読んだ。\n- `python3 -m unittest discover -s tests -t .`（`PYTHONDONTWRITEBYTECODE=1`）→ 12件が通った（ただし上記のとおり薄い）。\n- `create_note(...,['abc\\n'])` を実行（読み取り専用のメモリ DB）→ 通って保存された。重大1の再現。\n- `$AQ history --since 0` を確認 → 検証条件の弱体化はない。V・VK を `unit` に結び付けただけだった。\n- コード・設計の整合: 設計書どおり、トランザクション、プレースホルダー、ESCAPE、`_visible`、`_can_modify`、フックがある（重大1の欠陥を除く）。\n- `$AQ gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

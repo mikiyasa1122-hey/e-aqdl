@@ -1,0 +1,28 @@
+{
+ "case": "EXC-01",
+ "rep": 3,
+ "judge_cost_usd": 0.06366430000000001,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込み欠陥そのものです。`get_note` は `_visible` が偽のとき Forbidden を返しており、存在しないメモの NotFound と区別できます。報告は箇所（`get_note`）、原因（Forbidden と NotFound の差）、影響（他組織・他人の非公開メモの存在を推測できる）のすべてが正解データと一致しています。\n\n**重大2**: テストの不足だけを指摘しています。コードの欠陥の主張ではないため、test_gap です。\n\n**軽微1**: `update_note` と `delete_note` は権限判定をトランザクションの外で行っています。`transfer_notes` が間に入ると、元の所有者が判定を通ったまま削除できる余地があるのは事実です。`delete_note` には version 条件がないため、この指摘は根拠のある実在の競合です。ただし埋め込み欠陥とは別の箇所と原因です。real_other とします。\n\n**検出**: 重大1が欠陥と一致するため yes です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見られないメモに Forbidden を返し、存在しないメモの NotFound と区別できる点を、箇所・原因・影響とも正解どおりに指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけの指摘で、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限判定がトランザクション外にあり、delete には version 条件もないため、transfer との競合で権限の判定が古くなる余地があり、埋め込み欠陥とは別の実在する問題。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（get_note の Forbidden による存在の漏えい）を正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見られないメモに Forbidden を返し、存在しないメモの NotFound と区別できる点を、箇所・原因・影響とも正解どおりに指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけの指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限判定がトランザクション外にあり、delete には version 条件もないため、transfer との競合で権限の判定が古くなる余地があり、埋め込み欠陥とは別の実在する問題。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（get_note の Forbidden による存在の漏えい）を正確に指摘している。"
+ }
+}

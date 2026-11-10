@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 2,
+ "sec": 32.9,
+ "exit": 0,
+ "cost_usd": 0.1048639,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12751,
+  "cache_read_input_tokens": 122139,
+  "output_tokens": 4163,
+  "output_tokens_details": {
+   "thinking_tokens": 804
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12751,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2843,
+    "cache_read_input_tokens": 36895,
+    "cache_creation_input_tokens": 2731,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2731
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 形の崩れたリンクを Forbidden にせず `None`（例外なし）で返す。 / 成立条件: `verify_link` に形式が正規表現に合わない文字列を渡す。例は `\"abc\"`、署名が64文字でないもの、数字以外を含むもの。 / 影響: 仕様は「形の崩れたリンクはどれも Forbidden」。呼び出し側が例外だけを見て認可すると、改ざん・不正なリンクを通してしまう。 / 確認した保証: 上流の検証も既存テストもこれを防いでいない。実行して `verify_link('s','abc')` が `None` を返すことを確認した。 / 根拠: notes/share.py:30-35。`except ValueError: return None` になっている。 / 提案: `raise Forbidden(\"不正なリンク\")` に変える。その後、先頭ゼロ（`007`）を正規形に限るかどうかも決める。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査が `TAG_RE.match` と `$` で、末尾の改行を通す。 / 成立条件: タグ `\"ab\\n\"` を作成・更新・検索に渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。実行して `TAG_RE.match('ab\\n')` が真になることを確認した。 / 確認した保証: 共有リンクの正規表現は `fullmatch` で対策済みだが、タグの正規表現には同じ対策がない。 / 根拠: notes/service.py:14（定義）、service.py:62（作成・更新）、service.py:139（検索）。 / 提案: `TAG_RE.fullmatch(t)` を使う（または `\\Z`）。呼び出し箇所は `_validate` と `search_notes` の2か所。\n- [重大3] 区分: テスト / 対象: AC7, K3, R7 / 対応区分: 証拠不足 / 内容: RateLimiter のテストが、枠の境界（ちょうど window 秒で新しい枠になる）と同時呼び出しで上限を超えないことを確かめていない。現状は `t=61` の1ケースだけ。 / 根拠: AC7 に「枠の境界・同時の呼び出しを含む」と明記されている。設計は `RateLimiter.hook` による決定論的な再現を約束している。 / 提案: `t=59.999` で拒否、`t=60` で許可になることを確かめる。複数スレッドを使い、`hook` で順序を固定して limit 回を超えて許可されないことを確かめる。ロックを外すと失敗するテストにする。\n- [重大4] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC8, AC9, AC10, K1, K2, K3, K4, K6, R9 / 対応区分: 証拠不足 / 内容: 必須のリスクを確かめるテストが大半で欠けている。欠けているものは次のとおり。 / 根拠: 12件はいずれも正常系の1ケースだけで、`hooks.before_write` を使うテストが1つもない。仕様はこれらを受け入れ条件・リスクとして要求している。 / 提案: 次のテストを追加する。(a) 他組織・他人の非公開メモの NotFound。get・update・delete・list・search・transfer の各経路を含める。(b) 作成・削除・移管の途中失敗でロールバックされ、その後も接続を使えること（K4, AC10）。(c) version 不一致と、読み出しから書き込みの間の競合による Conflict。(d) 閲覧数の同時加算。(e) `%`、`_`、`\\` を含む検索語と SQL インジェクション相当の入力。(f) 移管で他組織・非管理者が Forbidden になること。(g) 監査ログの api_key の伏せ字。8文字未満と末尾4文字の境界を含める。(h) 期限の境界と、改ざん・形崩れが Forbidden になること。(i) ログと例外に本文・署名・api_key が出ないこと。\n\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: 先頭ゼロのリンク（`007.…`）は、整数に変換して署名するため、`7.…` と同じ署名で通る。有効性は変わらないが、同じリンクが複数の表記になる。 / 提案: 正規形（先頭ゼロなし）だけを受け付ける。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系1件と空題名の拒否だけで不十分。本文・タグ・題名の境界、タグの重複・5個超、途中失敗で何も残らないことが未検証。実装にもタグ末尾改行の欠陥がある。\n- AC2: 閲覧数の増加も同時閲覧も、見え方の規則（他組織・非公開・不存在）も未検証で不十分。\n- AC3: 一覧と検索の正常系だけ。範囲外の入力、`%` と `_`、タグの OR 絞り込み、非公開の除外が未検証で不十分。\n- AC4: 作成者による更新・削除の正常系だけ。Conflict、Forbidden、非公開、削除の失敗が未検証で不十分。\n- AC5: 件数と管理者以外の拒否だけ。他組織の拒否と途中失敗後の全件復元が未検証で不十分。\n- AC6: 伏せ字の値を確かめておらず不十分。`action` と `actor` しか見ていない。\n- AC7: 重大3のとおり不十分。\n- AC8: 往復と改ざんの2件だけ。期限の境界、形崩れ、期限切れが未検証。形崩れは実装が仕様違反。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。`.skip` やアサーションなしのテストはなかった。\n\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、単体・結合テストで足りる。ただし並行・途中失敗を確かめる結合テストは必須。\n\n### 不足しているリスク\n- K1: 他組織・非公開メモの漏えいを防ぐテストがない。\n- K2: LIKE のエスケープとプレースホルダーを確かめるテストがない。実装は `ESCAPE '\\\\'` と `_like_escape` で妥当に見える。\n- K3: 並行の更新・閲覧・呼び出しのテストがない。\n- K4: 途中失敗によるロールバックのテストがない。\n- K5, K7: 監査ログの伏せ字と、ログ・例外への機密情報の非露出を確かめるテストがない。\n- K6: 移管が組織の外に渡らないことを確かめるテストがない。\n- K8: 形崩れのリンクが通る。実装の欠陥（重大1）。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が通った。ただし内容は薄い。\n- `verify_link('s','abc')` が `None` を返すことを実行して確認した（重大1）。\n- `TAG_RE.match('ab\\n')` が真になることを確認した（重大2）。\n- 実装では確認できて問題なし: BEGIN IMMEDIATE のトランザクション、`UPDATE … WHERE version = ?` による楽観ロック、LIKE の ESCAPE と SQL のプレースホルダー、可視性の検査。\n- `$AQ trace`・`history`・`gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

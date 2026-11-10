@@ -1,0 +1,49 @@
+{
+ "case": "BND-01",
+ "rep": 3,
+ "sec": 29.9,
+ "exit": 0,
+ "cost_usd": 0.1305629,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20241,
+  "cache_read_input_tokens": 113729,
+  "output_tokens": 3821,
+  "output_tokens_details": {
+   "thinking_tokens": 744
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20241,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2624,
+    "cache_read_input_tokens": 36394,
+    "cache_creation_input_tokens": 3848,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3848
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 71ec4f30\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:`list_notes` / 対応区分: 修正必須 / 内容: per_page の上限が 51 になっている。`1 <= per_page <= PER_PAGE_MAX + 1` と書かれており、仕様の「1〜50、範囲外は ValidationError」に反する。 / 成立条件: `per_page=51` で呼ぶだけで起きる。 / 影響: 範囲外の入力が拒否されず、51 件が返る。AC3 の「入力の拒否」を満たさない。 / 根拠: 一時スクリプトで `list_notes(conn, user, per_page=51)` を実行し、例外なしで `per_page: 51` が返るのを確認した。上流や DB の制約でこの入力が防がれる経路はない。エラーメッセージ側は「1〜50」と書いてあり、コードと食い違っている。 / 提案: 条件を `1 <= per_page <= PER_PAGE_MAX` に直す。51・0・50 の境界テストも足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は 12 件すべて正常系のスモークで、仕様が求める拒否・異常系・境界・並行の検証がほぼない。主な欠落は次のとおり。(a) 他組織・他人の非公開メモが NotFound になること（K1）。(b) 管理者・他人による更新・削除が Forbidden になること。(c) version 不一致と、読み出しから書き込みの間の競合による Conflict（K3, AC4）。(d) `hooks.before_write` を使った、作成・削除・移管の途中失敗時のロールバック（K4, AC1, AC5, AC10）。(e) 閲覧数の同時更新（AC2, K3）。(f) RateLimiter の枠の境界（ちょうど window 秒）とスレッドからの同時呼び出し（AC7）。(g) LIKE の `%`・`_` と SQL インジェクション文字列（K2）。(h) api_key の伏せ字と 8 文字未満の鍵（AC6, K7）。(i) 共有リンクの期限ちょうど・形の崩れ（K8, AC8）。(j) ログと例外に機密が出ないこと（AC9）。 / 根拠: これらは仕様が必須とする受け入れ条件・リスクである。現状のテストは条件を外しても通る。実際に重大1の境界バグ（per_page=51）が全テストを通過している。設計書は、並行・途中失敗を再現するための差し込み口（hooks.before_write / RateLimiter.hook）を用意しているが、それを使うテストが 1 件もない。 / 提案: 上の (a)〜(j) を、差し込み口を使った決定論的なテストとして追加する。tests/ 以外のファイルは対象にしない。\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py:`update_note`・`delete_note` / 対応区分: 改善提案 / 内容: 可視性・権限の確認がトランザクションの外にあり、確認と書き込みの間に所有者や公開状態が変わると、古い判定で書き込む余地がある（TOCTOU）。更新は version の条件があるので Conflict になり実害は小さい。削除には version の条件がない。 / 提案: 確認を BEGIN IMMEDIATE の内側で行う。\n- [軽微2] 区分: 実装 / 対象: R8, notes/share.py:`LINK_RE` / 対応区分: 改善提案 / 内容: 仕様は「10進の数字だけ」だが、正規表現は 18 桁までに限定している。19 桁以上は Forbidden になるが、実害はない。 / 提案: 仕様と一致させるか、仕様に上限を明記する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と空の題名の拒否だけ。本文・タグの境界、重複タグ、途中失敗時に何も残らないことを確かめておらず、不十分。\n- AC2: 閲覧は 1 件のテストで version を見ているだけ。他組織・非公開の NotFound、閲覧数の増加と同時閲覧が未検証で、不十分。\n- AC3: 一覧と検索の正常系だけ。範囲外の拒否・sort・`%`/`_`・タグ OR・非公開の除外がなく、per_page=51 のバグを見逃した。不十分。\n- AC4: 作成者による更新・削除の正常系だけ。Forbidden・Conflict・非公開の NotFound・削除の失敗が未検証で、不十分。\n- AC5: 移管の正常系と非管理者の拒否だけ。他組織の拒否と途中失敗時のロールバックが未検証で、不十分。\n- AC6: 伏せ字そのものを一切確かめていない（action と actor の確認のみ）。不十分。\n- AC7: 上限超過と枠の再開（t=61）だけ。境界（ちょうど 60）と同時の呼び出しが未検証で、不十分。\n- AC8: 往復と改ざん 1 例だけ。期限ちょうど・期限切れ・形の崩れが未検証で、不十分。\n- AC9: テストなし。不十分。\n- AC10: テストなし。不十分。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。`git diff` / `history` を確認した範囲では、検証条件が弱められた形跡はない。履歴は bind の追加のみだった。\n\n### E2E の要否\n- 不要。HTTP 層のない Python ライブラリで、単体テストで足りる。ただし異常系・並行は上の指摘のとおり単体で必須。\n\n### 不足しているリスク\n- K1〜K8 はいずれも検証がない（重大2）。\n- 閲覧数と RateLimiter の並行性は、コード上は問題ない。`get_note` は BEGIN IMMEDIATE 内の `views = views + 1`、RateLimiter はロックで保護されている。ただし未検証。\n\n### 確認したこと\n- spec.md / design.md / notes/*.py / tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` → 12 件 OK。\n- 一時スクリプトで `list_notes(per_page=51)` が例外なしで通ることを確認した（重大1の再現）。\n- `aqdlc.py history --since 0` で検証条件の弱体化がないことを確認した。\n- 認可（_visible / _can_modify）、SQL のプレースホルダーと ESCAPE、トランザクションのロールバック、署名の比較（compare_digest）、api_key の伏せ字、ログ内容はコード上は仕様どおりだった。",
+ "files_changed": [],
+ "valid": true
+}

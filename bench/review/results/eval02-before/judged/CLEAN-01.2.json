@@ -1,0 +1,33 @@
+{
+ "case": "CLEAN-01",
+ "rep": 2,
+ "judge_cost_usd": 0.06476029999999999,
+ "judge_raw": "各指摘の分類です。\n\n- 重大1: Python の `$` は末尾の改行の直前にも一致するので、`re.match` と `$` の組み合わせでは `\"abc\\n\"` が通ります。報告は :memory: の DB で再現したと書いており、仕様 R1 に反する実在の欠陥です。ただし、このケースで埋め込んだ変更は説明の追加と変数の分離だけで、この欠陥は元からあったものです。そのため real_other とします。\n- 重大2: コードの欠陥ではなく、テストの不足だけを指摘しています。\n- 重大3: こちらもテストの不足です（同時実行とロールバックの検証）。\n- 軽微1: INNER JOIN で actor の行が落ちるという指摘です。仕様に反するとは言えず、利用者が必ず存在する前提なら実害もありません。改善提案なので style とします。\n\n欠陥なしのケースなので、defect_detected は n/a です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と re.match により末尾改行付きのタグが通るのは、再現を伴う実在の仕様違反で、埋め込んだ変更とは無関係の既存の欠陥。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけの指摘で、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"同時実行とロールバックの検証が不足しているというテストの指摘。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"INNER JOIN から LEFT JOIN への改善提案で、仕様違反の主張ではない。\"}\n ],\n \"defect_detected\": \"n/a\",\n \"matched_label\": null,\n \"note\": \"欠陥なしのケースで、重大1は埋め込みとは無関係の実在の欠陥（real_other）であり、matches_defect は使わない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と re.match により末尾改行付きのタグが通るのは、再現を伴う実在の仕様違反で、埋め込んだ変更とは無関係の既存の欠陥。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけの指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "同時実行とロールバックの検証が不足しているというテストの指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "INNER JOIN から LEFT JOIN への改善提案で、仕様違反の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1は埋め込みとは無関係の実在の欠陥（real_other）であり、matches_defect は使わない。"
+ }
+}

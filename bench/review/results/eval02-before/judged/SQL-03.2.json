@@ -1,0 +1,33 @@
+{
+ "case": "SQL-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0645963,
+ "judge_raw": "## 判定\n\n- **重大1**: 欠陥そのものを指摘している。箇所は `list_notes` の `SORT_COLUMNS.get(sort, sort)` で、原因は許可した値に限らず sort を ORDER BY にそのまま入れていること。影響も任意の式の注入で一致する。\n- **重大2**: コードの欠陥ではなく、テストの不足だけを述べている。\n- **重大3**: `update_note` と `delete_note` で、可視性と権限の確認がトランザクションの外にあるという指摘。コードの読みとしては実在する競合（TOCTOU）だが、本人も一部は未確認と認めている。埋め込んだ欠陥ではない。ただし version が一致しない限り update は Conflict になる点は割り引くとしても、delete 側は実在の穴なので real_other とする。\n- **軽微1**: 保守性の提案で、動作は仕様どおりと本人も述べている。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の SORT_COLUMNS.get(sort, sort) で sort が ORDER BY にそのまま入る点を、原因・影響とも埋め込み欠陥どおりに指摘し、実行でも確認している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを述べており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note で可視性・権限の確認がトランザクション外にあり、確認から書き込みの間の状態変化に弱いという実在の欠陥を、根拠を挙げて指摘している（一部は未確認と自認）。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"search_notes のタグ検査の重複という保守性の提案で、動作は仕様どおりと明記されている。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ SQL インジェクション（sort の ORDER BY への直接埋め込み）を、箇所・原因・影響まで正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の SORT_COLUMNS.get(sort, sort) で sort が ORDER BY にそのまま入る点を、原因・影響とも埋め込み欠陥どおりに指摘し、実行でも確認している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを述べており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update_note と delete_note で可視性・権限の確認がトランザクション外にあり、確認から書き込みの間の状態変化に弱いという実在の欠陥を、根拠を挙げて指摘している（一部は未確認と自認）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "search_notes のタグ検査の重複という保守性の提案で、動作は仕様どおりと明記されている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ SQL インジェクション（sort の ORDER BY への直接埋め込み）を、箇所・原因・影響まで正確に捉えている。"
+ }
+}

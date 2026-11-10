@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 3,
+ "sec": 33.9,
+ "exit": 0,
+ "cost_usd": 0.13752360000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20484,
+  "cache_read_input_tokens": 117116,
+  "output_tokens": 4386,
+  "output_tokens_details": {
+   "thinking_tokens": 831
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20484,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2779,
+    "cache_read_input_tokens": 38137,
+    "cache_creation_input_tokens": 2579,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2579
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 形の崩れた共有リンクが Forbidden にならず None が返る。 / 成立条件: `verify_link(secret, \"abc\")` のように、正規表現に合わない文字列や、数字が19桁以上の文字列を渡す。 / 影響: 仕様は「形の崩れたリンクはどれも Forbidden」と定めている。呼び出し側が None を「無効」ではなく「許可」と取り違えると認可の穴になる。 / 確認した保証: 上流に別の検証はない。実行して `None` が返ることを確認した。 / 根拠: notes/share.py の `verify_link` で、`raise ValueError` を `except ValueError: return None` が受けている。 / 提案: `return None` を `raise Forbidden(\"不正なリンク\")` に変える。\n- [重大2] 区分: 実装 / 対象: R1, AC1, K2 / 対応区分: 修正必須 / 内容: タグの検査が `TAG_RE.match` と `$` で行われており、末尾に改行を含むタグ（例 `\"ab\\n\"`）を通す。 / 成立条件: `create_note`・`update_note`・`search_notes` に末尾 `\\n` 付きのタグを渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という R1 の規則に違反する。不正なタグが保存される。 / 確認した保証: 他の層での検証はない。`_validate(..., [\"ab\\n\"])` が受理されることを実行で確認した。 / 根拠: notes/service.py:14（`^...$`）、:64 と :150 の `.match`。 / 提案: `TAG_RE.fullmatch` を使うか、`\\Z` に変える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが正常系の12件だけで、受け入れ条件の大半を検証していない。次の検証がない。 ①他の組織・他人の非公開メモが NotFound になること（K1）。 ②閲覧数の同時加算（AC2・K3）。 ③更新の Conflict と、読み出しから書き込みの間に更新が入る場合（AC4）。 ④作成・削除・移管で途中で失敗した場合のロールバック（AC1・AC5・K4）。 ⑤LIKE の `%`・`_`・`\\` とインジェクション文字列（AC3・K2）。 ⑥入力の境界値（題名100/101文字、タグ5/6個、page・per_page・sort の範囲外）。 ⑦api_key の伏せ字（AC6・K7）。 ⑧RateLimiter の枠の境界と並行実行（AC7）。 ⑨共有リンクの期限の境界と形の崩れ（AC8）。 ⑩ログ・例外に機密情報が出ないこと（AC9）。 ⑪例外の後も接続を使えること（AC10）。 / 根拠: tests/test_notes.py に該当するテストがない。hooks と RateLimiter.hook は用意されているが使われていない。重大1・2の不具合も、これらの検証があれば検出できた。 / 提案: 上記の観点を、決定論的な差し込み口（hooks・hook・clock）とスレッドを使って追加する。\n- [重大4] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: 更新・削除で認可の確認がトランザクションの外にある。確認後に、ほかの接続が `transfer_notes` や削除を行うと、古い row で判定した結果のまま書き込みが進む。 / 成立条件: `update_note` と `transfer_notes` が同時に走る。 / 影響: 更新側は version の条件で Conflict になることが多い。一方 `delete_note` には version も権限の再確認もない。そのため、所有者が変わった直後に元の所有者が他人のメモを削除でき、その場合に Forbidden にならない。 / 確認した保証: `delete_note` の DELETE は `WHERE id = ?` だけである。移管で version は増えるが、削除はそれを見ていない。 / 根拠: notes/service.py:182-191。`get_note` は同じ問題を再確認で防いでおり、設計との一貫性もない。 / 提案: `BEGIN IMMEDIATE` の後で `_row` を読み直し、`_visible` と `_can_modify` を再判定する（`update_note` も同様）。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `page` が極端に大きいと、OFFSET が sqlite の整数範囲を超えて OverflowError になる。 / 提案: page に上限を設けるか、OverflowError を ValidationError に変換する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系1件と空題名の拒否だけで、タグ・文字数の境界・失敗時の巻き戻しは未検証。不十分。\n- AC2: 作成者の閲覧だけを確認している。他の組織・非公開の NotFound、閲覧数の加算、同時の閲覧は未検証。不十分。\n- AC3: 一覧と検索の正常系だけ。`%`・`_` の扱い、入力の範囲外、タグ OR、他人の非公開の除外は未検証。不十分。\n- AC4: 所有者の更新と削除の正常系だけ。Conflict・Forbidden・管理者の挙動は未検証。不十分。\n- AC5: 正常系と非管理者の拒否だけ。組織をまたぐ移管と途中失敗は未検証。不十分。\n- AC6: 行の action と actor だけを見ており、actor_key の伏せ字を見ていない。不十分。\n- AC7: 逐次の境界の一部だけ。並行実行と、ちょうど window 秒での枠の切り替えは未検証。不十分。\n- AC8: 往復と改ざんの1件だけ。期限の境界、期限切れ、形の崩れは未検証で、実際に不具合（重大1）がある。不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。検証条件の改ざん・弱体化は確認していない（履歴は未確認）。\n\n### E2E の要否\n- 不要（ライブラリで HTTP や UI がない）。ただし SQLite の別接続・別スレッドによる並行の統合テストは必要。\n\n### 不足しているリスク\n- K1: 他の組織・非公開メモの漏えいの検証がない。また重大4のとおり、削除時の認可の再確認が漏れている。\n- K2: LIKE のエスケープと SQL の組み立て自体は妥当（プレースホルダー・ESCAPE 句あり）だが、テストがない。\n- K3: 閲覧数・更新・RateLimiter の並行実行は未検証。\n- K4: 途中失敗のロールバックは未検証。\n- K5・K7: api_key の伏せ字とログの検証がない。\n- K6: 組織をまたぐ移管の拒否は未検証。\n- K8: 重大1の不具合がある。\n\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` → 12件すべて成功。\n- 再現: `share.verify_link(\"s\",\"abc\")` が `None` を返す。`service._validate(\"t\",\"b\",[\"ab\\n\"])` が例外を出さず受理される。\n- `$AQ history` と `$AQ trace` は実行していない。そのため、検証条件の弱体化は未確認。",
+ "files_changed": [],
+ "valid": true
+}

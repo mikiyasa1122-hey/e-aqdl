@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-09",
+ "rep": 1,
+ "sec": 32.1,
+ "exit": 0,
+ "cost_usd": 0.1361916,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20676,
+  "cache_read_input_tokens": 115416,
+  "output_tokens": 4193,
+  "output_tokens_details": {
+   "thinking_tokens": 1080
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20676,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2548,
+    "cache_read_input_tokens": 36953,
+    "cache_creation_input_tokens": 3955,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3955
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 095b6340\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査 `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾が改行のタグ（`\"abc\\n\"`）を通してしまう。`$` は末尾の改行の直前にも一致するためである。 / 成立条件: `create_note`・`update_note`・`search_notes` に `tags=[\"abc\\n\"]` のように末尾が改行のタグを渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という仕様に反するタグが保存される。同じタグが `abc` と `abc\\n` の2件に分かれ、タグ絞り込みの結果が食い違う。`share.py` は同じ落とし穴を `fullmatch` で避けているので、実装の一貫性もない。 / 確認した保証: 上流の検証や DB の制約（CHECK など）はない。実行すると、`create_note(..., ['abc\\n'])` が成功し、`get_note` が `['abc\\n']` を返した。`search_notes(..., ['x\\n'])` も検証を通った。 / 根拠: notes/service.py:14 の `TAG_RE`、同:56 の `_validate` の `TAG_RE.match(t)`、同:133 付近の `search_notes` の `TAG_RE.match(t)`。 / 提案: `TAG_RE.fullmatch(t)` に変える（`_validate` と `search_notes` の2か所）。末尾が改行のタグを拒否するテストを追加する。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K8, K5, K7 / 対応区分: 証拠不足 / 内容: 検証が正常系の1本ずつにとどまり、受け入れ条件のリスクを確かめていない。具体的には次の証拠がない。 (a) 他の組織・他人の非公開メモが、get・list・search・update・delete・transfer で NotFound または Forbidden になること（K1・K6）。 (b) `search_notes` が `%`・`_`・`\\` と SQL 風の文字列を普通の文字として扱うこと（K2）。 (c) 楽観的ロックの Conflict。古い version、および `hooks.before_write(\"update\")` で他の更新を割り込ませた場合。 (d) 閲覧数の同時増加と、`RateLimiter` の同時呼び出し。設計が用意した差し込み口を使っていない。 (e) 途中失敗のロールバック（create:tags・delete・transfer）と、例外後の接続の再利用（K4・AC10）。 (f) `export_audit` の api_key の伏せ字。8文字未満・ちょうど8文字・末尾4文字の確認がない。V6 は action と actor しか見ておらず空洞である。 (g) 共有リンクの期限ちょうど（`now == expires`）、形の崩れたリンク、改行を含むリンク。 (h) ログ・例外のメッセージに本文や署名が出ないこと（AC9）。 (i) 入力の境界値（題名100/101文字、本文10000文字、タグ5/6個、`per_page` 0/51、`page` 0、不正な sort）。 / 根拠: テストは12本で、正常系が中心である。`unittest` は通るが、ロック・認可・ESCAPE・ロールバックの条件を外しても失敗しない。`gate` では全 AC・K の検証が `unit` に紐づいているが、中身がない。 / 提案: 上記 (a)〜(i) を決定論的なテストとして追加する。並行はスレッドと `hooks.before_write`・`RateLimiter.hook` で再現する（sleep には頼らない）。DB は一時ファイルの別接続を使う。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、`_visible`・`_can_modify` の判定をトランザクションの外で行っている。判定と書き込みの間にメモの持ち主が `transfer_notes` で変わると、古い権限の判定で書き込まれる。`delete_note` は DELETE の rowcount を見ないため、二重削除でも監査ログが残る。 / 提案: トランザクション内でメモを読み直して判定する。削除では rowcount が 0 なら NotFound にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空の題名しか確かめておらず不十分。タグの境界・改行・重複・文字列そのもの、およびロールバックの検証がない。実装にも重大1のバグがある。\n- AC2: 不十分。他の組織・非公開のメモと閲覧数の同時増加を確かめていない。\n- AC3: 不十分。`%`・`_` の検索、範囲外の入力、OR のタグ絞り込み、他人の非公開メモの除外がない（実装には重大1のバグ）。\n- AC4: 不十分。Conflict、Forbidden、管理者、非公開のメモ、削除失敗の伝播がない。\n- AC5: 不十分。移管の個数だけで、他の組織の拒否と途中失敗時に元のままかを確かめていない。\n- AC6: 空洞。伏せ字の内容を確認していない。\n- AC7: 不十分。枠の境界（ちょうど window 秒）と同時の呼び出しがない。\n- AC8: 不十分。期限の境界、形の崩れ、改行を確かめていない。\n- AC9・AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はなかった。`history` では検証条件を弱めた形跡はなかった（bind のみ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリであり、別々の接続・スレッドを使う単体・結合テストで足りる。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 は、実装の経路は妥当に見えるが、検証されていない（重大2）。\n- 並行時のトランザクションの境界（`BEGIN IMMEDIATE`）は、コードの読解でのみ確認した。実行による確認はしていない。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12本が成功した。\n- 末尾が改行のタグを `create_note` と `search_notes` に渡すスクリプトを実行し、検証を通ることを確認した（重大1）。\n- `notes/*.py` を全読した。SQL は値がすべてプレースホルダーで、LIKE は ESCAPE 句と、`\\`・`%`・`_` のエスケープが適用されている。`ORDER BY` はホワイトリスト化されている。\n- `aqdlc history --since 0` を確認した。",
+ "files_changed": [],
+ "valid": true
+}

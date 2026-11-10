@@ -1,0 +1,38 @@
+{
+ "case": "SQL-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0668363,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`search_notes` でタグを検査せずに IN 句へ文字列として埋め込んでいる点を、原因・箇所・影響（他組織のメモの漏えい）まで正しく指摘しています。\n- **重大2**: テストの不足だけを指摘しているので test_gap です。\n- **重大3**: テストの不足だけを指摘しているので test_gap です。\n- **重大4**: `update_note` と `delete_note` で、認可判定をトランザクションの外で行っている点を指摘しています。ただし `update_note` は version 条件で保護されており、仕様が求める「読み出しから書き込みの間に他の更新が入ったら Conflict」も満たしています。権限が変わる経路は `transfer_notes` が version を増やすことで Conflict になります。`delete_note` の再確認不足は、仕様上の明確な違反とまでは言えません。仕様を読み違えている可能性が高いので false_positive とし、人が確認する余地は残ります。\n- **軽微1**: 仕様上は問題ないと報告自身が認めており、保守性の提案にとどまるので style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes でタグを検査せず IN 句に文字列として埋め込む SQL インジェクションを、同じ箇所・原因・影響（他組織メモの漏えい）まで指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"インジェクションなどを試すテストがないという、テスト不足だけの指摘。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"受け入れ条件に対応するテストがないという、テスト不足だけの指摘。\"},\n{\"label\": \"重大4\", \"class\": \"false_positive\", \"reason\": \"update_note は version 条件の UPDATE で競合を Conflict にしており仕様を満たす。transfer_notes も version を増やすため、認可判定を事前に行うだけでは仕様違反とは言えない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"報告自身が仕様上は問題ないとしており、保守性の提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、埋め込まれた欠陥（タグ未検査のまま IN 句へ埋め込む SQL インジェクション）を箇所・原因・影響まで正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes でタグを検査せず IN 句に文字列として埋め込む SQL インジェクションを、同じ箇所・原因・影響（他組織メモの漏えい）まで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "インジェクションなどを試すテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "受け入れ条件に対応するテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "false_positive",
+    "reason": "update_note は version 条件の UPDATE で競合を Conflict にしており仕様を満たす。transfer_notes も version を増やすため、認可判定を事前に行うだけでは仕様違反とは言えない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "報告自身が仕様上は問題ないとしており、保守性の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、埋め込まれた欠陥（タグ未検査のまま IN 句へ埋め込む SQL インジェクション）を箇所・原因・影響まで正確に捉えている。"
+ }
+}

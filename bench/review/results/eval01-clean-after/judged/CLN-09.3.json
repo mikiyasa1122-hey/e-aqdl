@@ -1,0 +1,18 @@
+{
+ "case": "CLN-09",
+ "rep": 3,
+ "judge_cost_usd": 0.1114142,
+ "judge_raw": "このケースは欠陥なしです。報告の指摘は軽微1の1件で、判定は合格です。\n\n**軽微1（export_audit の JOIN）**: `audit` と `users` を JOIN しているので、対応する users 行がない監査行は出力から落ちます。ただ、users には削除の経路がなく、仕様上も利用者は削除されません。報告自身も「理論上」「将来 users の削除を導入するなら」と書いていて、現状のコードの欠陥とは主張していません。仕様に反する入力や状態は成立しないので、将来の保守に向けた提案（style）と判断しました。\n\n欠陥なしのケースなので、`matches_defect` は使わず `defect_detected` は \"n/a\" です。報告の各 AC の検証評価も、コードとテストに照らして概ね正しいと確認しました。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"users の削除経路が仕様になく JOIN で行が落ちる状態は現状成立しないため、将来の保守に向けた LEFT JOIN の提案で欠陥の主張ではない。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、報告は軽微な保守提案1件のみで誤検出も実在欠陥の指摘もない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "users の削除経路が仕様になく JOIN で行が落ちる状態は現状成立しないため、将来の保守に向けた LEFT JOIN の提案で欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、報告は軽微な保守提案1件のみで誤検出も実在欠陥の指摘もない。"
+ }
+}

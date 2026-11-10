@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-10",
+ "rep": 1,
+ "sec": 30.8,
+ "exit": 0,
+ "cost_usd": 0.1306094,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20375,
+  "cache_read_input_tokens": 113834,
+  "output_tokens": 3771,
+  "output_tokens_details": {
+   "thinking_tokens": 622
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20375,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2668,
+    "cache_read_input_tokens": 36422,
+    "cache_creation_input_tokens": 3954,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3954
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0d59cab3\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3, K2 / 対応区分: 修正必須 / 内容: タグの検査用正規表現 `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っており、末尾の改行を通す。`$` は文字列末尾の直前にある改行にも一致するため。 / 成立条件: タグが `\"abc\\n\"` のように末尾に改行を含むとき。作成・更新・検索のすべてで起きる。 / 影響: 仕様は「英小文字・数字・ハイフンの1〜20文字」と定めているが、改行入りのタグが保存される。実行して確認した。`create_note(..., ['abc\\n'])` が成功し、`get_note` が `['abc\\n']` を返した。入力検証をすり抜けるため、タグ検索や表示が壊れうる。 / 根拠: notes/service.py:15 で定義、:61 と :149 の `TAG_RE.match(t)` で使用。確認した保証: 上流に他の検証はなく、DB 側にも制約はない。share.py は同じ問題を避けるため `fullmatch` を使っており、service.py だけ漏れている。 / 提案: `TAG_RE.fullmatch(t)` にするか、パターンを `\\Z` で終える。末尾改行のタグを拒否するテストを加える。\n- [重大2] 区分: テスト / 対象: AC4, AC7, K3, R2 / 対応区分: 証拠不足 / 内容: 同時実行の検証が1つもない。閲覧数の数え漏れ（AC2）、更新の競合（読み出しと書き込みの間に他の更新が入る場合の Conflict、AC4）、RateLimiter の同時呼び出し（AC7）、いずれも確かめていない。設計は `hooks.before_write` と `RateLimiter.hook` を差し込み口として用意したが、テストが使っていない。version 違いの Conflict を確かめるテストもなく、`RateLimited` を含む枠の境界（ちょうど window 秒）も確かめていない。 / 根拠: AC7 は同時呼び出しと枠の境界、K3 は更新・数の消失を必須としている。tests/test_notes.py は RateLimitTest で 61 秒後の再開しか見ていない。 / 提案: ①2接続・2スレッドで get_note を N 回ずつ呼び、views が合計と一致することを確かめる。②`before_write(\"update\")` の中で別の接続から更新し、後から書いた側が Conflict になることを確かめる。③`RateLimiter.hook` を使った複数スレッドで、上限を超えて通さないことを確かめる。④枠の境界（window 秒ちょうど、その1つ前）を確かめる。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC8, AC9, AC10, K1, K2, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 異常系・境界値・認可の検証がほぼない（全12件の unittest のうち、拒否を確かめるのは空の題名、非管理者による移管、改ざんリンクの3件だけ）。次の検証がない。他の組織・他人の非公開メモに対する NotFound、更新・削除の Forbidden、フック経由の途中失敗によるロールバック（作成・削除・移管）、`%` `_` を含む検索と SQL インジェクション文字列、list の page・per_page・sort の範囲外、api_key を伏せる処理（AC6 のテストは action と actor しか見ていない）、期限ちょうど・形の崩れたリンク、ログと例外メッセージへの機密情報の出力（AC9）、例外の後に接続が使えること（AC10）。 / 根拠: 仕様が要求するこれらの規則と K1・K4〜K8 のリスクを、テストはまったく確かめていない。そのため重大1のような実装の穴も検出できなかった。認可や伏せ処理を外しても現在のテストは全部通る。 / 提案: 上記の項目ごとに、正常系と拒否側の両方のテストを加える。\n- [軽微1] 区分: 実装 / 対象: R5 / 対応区分: 改善提案 / 内容: transfer_notes は version を増やすが updated_at を更新しない。仕様に規定はないため、一覧の並び順に影響する点だけ確認してほしい。 / 提案: 仕様で決めるか、現状のままであることを設計に明記する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空の題名しか見ておらず、タグ・文字数の境界、失敗時に何も残らないこと、改行タグを通す不具合を捕えていない。\n- AC2: 不十分。同じ組織の閲覧しか見ておらず、NotFound の各ケースや閲覧数の増加と同時実行を見ていない。コード上は更新と再読込を1つのトランザクションで行っており、実装は妥当に見える（未検証）。\n- AC3: 不十分。部分一致と1ページ目しか見ておらず、`%` `_`、タグ OR、範囲外の入力、他人の非公開メモの除外を見ていない。LIKE の ESCAPE とプレースホルダーはコード上は妥当。\n- AC4: 不十分。オーナーによる更新と削除の成功しか見ておらず、Conflict、Forbidden、管理者の扱い、削除途中の失敗を見ていない。\n- AC5: 不十分。成功と非管理者の拒否だけで、別の組織への移管や途中失敗での巻き戻しを見ていない。\n- AC6: 不十分。伏せた鍵の値を一度も検証していない。\n- AC7: 不十分。単一スレッドの基本動作だけで、同時呼び出しと枠の境界がない。\n- AC8: 一部のみ。往復と改ざんは見ているが、期限ちょうど・期限切れ・形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは検出されなかった）。\n### E2E の要否\n- 不要（HTTP や UI を持たない Python ライブラリで、unittest で検証できる）。ただし並行実行はフックを使った決定論的な検証が必須。\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K6、K7、K8: テストによる検証なし（重大3、重大2を参照）。\n- K2: コード上はプレースホルダー・ESCAPE・ホワイトリスト化した並び順で対策されているが、テストがない。\n### 確認したこと\n- spec.md と design.md、notes/*.py 全体を読み、`python3 -m unittest discover -s tests` で 12 件が通ることを確認した。\n- 末尾改行のタグ `'abc\\n'` が `create_note` と `get_note` を通ることを python3 で再現した（重大1）。\n- `aqdlc trace` で要求と検証の対応を確認した。反証テストは無効で、全件 passed_but_unchallenged だった。\n- 実装は変更していない。gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

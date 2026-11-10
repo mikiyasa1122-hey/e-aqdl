@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-04",
+ "rep": 3,
+ "sec": 37.6,
+ "exit": 0,
+ "cost_usd": 0.12016589999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15219,
+  "cache_read_input_tokens": 121939,
+  "output_tokens": 4708,
+  "output_tokens_details": {
+   "thinking_tokens": 1033
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15219,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2852,
+    "cache_read_input_tokens": 37696,
+    "cache_creation_input_tokens": 3938,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3938
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 22bd3e62\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査 `TAG_RE = r\"^[a-z0-9-]{1,20}$\"` を `.match` で使っている。Python の `$` は末尾の改行の直前にも一致するため、`\"abc\\n\"` のように末尾に改行のあるタグが検査を通る。仕様のタグは「英小文字・数字・ハイフンの1〜20文字」だけ。 / 成立条件: タグ文字列の末尾に `\\n` を1つ付けるだけ。create_note・update_note（`_validate`、notes/service.py:63-65）と search_notes（同 149-151）で起きる。 / 影響: 規則外のタグが保存される。実行して確認した。`create_note(..., ['abc\\n'])` が成功し、`note_tags` に `'abc\\n'` が入った。`search_notes(..., ['abc\\n'])` も拒否されない。AC1・AC3 の「規則どおりに拒否」を満たさない。share.py は同じ問題を避けて `fullmatch` を使っており、service 側だけ漏れている。 / 根拠: notes/service.py:14, 64, 150。上流で防ぐ検証や DB の制約はない（note_tags.tag は TEXT NOT NULL だけ）。 / 提案: `TAG_RE.fullmatch(t)` に変える（3か所。`_validate` と search_notes の2か所に分かれた検査を共通関数にすると漏れを防げる）。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件の正常系だけで、仕様の受け入れ条件とリスクを確かめていない。足りない証拠は次のとおり。(a) 異常系・境界値: タグ6個、不正なタグ（末尾の改行を含む）、tags に文字列そのものを渡す、title 100/101文字、body の上限、page・per_page・sort の範囲外、検索語の `%` と `_`、SQL インジェクション文字列。(b) 認可・漏えい: 他の組織や他人の非公開メモが NotFound になること、一般利用者・他組織の管理者の更新・削除・移管が Forbidden になること、一覧・検索への非公開メモの混入。(c) 競合: 閲覧数の同時加算、`update_note` の version 競合と読み出し〜書き込みの間の競合（`hooks.before_write` が差し込み口として用意されているのに未使用）、RateLimiter の複数スレッド（`RateLimiter.hook` も未使用）。(d) 途中の失敗: 作成・削除・移管の途中で例外を起こして何も残らないこと、例外後に接続を使い続けられること。(e) 秘密情報: api_key の伏せ字（8文字未満・ちょうど8文字）、ログ・例外に本文・署名・api_key が出ないこと。(f) 境界: RateLimiter の枠のちょうど window 秒、share の期限ちょうど・期限切れ・形の崩れたリンク。 / 根拠: 現状のテストは、認可の条件や SQL の組み立てを壊しても通る。`test_export_audit` は api_key を一度も検査していない。`test_tampered` は改ざんの1例だけで、期限切れは見ていない。history #79〜#93 では、AC・K の検証がすべて同じ `unit` に紐づいているだけで、中身を確かめる実体がない。重大1もテストがないため見逃された。 / 提案: 上の(a)〜(f)を、AC・K ごとに決定論的なテスト（フックと偽の時計を使い、sleep に頼らない）で追加する。同時実行のテストは、別々の接続とスレッドで行う（ファイル DB を使う）。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: list_notes で page に非常に大きな整数を渡すと、`OFFSET` が SQLite の整数の範囲を超えて OverflowError になる。ValidationError にはならない。 / 提案: page に現実的な上限を設けるか、OverflowError を ValidationError に変換する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空の題名だけで、タグの規則・長さ・個数・失敗時に何も残らないことが未検証。実際に欠陥（重大1）がある。\n- AC2: 不十分。自分のメモの閲覧だけで、他組織・他人の非公開メモの NotFound も、同時の閲覧数加算も未検証。実装は `BEGIN IMMEDIATE` と `UPDATE views = views + 1` で正しく見える（コードを読んだだけで、実行はしていない）。\n- AC3: 不十分。範囲外の入力、LIKE のエスケープ、タグ検索、非公開の除外、インジェクションが未検証。タグの検査に欠陥がある（重大1）。\n- AC4: 不十分。作成者の更新・削除の正常系だけで、Conflict・Forbidden・NotFound・削除の巻き戻しが未検証。\n- AC5: 不十分。管理者であることの検査が1例あるだけで、他組織への移管の拒否や途中の失敗での元に戻る動作が未検証。\n- AC6: 不十分。api_key を伏せる動作を確かめていない。\n- AC7: 不十分。枠の更新の1例だけで、ちょうど window 秒の境界も複数スレッドの同時呼び出しも未検証。\n- AC8: 不十分。正常系と改ざん1例だけで、期限ちょうど・期限切れ・形の崩れたリンクが未検証。\n- AC9: 未検証。ログ・例外の内容を確かめるテストがない。\n- AC10: 未検証。例外の後に接続を使い続けられることを確かめるテストがない。\n- エンジンが検出したテストの兆候: なし（skip・.only なし）。テストの弱体化はなく、そもそも検証が足りない状態（重大2）。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリ。ただし並行実行は、ファイル DB で別々の接続・スレッドを使うテストが必要（重大2の(c)）。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 を確かめる検証が実質ない（重大2）。\n- 更新・削除の認可は、トランザクションの外で読んだ行で判定している。例えば、読み出しと書き込みの間に管理者が移管した場合。version の条件で多くは Conflict になるが、削除は version の条件がない（delete_note）。仕様の範囲内と判断し指摘にはしていない。テストで挙動を固定しておくとよい。\n\n### 確認したこと\n- spec.md・design.md、notes/*.py 全体を読んだ。コードは設計（BEGIN IMMEDIATE、プレースホルダー、LIKE の ESCAPE、version の条件付き UPDATE）と整合している。\n- `python3 -B -m unittest discover -s tests -t .` → 12件が OK。\n- `python3 -B -c ...` で `create_note(['abc\\n'])` が成功し、`note_tags` に `'abc\\n'` が保存され、`search_notes` もそのタグを拒否しないことを確認した（重大1）。\n- `$AQ history --since 0` を確認した。検証条件の弱体化の履歴はなく、すべてのチェックが `unit` に紐づいているだけだった。\n- `$AQ gate` と依存関係のインストールは実行していない。ファイルも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

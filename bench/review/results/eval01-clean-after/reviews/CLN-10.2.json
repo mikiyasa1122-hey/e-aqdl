@@ -1,0 +1,49 @@
+{
+ "case": "CLN-10",
+ "rep": 2,
+ "sec": 26.4,
+ "exit": 0,
+ "cost_usd": 0.12015519999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18719,
+  "cache_read_input_tokens": 132132,
+  "output_tokens": 3205,
+  "output_tokens_details": {
+   "thinking_tokens": 1010
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18719,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1732,
+    "cache_read_input_tokens": 42128,
+    "cache_creation_input_tokens": 3539,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3539
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c8b1a97a\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R5, notes/service.py の transfer_notes / 対応区分: 改善提案 / 内容: 移す先の利用者が DB に存在するかを確認していない。存在しない ID だと FK 違反の `sqlite3.IntegrityError` が出る。トランザクションは ROLLBACK されるため、データは壊れず、元のまま残る。仕様は利用者の dict を呼び出し側が確かめて渡す前提（対象外）なので、欠陥ではない。 / 提案: 必要なら ValidationError か NotFound に変換するとよい。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。項目ごとの境界値・拒否（題名・本文・タグ・tags が文字列）を確かめている。途中失敗（`hooks.before_write(\"create:tags\")`）で何も残らないことも確かめている。実装は `_validate` と `transaction()` で規則どおり。\n- AC2: 妥当。他の組織・他人の非公開・存在しないメモが、どれも NotFound になることを確かめている。NotFound では閲覧数が増えない。確認後に見えなくなった場合も NotFound になる。閲覧数の増加はトランザクション内の `views = views + 1` で、数え漏れはない。割り込みとスレッド同時の両方のテストがある。\n- AC3: 妥当。範囲、並び順、ページ送り、`%` と `_` をそのまま文字として探すこと、タグの OR、SQL 文字列を値として扱うことを確かめている。プレースホルダーと `ESCAPE '\\'` を、題名と本文の両方に適用している（`_like_escape` はバックスラッシュも先にエスケープする）。タグも `TAG_RE.fullmatch` で検査している。\n- AC4: 妥当。権限、非公開メモ、古い version の Conflict、読み書きの間に入った更新の Conflict、検証、失敗時の巻き戻し、認可をトランザクション内でもう一度行うことを確かめている。UPDATE は `version` を条件にした rowcount 判定で、削除の失敗は握りつぶさず呼び出し側に伝わる。\n- AC5: 妥当。管理者だけ、同じ組織だけ、途中失敗で何も移らないことを確かめている。SQL の条件は `org_id` と `owner_id` で絞っている。\n- AC6: 妥当。末尾4文字以外の伏せ字と、8文字未満の全伏せを実装している。\n- AC7: 妥当。枠の境界（159.999 は拒否、160.0 は新しい枠）、拒否された呼び出しが枠を延ばさないこと、20スレッドの Barrier 同時実行、ロック内の割り込みを確かめている。時間は sleep ではなくクロックの差し替えで制御しており、決定論的。\n- AC8: 妥当。実装は `LINK_RE.fullmatch`、`>=` による期限判定、`hmac.compare_digest` で、期限・改ざん・形の崩れを確かめている。\n- AC9・AC10: 妥当。ログと例外に ID だけを出し、`transaction()` は例外のたびに ROLLBACK する。回復のテストがある。\n- 重要リスク K1〜K8 は、上記のテストと実装の経路で確かめられている。K2 は上記 AC3 のとおり。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのファイルはない。テストや検証条件を弱めた履歴もない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使ったテスト（実 DB のメモリ・ファイル）が実際の経路を通っている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/*.py` の全文を実装と突き合わせた。\n- `aqdlc.py trace` で全要求に検証が対応していることを確認した。`history` で、検証条件の登録だけで弱体化がないことを確認した。\n- `python3 -m unittest discover -s tests -t .`（`PYTHONDONTWRITEBYTECODE=1`）を実行し、63件すべて合格した。\n- `git status` で、`notes/`、`tests/` などがすべて未追跡（新規）であることを確認した。変更前のコードとの差分比較はできない。",
+ "files_changed": [],
+ "valid": true
+}

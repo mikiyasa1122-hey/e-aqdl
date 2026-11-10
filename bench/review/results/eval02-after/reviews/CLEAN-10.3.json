@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-10",
+ "rep": 3,
+ "sec": 39.2,
+ "exit": 0,
+ "cost_usd": 0.11878060000000001,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14378,
+  "cache_read_input_tokens": 123026,
+  "output_tokens": 4895,
+  "output_tokens_details": {
+   "thinking_tokens": 1335
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14378,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3171,
+    "cache_read_input_tokens": 37381,
+    "cache_creation_input_tokens": 3860,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3860
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0d59cab3\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC3, K1, K2, K6 / 対応区分: 証拠不足 / 内容: 組織・非公開の分離（他組織・他人の非公開が NotFound になること、一覧・検索から漏れないこと）と、LIKE の `%` `_` `\\` を普通の文字として扱うことを確かめるテストがない。tests/test_notes.py にあるのは正常系の12件だけ。移管の組織またぎ Forbidden、管理者による非公開メモの NotFound、検索のタグ OR 絞り込みや不正タグ、一覧の範囲外（page=0、per_page=51、不正な sort）もない。 / 根拠: K1・K2・K6 は仕様上の重要リスク。`_visible` や `_like_escape` の ESCAPE 処理は実装にあるが、条件を外しても失敗するテストがなく、現状は検証が空洞。 / 提案: 別組織・他人の非公開メモでの get・list・search・update・delete・transfer の拒否。`%` や `_` を含む検索語の完全一致的な結果。`' OR 1=1` 入りの検索語とタグ。一覧の境界値（0・1・50・51）。\n- [重大2] 区分: テスト / 対象: AC2, AC4, AC7, K3 / 対応区分: 証拠不足 / 内容: 同時実行の検証がない。閲覧数の数え漏れ、version 競合（Conflict）、読み出しと書き込みの間に更新が入る場合、RateLimiter のスレッド同時呼び出しが対象。設計書は `hooks.before_write` と `RateLimiter.hook` を差し込み口として用意したが、一度も使われていない。RateLimiter の枠の境界（ちょうど window 秒）もテストされていない。 / 根拠: AC2・AC4・AC7 は「同時」を明示している。version 条件や lock を外してもテストは通る。 / 提案: hook で別接続（ファイル DB）・別スレッドの更新を割り込ませ、Conflict と閲覧数 N 件分の増加を決定論的に確認する。RateLimiter は hook 内で別スレッドから hit を呼び、上限を超えないことと、境界（window-ε と window ちょうど）を確かめる。sleep には頼らない。\n- [重大3] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4 / 対応区分: 証拠不足 / 内容: ロールバック・原子性のテストがない。create のタグ挿入後の失敗で何も残らないこと、delete 途中の失敗が呼び出し側に伝わること、transfer が途中で失敗したら全部元のままであること、例外の後に同じ接続が使えることが未検証。入力検証（title 100/101文字、空白だけ、tags 6個・重複・文字列そのもの、body 10000/10001文字）の異常系もない。 / 根拠: AC1・AC5・AC10 は失敗時の状態を直接の受け入れ条件にしている。`transaction()` の ROLLBACK を消しても現在のテストは全て通る。 / 提案: hooks.before_write で例外を投げ、notes・note_tags・audit の件数が変わらないことと、その後の操作が成功することを確認する。R1 の境界値表のテストも追加する。\n- [重大4] 区分: テスト / 対象: AC6, AC8, AC9, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 機密情報と共有リンクの境界の検証が弱い。監査ログのテストは action と actor しか見ておらず、api_key の伏せ字（末尾4文字、7文字・8文字の境界）を確かめていない。共有リンクは「期限ちょうど」「期限切れ」「署名の改ざん」「形の崩れ（改行・非ASCII・桁違い）」が未検証。tampered テストは note_id の改ざん1通りだけ。ログ・例外メッセージに本文・署名・api_key が出ないことのテストもない。 / 根拠: K5・K7・K8 は重要リスク。伏せ字の分岐や `now >= expires` を壊しても検出できない。 / 提案: 7文字・8文字・12文字の鍵の出力を確かめる。expires-1 と expires ちょうどの検証、署名1文字の改変、不正な形式の各種、assertLogs で本文・署名・鍵が含まれないことを確認する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: delete_note と update_note は、権限確認をトランザクションの外で行っている。そのため、並行して削除・移管されると、削除済みのメモに対する DELETE が0行でも成功し、監査ログだけが残る。update は version 条件で守られているので実害は小さい。 / 提案: トランザクション内で再読み込みして `_visible`・`_can_modify` を再判定し、rowcount を確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで不十分。境界値、タグの規則、失敗時に何も残らないことが未検証（重大3）。\n- AC2: 閲覧数の増加は正常系で間接的に触れているだけ。他組織・非公開の NotFound と、同時閲覧が未検証（重大1・2）。\n- AC3: 一覧の1ページ目と検索の1件一致だけ。範囲外・ワイルドカード・タグ・他人の非公開が未検証（重大1）。\n- AC4: 更新は所有者の成功、削除は所有者の成功だけ。Conflict・Forbidden・管理者・検証が未検証（重大2・3）。\n- AC5: 成功と非管理者の Forbidden だけ。組織またぎ・原子性が未検証（重大1・3）。\n- AC6: action と actor だけを確認しており、伏せ字は未検証で不十分（重大4）。\n- AC7: 逐次で枠を超えた場合と61秒後の再開だけ。ちょうど window 秒の境界と同時の呼び出しは未検証（重大2）。\n- AC8: 往復と note_id の改ざん1通りだけ。期限の境界・形式・署名の改変が未検証（重大4）。\n- AC9: テストなし（重大4）。\n- AC10: テストなし（重大3）。\n- エンジンの検出した兆候: なし（skip・.only・アサーションなしはなし）。テストの改ざん・弱体化の痕跡は history に見当たらず、検証条件は新規 bind のみ。\n\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、SQLite を直接使う unittest（別接続・別スレッド）で十分にリスクを確かめられる。\n\n### 不足しているリスク\n- K1・K2・K6: 分離とインジェクションを確かめるテストがない（重大1）。\n- K3: 並行実行のテストがない（重大2）。\n- K4: ロールバックのテストがない（重大3）。\n- K5・K7・K8: 伏せ字・ログ・リンク境界の検証がない（重大4）。\n\n### 確認したこと\n- 仕様・設計と notes/db.py、service.py、ratelimit.py、share.py、errors.py の全体を読んだ。実装は仕様に概ね沿っている。確認した点は、SQL のプレースホルダー、LIKE の ESCAPE 処理（`%` `_` `\\`）、BEGIN IMMEDIATE と UPDATE の version 条件、RateLimiter の lock と `>=` 境界、share の fullmatch と `compare_digest`、api_key の伏せ字。仕様違反の実装欠陥は見つからなかった。\n- `python3 -m unittest discover -s . -p 'test_*.py'` → 12件 OK。\n- `aqdlc.py history --since 0` を確認。bind の追加のみで、検証条件を弱める変更は見当たらなかった。\n- `git status` を確認した。`notes/` と `tests/` は未追跡で、差分の比較対象はない。",
+ "files_changed": [],
+ "valid": true
+}

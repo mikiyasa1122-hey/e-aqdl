@@ -1,0 +1,43 @@
+{
+ "case": "SQL-05",
+ "rep": 2,
+ "judge_cost_usd": 0.0699823,
+ "judge_raw": "各指摘の判定は次のとおりです。\n\n- **重大1**: タグの正規表現が `re.match` と `$` の組み合わせで、末尾の改行を通してしまいます。これは実在する欠陥ですが、埋め込んだ欠陥（`_like_escape`）とは別の箇所です。→ real_other\n- **重大2**: `_like_escape` が `\\` をエスケープしていないことを、`notes/service.py:134-135` で指摘しています。原因は正解データと同じです。影響も、検索語の `\\` が普通の文字として扱われない点で一致します。ただし、報告が挙げた具体例（`\\` で検索すると 0 件、`k\\s` で 0 件）は、正解データの例（`\\` を探すと `%` を含むメモが返る、`\\_` が `_` の普通の文字になる）とは違います。それでも原因は同じで、語末の `\\` が直後の `%` を打ち消すという影響にも触れています。→ matches_defect\n- **重大3**: テストの不足だけを指摘しています。→ test_gap\n- **重大4**: `delete_note` の認可確認がトランザクションの外にあり、確認から削除までの間に移管が入ると、所有していないメモを削除できます。これは実在する競合です。→ real_other\n- **軽微1**: `sort` に unhashable な値を渡すと `TypeError` になります。`in dict` の判定で実際に起きるので、入力検証の漏れという実在する小さな欠陥です。→ real_other\n- **軽微2**: `version` が非整数でも Conflict になるだけで、仕様に反しているわけではありません。検証を足すという好みの提案です。→ style\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"タグの正規表現が re.match と $ の組み合わせで末尾の改行を通すのは実在する欠陥だが、埋め込んだ欠陥とは別の箇所。\"},\n  {\"label\": \"重大2\", \"class\": \"matches_defect\", \"reason\": \"_like_escape が \\\\ 自身をエスケープしていないことを同じ箇所で指摘しており、原因が正解データと一致する。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n  {\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note の認可確認がトランザクションの外にあるのは実在する競合で、埋め込んだ欠陥とは別。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"unhashable な sort で ValidationError ではなく TypeError になるのは実在する入力検証の漏れ。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"非整数の version は Conflict になるだけで仕様違反ではなく、検証を足すという好みの提案。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大2\", \"note\": \"重大2が _like_escape の \\\\ 未エスケープという原因を正しく指摘している。報告の具体例は正解データと違うが、原因は同じ。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "タグの正規表現が re.match と $ の組み合わせで末尾の改行を通すのは実在する欠陥だが、埋め込んだ欠陥とは別の箇所。"
+   },
+   {
+    "label": "重大2",
+    "class": "matches_defect",
+    "reason": "_like_escape が \\ 自身をエスケープしていないことを同じ箇所で指摘しており、原因が正解データと一致する。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note の認可確認がトランザクションの外にあるのは実在する競合で、埋め込んだ欠陥とは別。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "unhashable な sort で ValidationError ではなく TypeError になるのは実在する入力検証の漏れ。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "非整数の version は Conflict になるだけで仕様違反ではなく、検証を足すという好みの提案。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大2",
+  "note": "重大2が _like_escape の \\ 未エスケープという原因を正しく指摘している。報告の具体例は正解データと違うが、原因は同じ。"
+ }
+}

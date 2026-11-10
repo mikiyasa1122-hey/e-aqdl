@@ -1,0 +1,49 @@
+{
+ "case": "VAL-03",
+ "rep": 3,
+ "sec": 25.5,
+ "exit": 0,
+ "cost_usd": 0.11875390000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18910,
+  "cache_read_input_tokens": 115379,
+  "output_tokens": 3156,
+  "output_tokens_details": {
+   "thinking_tokens": 546
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18910,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2121,
+    "cache_read_input_tokens": 36859,
+    "cache_creation_input_tokens": 2283,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2283
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0f27a8ba\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査が仕様と違う。`notes/service.py:14` の `TAG_RE = re.compile(r\"^[a-z0-9-]{1,20}\")` を `match` で使っているが、末尾の `$` がない。 / 成立条件: タグが `abc!`、`a`×30、`ok tag` のように、先頭が正規の文字でその後ろに不正な文字や長すぎる文字が続く場合（create_note・update_note・search_notes のすべて）。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」を守らないタグが保存・検索を通る。`TAG_RE.match('abc!')` と `TAG_RE.match('a'*30)` はどちらも True になることを実行して確認した。 / 根拠: `_validate`（service.py:52-53）と `search_notes`（service.py:126-129）が `TAG_RE.match` だけで判定しており、上流に別の検証はない。 / 提案: `re.fullmatch(r\"[a-z0-9-]{1,20}\", t)` に変える。\n- [重大2] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note`（service.py:150-168）は、tags を渡して更新するときも `notes.updated_at` などを含む UPDATE を version 条件付きで行うが、更新前の `_visible` と `_can_modify` の判定は、トランザクションの外で読んだ行に基づいている。 / 成立条件: 判定の後、書き込みの前に、移管（transfer_notes）や他の更新が入った場合。 / 影響: 移管で所有者が変わっても、`transfer_notes`（service.py:206）が version を増やすので、古い version の更新は Conflict で止まる。したがってデータの欠陥にはならない。一方、`delete_note`（service.py:171-179）には version の確認がなく、判定の後に移管された場合でも古い所有者が削除できる。 / 根拠: delete_note は `_can_modify` をトランザクションの外で判定し、`DELETE ... WHERE id = ?` に所有者・組織の条件がない。 / 提案: BEGIN IMMEDIATE の中で行を読み直して `_visible` と `_can_modify` を再判定してから削除する。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件の正常系中心で、受け入れ条件の大半を確かめていない。不足しているのは、他の組織・非公開メモの NotFound（K1）、閲覧数の同時加算（K3）、Conflict と競合、タグ・題名・本文の境界、LIKE の `%` `_` `\\`、SQL インジェクション文字列（K2）、フック（`hooks.before_write`）による途中失敗でのロールバックと接続の再利用（K4, AC10）、移管の失敗時に元のまま残ること、api_key の伏せ字と8文字未満（AC6）、RateLimiter の枠の境界と同時呼び出し（AC7）、共有リンクの期限ちょうど・形の崩れ（AC8）、ログに機密情報が出ないこと（AC9）。 / 根拠: 設計はテスト用の差し込み口を用意しているが、tests/test_notes.py がまったく使っていない。重大1のようなタグの不具合も、テストで検出できていない。 / 提案: 上記のリスクごとに異常系・境界値のテストを追加する。並行系は sleep ではなく、フックと別々の接続・スレッドで決定論的に再現する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常作成だけで不十分。タグ・長さの境界とロールバックが未検証。\n- AC2: 可視性（他の組織・非公開）と閲覧数の加算が未検証で不十分。\n- AC3: 一覧の1ページ目と単純な検索だけ。範囲外・`%` `_`・タグ OR・インジェクションが未検証で不十分。\n- AC4: 所有者の更新と削除だけ。Conflict・Forbidden・管理者・非公開が未検証で不十分。\n- AC5: 管理者の移管の件数と非管理者の拒否だけ。組織をまたぐ場合と失敗時の巻き戻しが未検証で不十分。\n- AC6: 伏せ字の中身を確認しておらず不十分。\n- AC7: 上限と枠のリセット（61秒後）は確かめているが、ちょうど window 秒の境界と同時呼び出しがなく不十分。\n- AC8: 往復と改ざんは確認している。期限ちょうど・形の崩れ・期限切れがなく不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（HTTP なしのライブラリで、sqlite3 を使うユニット・結合テストで足りる）。\n### 不足しているリスク\n- K1〜K8: 重大3のとおり、実装の確認はコードを読んだだけで、テストによる証拠がない。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` が12件合格。\n- `TAG_RE.match('abc!')` と `TAG_RE.match('a'*30)` が True になることを実行して確認。\n- service.py、ratelimit.py、share.py、db.py をすべて読んだ。LIKE は ESCAPE 句とプレースホルダーで正しく、ORDER BY は固定の辞書から取っていて安全。レート制限は Lock 内で判定しており、枠の境界は `>=` で正しい。",
+ "files_changed": [],
+ "valid": true
+}

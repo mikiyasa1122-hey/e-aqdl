@@ -1,0 +1,49 @@
+{
+ "case": "SQL-01",
+ "rep": 1,
+ "sec": 30.1,
+ "exit": 0,
+ "cost_usd": 0.1400894,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22480,
+  "cache_read_input_tokens": 114434,
+  "output_tokens": 3871,
+  "output_tokens_details": {
+   "thinking_tokens": 215
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22480,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3128,
+    "cache_read_input_tokens": 33488,
+    "cache_creation_input_tokens": 9224,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9224
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 676349a2\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2, R9 / 対応区分: 修正必須 / 内容: `search_notes` が検索語 q を SQL 文字列に直接埋め込んでいる。プレースホルダーを使っておらず、LIKE の `%` `_` `\\` もエスケープしていない。設計書の「SQL はプレースホルダー。LIKE は ESCAPE」にも反する。 / 成立条件: 利用者が `q` に `%'` や `x' OR '1'='1` のような文字列を渡す。たとえば `q=\"zzz%' OR private=1 OR '%\"` のように括弧を意識して組み立てると、org_id と private の条件の外側まで条件を書き換えられる。`q` に `'` を含めるだけでも SQL エラーになる（例外メッセージに SQL 文が出る）。`q=\"%\"` や `q=\"_\"` は全件にマッチし、仕様の「普通の文字として部分一致」と食い違う。 / 影響: 他人の非公開メモや他組織のメモのタイトル（id と title）が漏れる。SQL エラーで検索が失敗することもある（K1・K2 の実害）。 / 根拠: notes/service.py:195-196 で `f\"... LIKE '%{q}%' OR body LIKE '%{q}%')\"` と組み立てている。`_like_escape`（188行）は定義されているが、どこからも呼ばれていない。上流の検証は長さと空白だけで、クォートは弾かない。呼び出し元・DB の制約でも防がれていない。 / 提案: `title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'` とし、`\"%\" + _like_escape(q) + \"%\"` をバインドする（title・body の両方に同じ値を渡す）。\n- [重大2] 区分: テスト / 対象: AC3, K2, K1 / 対応区分: 証拠不足 / 内容: SQL インジェクション、`%` `_` `\\` のリテラル検索、タグ OR 絞り込み、検索のタグ検査、page / per_page / sort の範囲外の拒否、他組織・他人の非公開メモが一覧・検索に出ないことを確かめるテストが1件もない。V3・VK2 は `test_list_first_page` と `test_search`（正常系だけ）にしか結び付いておらず、空洞化している。重大1はこの穴のために検出されていない。 / 根拠: tests/test_notes.py 全体。AC3 は入力の拒否と結果の両方を要求し、K2 は重要リスクである。 / 提案: 悪意ある q（`'`、`%' OR ...`）で他人の非公開メモが返らないこと、`%` と `_` がリテラルとして扱われること、範囲外の入力が ValidationError になること、タグ OR の絞り込みと不正タグの拒否、他組織・他人の非公開メモの除外を追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC5, AC7, AC8, AC9, AC10, AC1, AC6, K1, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 仕様が求める異常系・境界値・同時実行・失敗時のロールバックの検証が、ほぼすべて欠けている。具体的には次のとおり。(a) 閲覧数の同時加算（hooks.before_write を使う）。(b) 更新の version 不一致と、読み出し〜書き込みの間の割り込みによる Conflict。(c) 他組織・他人の非公開メモへの NotFound と、非管理者への Forbidden。(d) 作成・削除・移管の途中失敗（hooks）で何も残らないこと。(e) 移管の組織またぎの Forbidden。(f) api_key の伏せ字（末尾4文字、8文字未満の全伏せ）。(g) RateLimiter の境界（ちょうど window 秒、複数スレッド、hook）。(h) 共有リンクの期限ちょうど、形の崩れ、署名違い。(i) ログ・例外に本文・署名・api_key が出ないこと。(j) 例外後に接続を再利用できること。(k) 入力検証の境界（title 100/101、tags 5/6、不正タグ、tags に文字列を渡す）。 / 根拠: tests/test_notes.py は約20ケースで、ほぼ正常系だけ。`test_tampered` は note_id を書き換えるだけである。`test_export_audit` は伏せ字を見ていない。`test_transfer` は件数しか見ておらず、所有者が移ったことも確認していない。設計書自体が hooks を再現手段としているのに使われていない。 / 提案: 上記 (a)〜(k) を決定論的に（sleep を使わず hooks とスレッドで）追加する。\n- [軽微1] 区分: 実装 / 対象: R5, R2 / 対応区分: 改善提案 / 内容: `transfer_notes` は to_user・from_user の実在や role を DB で確かめていない。仕様では呼び出し側を信用する前提なので欠陥ではない。 / 提案: 必要なら存在確認を足す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成成功と空題名の拒否だけを確かめている。タグ・本文・境界値と、失敗時に何も残らないこと（VK4）は未確認のため不十分。実装（service.py:136-148）は仕様に沿っている。\n- AC2: V2 は自分の閲覧だけで、不可視メモの NotFound・閲覧数の増加・同時閲覧がない。不十分。\n- AC3: V3 は正常系だけで、注入・ワイルドカード・タグ・範囲外がない。実装にも欠陥がある（重大1）。不十分。\n- AC4: V4 は作成者の更新・削除の正常系だけで、Conflict・Forbidden・検証がない。不十分。実装は仕様に沿っている。\n- AC5: V5 は件数と管理者以外の拒否だけで、組織またぎ・ロールバックがない。不十分。\n- AC6: V6 は伏せ字を確かめていない。不十分（実装は仕様に沿っている）。\n- AC7: V7 は単一スレッドの基本動作だけで、ちょうど window 秒の境界と同時呼び出しがない。不十分（実装は仕様に沿っている）。\n- AC8: V8 は往復と note_id の改ざんだけで、期限の境界・形の崩れ・署名違いがない。不十分。\n- AC9: 検証が存在しない。\n- AC10: 検証が存在しない。\n- エンジンが検出したテストの兆候: なし。skip や .only はない。履歴（history）に、検証条件を弱めた形跡は見つからなかった。\n### E2E の要否\n- 不要（HTTP のないライブラリで、SQLite を使う unittest で確かめられる）。ただし、上記の統合的なテストの追加は必要。\n### 不足しているリスク\n- K2: 注入と LIKE のワイルドカードが実装でもテストでも未対策。\n- K1: 一覧・検索での他人の非公開メモの除外が未検証。\n- K3: 閲覧数の同時加算と更新の競合が未検証。\n- K4: 作成・削除・移管の途中失敗が未検証。\n- K5・K7: 伏せ字とログへの機密情報の露出が未検証。\n- K6: 移管での組織またぎが未検証。\n- K8: 共有リンクの境界・形の崩れが未検証。\n### 確認したこと\n- spec.md・design.md、notes/*.py、tests/test_notes.py を全文読んだ。`aqdlc history --since 0` も確認した。検証条件の弱体化はない。\n- 検索の SQL の組み立て（service.py:195-196）を、利用者の入力 q から実行箇所までたどった。バインドもエスケープも適用されていない。`_like_escape` は未使用であることも確認した。\n- service.py の他の SQL はプレースホルダーを使っている。ORDER BY は SORT_COLUMNS の許可リスト経由。\n- テストと gate は実行していない（コードの読解だけで判断した）。",
+ "files_changed": [],
+ "valid": true
+}

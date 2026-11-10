@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 3,
+ "sec": 39.7,
+ "exit": 0,
+ "cost_usd": 0.1430155,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20210,
+  "cache_read_input_tokens": 115495,
+  "output_tokens": 5061,
+  "output_tokens_details": {
+   "thinking_tokens": 964
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20210,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3542,
+    "cache_read_input_tokens": 37711,
+    "cache_creation_input_tokens": 2500,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2500
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3, 設計「楽観的ロックは UPDATE の条件に version を入れて rowcount で判定する」/ 対応区分: 修正必須 / 内容: `update_note` の UPDATE 文の条件が `WHERE id = ?` だけで、version を含んでいない。version の確認は、トランザクションの外で読んだ行（notes/service.py:158, 167）に対してだけ行っている。 / 成立条件: 同じ version を持つ2人が更新する。A が行を読んで version を確認した後、A が `BEGIN IMMEDIATE`（:170）を取る前に B が更新をコミットする。`hooks.before_write(\"update\")`（:169）がこの隙間にあたる。 / 影響: A の UPDATE は rowcount=1 で成功し、B の更新を黙って上書きする。仕様の「後から書いた側が先の更新を消さない」に反し、Conflict も出ない。タグも A の内容で置き換わる。 / 確認した保証: 上流の検証や DB の制約はない。`BEGIN IMMEDIATE` はこの隙間を閉じない。既存のテストにも競合を再現するものはない。 / 根拠: notes/service.py:158-174。トランザクション内で version を読み直しておらず、UPDATE の条件にも version がない。 / 提案: UPDATE を `WHERE id = ? AND version = ?`（引数は note_id, version）にして rowcount で Conflict を判定する。または `BEGIN IMMEDIATE` の後に行を読み直して version と権限を確認する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っているため、末尾に改行を付けたタグが通る。Python の `$` は末尾の改行の直前にもマッチする。 / 成立条件: tags に `\"ab\\n\"` を含めて `create_note`、`update_note`、`search_notes` を呼ぶ。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。実際に `create_note(tags=['ab\\n'])` が成功し、`get_note` が `['ab\\n']` を返すことを確認した。 / 確認した保証: 他の層でタグを検査している箇所はない。 / 根拠: notes/service.py:14, 64, 151。 / 提案: `TAG_RE.fullmatch` を使う。または `\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC4, AC5, AC7, AC2, AC1, AC10, K3, K4 / 対応区分: 証拠不足 / 内容: 同時実行・途中障害・ロールバックを確かめる検証が1件もない。設計が用意した `service.hooks.before_write` と `RateLimiter.hook` も一度も使われていない。具体的には次のとおり。(a) 更新の競合で Conflict になること（重大1を検出できるテスト）。(b) 同時の閲覧で数え漏れがないこと。(c) 作成・削除・移管の途中で障害を起こしたとき、何も残らず元のままであること。(d) RateLimiter を複数のスレッドから同時に呼んでも上限を超えないこと。(e) 枠の境界（ちょうど window 秒）。(f) 例外の後に同じ接続を使い続けられること。 / 根拠: これらは仕様の明示的な受け入れ条件で、K3・K4 が重要なリスクとして挙げている。いまの12件の unittest は正常系中心で、重大1のような欠陥を見逃す。 / 提案: `before_write` と `RateLimiter.hook` を使い、sleep に頼らず決定論的に再現するテストを追加する。必要なら別接続（ファイルDB）を使う。例外の後に同じ接続で次の操作が成功することも確かめる。\n- [重大4] 区分: テスト / 対象: AC3, AC6, AC8, AC9, AC4, K1, K2, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 認可と安全性の拒否経路が未検証。足りないものは次のとおり。(a) 他の組織・他人の非公開メモが、閲覧・更新・削除・一覧・検索のすべてで NotFound になり、含まれないこと。(b) member による他人のメモの更新・削除が Forbidden になること。(c) 組織をまたぐ移管が Forbidden になること。(d) `%`・`_`・`'` を含む検索語の扱い（K2）。(e) 入力の境界値: 題名100/101文字、タグ5/6個、per_page 0/51、sort の不正値。(f) api_key の伏せ字（8文字未満、ちょうど8文字、末尾4文字）。(g) 共有リンクの期限ちょうど、期限切れ、形の崩れ、改行を含むリンク。(h) ログ・例外のメッセージに本文・署名・api_key が出ないこと。 / 根拠: 現在は `test_transfer_requires_admin` と共有リンクの改ざん1件があるだけ。`export_audit` のテストは action と actor しか確認しておらず、api_key の伏せ字は見ていない。AC6・AC8・AC9 と K1・K2・K5・K6・K7・K8 はテスト上、空洞のままになっている。 / 提案: 上の各拒否経路・境界値について、拒否されること、および漏えいしないことを確かめるテストを追加する。認可の条件を外したら失敗するものにする。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: 共有リンクの署名対象が int 化した note_id と期限なので、`007.<期限>.<署名>` のように先頭に 0 を付けた別表記のリンクも有効になる。仕様に明示はないが、表記を一意にしたほうが安全。 / 提案: 正規表現で先頭の 0 を禁止するか、`link` を int から再構成した文字列と比較する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名と正常系だけを確認している。タグの規則（重大2）、長さの境界、失敗時に何も残らないこと（`hooks.before_write(\"create:tags\")` が未使用）を確かめていない。\n- AC2: 不十分。他の組織・他人の非公開メモの NotFound と、同時閲覧の数え漏れを確かめていない。\n- AC3: 不十分。正常系1件ずつだけ。範囲外の入力、`%`・`_`、タグの OR 検索、他人の非公開メモの除外を確かめていない。\n- AC4: 不十分。所有者による成功系だけ。Conflict・Forbidden・競合（重大1）・削除の失敗時の巻き戻しを確かめていない。\n- AC5: 不十分。admin でない場合の拒否だけ。組織をまたぐ移管と、途中で失敗したときに元のままであることを確かめていない。\n- AC6: 不十分。action と actor しか確認しておらず、伏せ字そのものを確かめていない。\n- AC7: 不十分。単一スレッドで、枠が過ぎたあとの回復しか確認していない。ちょうど window 秒の境界と同時呼び出しを確かめていない。\n- AC8: 不十分。往復と改ざん1件だけ。期限ちょうど、期限切れ、形の崩れを確かめていない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。`git diff` による検証条件の改ざんの比較は、リポジトリが未コミット（untracked）のため、比較する前の版がなく不可。テスト自体は skip・弱体化していない。\n\n### E2E の要否\n- 不要（HTTP 層のないライブラリ。ただし、実装と同じ層の統合テスト（実 SQLite・複数接続・複数スレッド）は重大3・重大4の形で必須）。\n\n### 不足しているリスク\n- K3: 更新の競合（重大1）と、閲覧・RateLimiter の同時実行の再現がない。\n- K4: 作成・削除・移管・更新の途中障害とロールバックの検証がない。\n- K1・K6: 認可の拒否経路の検証がない。\n- K2: LIKE のエスケープとプレースホルダーのテストがない。\n- K5・K7: 出力・ログへの機密情報の露出を確かめていない。\n- K8: 共有リンクの期限・形の崩れの境界を確かめていない。\n\n### 確認したこと\n- spec.md、design.md、`notes/*.py`、`tests/test_notes.py` を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った（0.004秒）。\n- `create_note(tags=['ab\\n'])` が成功し、`get_note` が `['ab\\n']` を返すことを実行して確認した（重大2）。\n- 重大1はコードの経路から立証した（service.py:158-174）。実行による再現は行っていない。\n- `$AQ trace`・`$AQ history` は実行していない。`gate` も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 1,
+ "sec": 31.1,
+ "exit": 0,
+ "cost_usd": 0.1251359,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18632,
+  "cache_read_input_tokens": 113719,
+  "output_tokens": 3922,
+  "output_tokens_details": {
+   "thinking_tokens": 649
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18632,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2944,
+    "cache_read_input_tokens": 36368,
+    "cache_creation_input_tokens": 2265,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2265
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 (notes/service.py:84 の create_note) / 対応区分: 修正必須 / 内容: メモ作成のたびに `log.info(\"note created id=%s owner=%s body=%r\", ..., body)` でメモの本文をログに出している。 / 成立条件: logging が INFO 以上で有効なら、create_note に成功するたびに起きる。 / 影響: 本文がログに残る。R9「ログに本文を出さない」と設計書「ログには ID だけを出す」に違反し、非公開メモの本文もログに出る。 / 確認した保証: 上流のマスクやフィルタはなく、`logging.getLogger(\"notes\")` にもフィルタはない。この出力を防ぐテストもない。 / 根拠: notes/service.py:84 のコードで確認した。 / 提案: ログ出力から body を削除し、id と owner だけにする。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, K1, K2, K4, K6 / 対応区分: 証拠不足 / 内容: 他の組織や他人の非公開メモが NotFound になること、一覧・検索への混入がないこと、管理者の権限がないとき（非管理者の更新・削除や、他の組織への移管）の Forbidden を確かめるテストがない。% と _ のエスケープ、SQL インジェクション文字列、タグ OR 検索、タグ・題名・本文・page・per_page・sort の境界値も同様にない。create・update・delete・transfer が途中で失敗したときのロールバックも確かめていない。tests の 12 件は主に正常系で、transfer の件数や、最初の 1 件を見るだけの弱い確認が中心。 / 根拠: 漏えい・インジェクション・不整合は仕様のリスク K1・K2・K4・K6 に当たり、これらに結びつく受け入れ条件を確かめる検証がなければ完了とは言えない。tests/test_notes.py を全件読んで確認した。 / 提案: 他の組織の利用者、他人の非公開メモ、管理者を使ったテストを足す。`service.hooks.before_write` で例外を起こして、create・delete・transfer が元のままになることを確かめる。`%`・`_`・`' OR 1=1 --` を含む検索語と、境界値（100文字・101文字、5個・6個のタグ）も確かめる。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC7, K3 / 対応区分: 証拠不足 / 内容: 同時実行の検証がない。閲覧数が数え漏れなく増えること、読み出しから書き込みの間に更新が入ったときと古い version の更新が Conflict になること、RateLimiter が複数スレッドから上限を超えて許さないことのいずれも確かめていない。 / 根拠: 設計書が用意した `hooks.before_write` と `RateLimiter.hook` の差し込み口が、テストで一度も使われていない。R2・R4・R7 の同時実行はリスク K3 の中心である。 / 提案: 差し込み口で割り込みの更新を決定論的に再現し、Conflict を確かめる。別々の接続とスレッドで N 回閲覧して views が N になることを確かめる。複数スレッドで hit を呼び、成功が limit 回ちょうどになることを確かめる。sleep には頼らない。\n- [重大4] 区分: テスト / 対象: AC6, AC8, AC9, AC10, AC7, K5, K7, K8 / 対応区分: 証拠不足 / 内容: api_key を伏せる出力（8文字未満・ちょうど8文字・末尾4文字）の検証がなく、現在のテストは action と actor しか見ていない。共有リンクの期限ちょうど（now == expires）や期限切れ、形の崩れ（改行、数字以外、署名の長さ違い）の検証もない。RateLimiter の枠の境界（ちょうど window 秒）も確かめていない。ログに本文・署名・api_key が出ないこと（重大1を検出できるテスト）と、例外の後に接続が使えること（in_transaction が False に戻る）も確かめていない。 / 根拠: AC6・AC7・AC8・AC9・AC10 は境界値と異常系そのものが受け入れ条件になっている。tests/test_notes.py の ShareTest と RateLimitTest は正常系と簡単な改ざんだけで、境界値を確かめていない。 / 提案: 各境界値のテストを追加する。具体的には now==expires で Forbidden、now==expires-1 で成功、枠の開始から window 秒ちょうどで新しい枠、鍵の長さ 7・8・9 の伏せ方、assertLogs でログに本文・署名・api_key が含まれないこと、例外の後に次の操作が成功すること。\n- [軽微1] 区分: 実装 / 対象: R8 (notes/share.py の verify_link) / 対応区分: 改善提案 / 内容: リンクの note_id は先頭の 0 を許すので、\"007.期限.署名\" は 7 のリンクと同じ署名で通る。リンクの文字列としては別物が同じ意味で通る。 / 提案: 先頭の 0 を許さない正規表現にするか、`str(note_id)` が元の文字列と一致することを確かめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常作成と空の題名の拒否だけで不十分。本文・タグの境界とロールバックがない。\n- AC2: 同じ組織内の get だけで不十分。他の組織・他人の非公開が NotFound になること、views の増加、同時実行がない。\n- AC3: 一覧の1ページ目と単純な検索だけで不十分。範囲外、`%`・`_`、インジェクション、タグ OR、非公開メモの除外がない。実装はプレースホルダーと ESCAPE を使っており、コード上は妥当と読めた。\n- AC4: 所有者の更新・削除だけで不十分。Conflict、Forbidden、管理者の操作、非公開メモの NotFound がない。\n- AC5: 件数の確認と非管理者の拒否だけで不十分。他の組織への移管と失敗時のロールバックがない。\n- AC6: 不十分。api_key の伏せ方を確かめていない。\n- AC7: 回数の制限と枠の更新だけで不十分。ちょうど window 秒の境界と同時実行がない。\n- AC8: 往復と改ざん1件だけで不十分。期限の境界、期限切れ、形の崩れがない。\n- AC9: 不十分。ログの検査がなく、重大1の欠陥を見逃している。\n- AC10: 不十分。例外の後に接続が使えることを確かめていない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしのファイルは見つからなかった）。検証条件を弱めた履歴は未確認（`$AQ history` は実行していない）。\n\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、unittest でのサービス層の結合検証（実際の SQLite と複数スレッド）が適している。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 の各リスクは、現在のテストではほとんど確かめられていない（重大2〜4を参照）。\n- 実装コードを読んだ範囲では、重大1以外の仕様違反は見つからなかった。ただし、上のテストがないため、そのコードの正しさは未検証のままである。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を全件読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行した（12 件すべて成功、出力は標準出力のみ）。\n- `$AQ trace` と `$AQ history` は実行していない。git の履歴も確認していない（`git status` では notes と tests が未追跡で、検証条件の改ざんは確認できていない）。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,33 @@
+{
+ "case": "SQL-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0654063,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込んだ欠陥そのものを指摘している。`search_notes` で検索語 q を f 文字列で SQL に直接埋め込んでいる点（SQL インジェクション）を、箇所・原因とも正しく挙げている。影響も、org_id や private の絞り込みを迂回できる可能性（未実行と明記）と、`%`・`_` のワイルドカード誤動作、`'` による構文エラーを挙げている。実行して確認した部分もある。よって matches_defect。\n\n**重大2**: SQL インジェクションや LIKE 特殊文字、タグ OR、境界値の検索・一覧テストが不足しているという指摘。コードの欠陥の主張ではなくテストの不足なので test_gap。\n\n**重大3**: 並行・途中失敗・認可のテストが不足しているという指摘。テストの不足だけを述べているので test_gap。\n\n**重大4**: 伏せ字、RateLimiter、共有リンク、ログの機密非出力のテストが不足しているという指摘。これも test_gap。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes が q を f 文字列で SQL に埋め込む SQL インジェクションを、箇所・原因・影響とも正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"検索・一覧のインジェクションや特殊文字、境界値のテスト不足を述べているだけで、コード欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"並行・ロールバック・認可の否定系テストの不足を述べているだけ。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"伏せ字・RateLimiter・共有リンク・ログのテスト不足を述べているだけ。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（search_notes の SQL インジェクション）を原因・影響とも正確に捉えており、他の3件はテスト不足の指摘である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes が q を f 文字列で SQL に埋め込む SQL インジェクションを、箇所・原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "検索・一覧のインジェクションや特殊文字、境界値のテスト不足を述べているだけで、コード欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "並行・ロールバック・認可の否定系テストの不足を述べているだけ。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "伏せ字・RateLimiter・共有リンク・ログのテスト不足を述べているだけ。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（search_notes の SQL インジェクション）を原因・影響とも正確に捉えており、他の3件はテスト不足の指摘である。"
+ }
+}

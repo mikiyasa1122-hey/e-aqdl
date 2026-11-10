@@ -1,0 +1,28 @@
+{
+ "case": "VAL-04",
+ "rep": 1,
+ "judge_cost_usd": 0.0619959,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`update_note` が `_validate(new_title, new_body, [])` と空リストを渡しており、新しいタグが検査されません。箇所・原因・影響がすべて正解データと一致します。\n- **重大2**: 実在する別の欠陥です。`TAG_RE.match` と `$` の組み合わせでは末尾の改行が通ります。`\"abc\\n\"` を有効なタグとして受理するので、仕様の「英小文字・数字・ハイフン」に反します。\n- **重大3**: テストの不足だけを指摘しているので test_gap です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note が _validate に空リストを渡し、更新時のタグを検査しないという埋め込み欠陥の原因と影響を、箇所も含めて正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match と $ で使うため末尾が改行のタグが通るという、埋め込みとは別の実在する仕様違反を指摘している。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が update_note で新しいタグを _validate に渡していない欠陥を、箇所・原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note が _validate に空リストを渡し、更新時のタグを検査しないという埋め込み欠陥の原因と影響を、箇所も含めて正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match と $ で使うため末尾が改行のタグが通るという、埋め込みとは別の実在する仕様違反を指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が update_note で新しいタグを _validate に渡していない欠陥を、箇所・原因・影響とも正確に指摘している。"
+ }
+}

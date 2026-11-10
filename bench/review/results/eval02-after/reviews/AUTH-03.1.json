@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-03",
+ "rep": 1,
+ "sec": 32.8,
+ "exit": 0,
+ "cost_usd": 0.1414057,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22919,
+  "cache_read_input_tokens": 111637,
+  "output_tokens": 3855,
+  "output_tokens_details": {
+   "thinking_tokens": 556
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22919,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2747,
+    "cache_read_input_tokens": 36929,
+    "cache_creation_input_tokens": 2351,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2351
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 73cf7484\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `_can_modify` が `row[\"owner_id\"] == user[\"id\"] or not row[\"private\"] or (admin かつ同じ組織)` になっている。`not row[\"private\"]` があるため、公開メモなら同じ組織の一般の member が他人のメモを更新・削除できる。仕様 R4 は作成者と同じ組織の管理者だけで、それ以外は Forbidden。 / 成立条件: 同じ組織の member B が、同じ組織の member A の公開メモに `update_note` または `delete_note` を呼ぶ。 / 影響: 他人のメモを書き換え・削除でき、認可の欠陥になる。 / 根拠: notes/service.py:`_can_modify`。再現: A が公開メモを作成し、B が `update_note(version=1, title=\"hijack\")` を呼ぶと版 2 が返って成功した。続けて B が `delete_note` を呼ぶと、例外なく削除された。上流の検証（`_visible` は閲覧可否だけ）や既存テストでは防げていない。 / 提案: `_can_modify` を `row[\"owner_id\"] == user[\"id\"] or (user[\"role\"] == \"admin\" and row[\"org_id\"] == user[\"org_id\"])` にする。非公開メモの管理者への NotFound は `_visible` が既に担っている。\n- [重大2] 区分: テスト / 対象: AC4, AC1, AC2, AC3, AC5, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心の12件だけで、仕様の異常系・境界値がほぼ検証されていない。足りない証拠は次のとおり。(a) 他人・他組織・非公開メモが NotFound になること、他人の公開メモの更新・削除が Forbidden になること。(b) version 不一致と、`hooks.before_write` を使った競合の Conflict。(c) 閲覧数の同時加算。(d) 途中失敗時のロールバック（作成・削除・移管・接続の再利用）。(e) 検索の `%`・`_`・`\\` と SQL 注入文字列、タグの OR 絞り込み。(f) 一覧の page・per_page・sort の範囲外。(g) 題名・本文・タグの境界値（100/101 文字、タグ5/6個、不正文字）。(h) 移管の組織外 Forbidden。(i) api_key の伏せ字（8文字未満・末尾4文字）。(j) RateLimiter の枠のちょうど境界と複数スレッドの同時呼び出し。(k) 共有リンクの期限ちょうど・形崩れ・改ざん署名。(l) ログと例外メッセージに機密が出ないこと。 / 根拠: これらはいずれも受け入れ条件・リスクに直結する。実際に [重大1] の認可欠陥が、既存テストをすべて通過している。 / 提案: 上記の観点ごとにテストを追加する。並行実行と途中失敗は、設計書の `hooks` と `RateLimiter.hook` で決定論的に再現する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` の可視性・認可の確認がトランザクションの外にある。`transfer_notes` や削除が、確認から BEGIN IMMEDIATE までの間に入ると、古い行に基づく認可のまま書き込む。ただし、version 条件があるため update の更新消失は防がれる。`delete_note` は version 条件も再確認もなく、他者が移管・削除した後でも、削除や監査記録が実行される。 / 成立条件: 認可の確認の後、`hooks.before_write` と同じ位置で別接続が移管または削除を行う（`delete_note` は検証前の読み出しの後に別接続が移管を行う）。 / 影響: 所有者が変わった後でも旧所有者の権限で削除でき、すでに存在しないメモの削除を audit に記録する。`get_note` は同様のケースをトランザクション内で再確認しているのに、`update_note`・`delete_note` は再確認していない。 / 根拠: notes/service.py の `delete_note` は `_row`、`_visible`、`_can_modify` の後で `transaction` に入り、中では再確認しない。 / 提案: `transaction` の内側で `_row` を再取得し、`_visible` と `_can_modify` を再検査する。DELETE の `rowcount` が 0 なら NotFound にする。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: 共有リンクの正規表現が先頭ゼロ付きの note_id・期限を許し、`007.…` のような別表記でも `int()` 変換後の署名が一致して通る。仕様の形には合うため、致命的ではない。 / 提案: 正規化した文字列と元の文字列が一致するか確認するか、先頭ゼロを拒否する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、境界値・タグ規則・ロールバックが未検証。不十分。\n- AC2: 閲覧の正常系のみで、NotFound の各ケースと同時の閲覧数加算が未検証。不十分。\n- AC3: `test_search` と `test_list_first_page` だけで、`%`・`_`・注入・範囲外・タグ OR が未検証。不十分。\n- AC4: 所有者の更新・削除だけで、Forbidden・Conflict・管理者の扱いが未検証。そのため [重大1] が素通りした。不十分。\n- AC5: 正常系と非管理者のみで、組織外とロールバックが未検証。不十分。\n- AC6: 伏せ字の検証が一切ない。不十分。\n- AC7: 枠の再開のみで、ちょうど境界と同時の呼び出しが未検証。不十分。\n- AC8: 往復と改ざん1例のみで、期限ちょうど・形崩れが未検証。不十分。\n- AC9: テストなし。\n- AC10: テストなし。\n- エンジンが検出したテストの兆候: なし。skip や弱いアサーションはないが、網羅が足りない。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリ。単体・統合テストで足りる）。\n### 不足しているリスク\n- K1: 公開メモを他の member が変更・削除できる（[重大1]）。\n- K3: 認可の確認から書き込みまでの競合（[重大3]）。同時の閲覧・更新・RateLimiter の並行テストもない（[重大2]）。\n- K2・K4・K5・K6・K8: 実装は妥当に見えるが、検証がない（[重大2]）。\n### 確認したこと\n- spec.md・design.md と notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った。\n- `_can_modify` の欠陥を、インメモリ DB 上のスクリプトで再現した。member が他の member の公開メモを更新（版 2 が返る）・削除できた。\n- LIKE は ESCAPE とプレースホルダーを使っており、`_like_escape` は `\\`・`%`・`_` を処理している。一覧の ORDER BY はホワイトリストから選ぶ。SQL は問題なし。\n- `$AQ trace` と `$AQ history` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}
