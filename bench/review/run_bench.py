@@ -47,6 +47,11 @@ def arg(name, default=None):
     return sys.argv[sys.argv.index(name) + 1] if name in sys.argv else default
 
 
+# モデルは固定する。指定しないと claude の既定のモデルが使われ、既定が変わると条件が変わる
+# （2026-11-11 の計測で、既定が Sonnet 5.5 から Opus 5.5 に変わっていたことに後から気づいた。results/TESTED-ANALYSIS.md）
+MODEL = arg("--model", "claude-sonnet-5-5")
+
+
 def selected():
     ids = arg("--cases")
     pool = {"clean": CL.CASES, "sql": SQ.CASES, "with-sql": CS.CASES + SQ.CASES, "tested": TD.CASES}.get(arg("--set"), CS.CASES)
@@ -162,7 +167,7 @@ def review_one(meta, out, rep):
     if os.path.exists(dest):
         return rid, "skip"
     t0 = time.time()
-    cmd = ["claude", "-p", meta["brief"] + "\n\n" + REVIEW_TASK, "--append-system-prompt", reviewer_prompt(),
+    cmd = ["claude", "-p", meta["brief"] + "\n\n" + REVIEW_TASK, "--model", MODEL, "--append-system-prompt", reviewer_prompt(),
            "--tools", "Read,Grep,Glob,Bash", "--dangerously-skip-permissions", "--output-format", "json"]
     # 引き継ぎ情報のエンジンのコマンド（trace・history）が、この run の状態を読めるようにする
     env = dict({k: v for k, v in os.environ.items() if k != "CLAUDE_PROJECT_DIR"}, AQDLC_HOME=meta["home"])
@@ -269,7 +274,7 @@ def judge_one(rev_path, out):
     prompt = JUDGE.format(case_id=c["id"], truth=truth, spec=D.SPEC_MD, code=case_code(c["id"], out), review=rev["result"],
                           tests=case_tests(c["id"], out) if clean or tested else "",
                           test_note=CLEAN_TEST_NOTE if clean else TESTED_NOTE if tested else "")
-    p = subprocess.run(["claude", "-p", prompt, "--tools", "", "--output-format", "json"], capture_output=True,
+    p = subprocess.run(["claude", "-p", prompt, "--model", MODEL, "--tools", "", "--output-format", "json"], capture_output=True,
                        text=True, timeout=900, cwd=out)
     try:
         res = json.loads(p.stdout)
@@ -294,7 +299,7 @@ def main():
         os.makedirs(os.path.join(out, d), exist_ok=True)
     if cmd == "build":
         with open(os.path.join(out, "conditions.json"), "w", encoding="utf-8") as f:
-            json.dump(dict(engine_commit(), case_set=arg("--set", "default"), python=sys.version.split()[0], built=time.strftime("%Y-%m-%dT%H:%M:%S"),
+            json.dump(dict(engine_commit(), case_set=arg("--set", "default"), model=MODEL, python=sys.version.split()[0], built=time.strftime("%Y-%m-%dT%H:%M:%S"),
                            config="既定（init のまま）。counterfactual off・holdout 無効・差分カバレッジ無効・"
                                   "review.blind 有効・workflow.mode full"), f, ensure_ascii=False, indent=1)
         for c in selected():
