@@ -66,7 +66,8 @@ def prune_failing_tests(dest):
     import ast
     dropped = []
     for _ in range(3):
-        bad = failing_tests(dest)
+        # 同時の操作の欠陥は、テストが毎回は失敗しない。数回実行して、1回でも失敗したテストを取り除く
+        bad = sorted(set().union(*(failing_tests(dest) for _ in range(4))))
         if not bad:
             return dropped
         by_file = {}
