@@ -55,7 +55,8 @@ def graph_issues(state):
 
 
 def _field(text, name):
-    m = re.search(rf"(?<![一-龥ぁ-んァ-ヶー]){re.escape(name)}\s*[:：]\s*([^/／]*)", text or "")
+    """「名前: 値」の値。欄の区切りは前後に空白のある「 / 」（値の中のパス「src/memo.py」「/api/orders」で切らない）。"""
+    m = re.search(rf"(?<![一-龥ぁ-んァ-ヶー]){re.escape(name)}\s*[:：]\s*(.*?)(?=\s[/／]\s|$)", text or "", re.M)
     return (m.group(1).strip(" *`…・") if m else "") or None
 
 

@@ -94,13 +94,21 @@ def deferred_list(state, cfg):
 
 def graph_fp(state):
     def vdef(v):
-        return {k: v.get(k) for k in ("id", "method", "command", "checks", "manual", "after_merge",
-                                       "level", "test", "timeout_sec")}
+        d = {k: v.get(k) for k in ("id", "method", "command", "checks", "manual", "after_merge",
+                                    "level", "test", "timeout_sec")}
+        if v.get("ordering"):
+            d["ordering"] = v["ordering"]  # 並行・共有の検証の順序の決め方（あるときだけ入れ、従来の指紋を変えない）
+        return d
+
+    def kdef(k):
+        out = [k["id"], k.get("text"), [vdef(v) for v in k.get("verifications", [])]]
+        if k.get("concurrency") or k.get("scenario") or k.get("invariant"):
+            out.append([k.get("concurrency"), k.get("scenario"), k.get("invariant")])
+        return out
     return fingerprint([[r["id"], r.get("text"), bool(r.get("critical")),
                          [[a["id"], a.get("text"), [vdef(v) for v in a.get("verifications", [])]]
                           for a in r.get("acceptance", [])],
-                         [[k["id"], k.get("text"), [vdef(v) for v in k.get("verifications", [])]]
-                          for k in r.get("risks", [])]]
+                         [kdef(k) for k in r.get("risks", [])]]
                         for r in state.get("requirements", [])])
 
 

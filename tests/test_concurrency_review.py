@@ -13,6 +13,8 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from helpers import ROOT, Env, blocked, build_to_review, denied  # noqa: E402
+
+sys.path.insert(0, os.path.join(ROOT, "plugins", "aq-dlc", "scripts"))
 from test_review_actions import report  # noqa: E402
 
 K1 = ("--concurrency", "toctou,lost_update", "--scenario", "A が存在を確認 → B が削除 → A が更新",
@@ -120,6 +122,40 @@ class ReviewTest(unittest.TestCase):
     def test_no_problem_passes(self):
         self.assertIsNone(self.stop(full("合格", 0, 0, [], scen("問題なし"))))
         self.assertTrue(self.e.state()["reviews"][-1]["passed"])
+
+
+class ReviewFixesTest(unittest.TestCase):
+    """独立レビューの指摘: 分類が指紋に入っていない・欄の値のパスで切れる。"""
+
+    def test_removing_classification_after_approval_needs_reapproval(self):
+        e = Env()
+        try:
+            build_to_review(e, with_question=False, k1_args=K1, v2_args=V2)
+            e.spawn("requirements")
+            e.start("requirements")
+            e.as_role("requirements", "risk", "R1", "K1", "空のメモが保存される", "--concurrency", "")
+            e.stop("requirements", "分類を外した")
+            self.assertTrue(denied(e.spawn("reviewer")))
+            self.assertIn("仕様", e.next())
+        finally:
+            e.cleanup()
+
+    def test_adding_classification_makes_review_stale(self):
+        e = Env()
+        try:
+            build_to_review(e, with_question=False)
+            g1 = __import__("aqdlc_core.state_model", fromlist=["x"]).graph_fp(e.state())
+            st = e.state()
+            st["requirements"][0]["risks"][0].update(concurrency=["toctou"], scenario="a", invariant="b")
+            self.assertNotEqual(g1, __import__("aqdlc_core.state_model", fromlist=["x"]).graph_fp(st))
+        finally:
+            e.cleanup()
+
+    def test_field_values_with_paths(self):
+        from aqdlc_core import concurrency as CCm
+        self.assertEqual(CCm._field("順序: /api/orders を A が読む → B が消す / 不変条件: x", "順序"),
+                         "/api/orders を A が読む → B が消す")
+        self.assertEqual(CCm._field("根拠: src/memo.py:3 / 提案: y", "根拠"), "src/memo.py:3")
 
 
 class UnrelatedChangeTest(unittest.TestCase):
