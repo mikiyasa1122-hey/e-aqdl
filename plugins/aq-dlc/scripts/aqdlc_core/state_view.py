@@ -129,7 +129,9 @@ def spec_sheet(state):
                 vs = "、".join(v.get("method", "") + ("（マージ後）" if v.get("after_merge") else "")
                               + ("（人が確認）" if v.get("manual") and not G.is_automated(v) else "")
                               for v in k.get("verifications", []))
-                lines.append(f"    - 想定する失敗 {k['id']}: {k.get('text')}" + (f" → 確かめ方: {vs}" if vs else ""))
+                lines.append(f"    - 想定する失敗 {k['id']}: {k.get('text')}" + (f" → 確かめ方: {vs}" if vs else "")
+                             + (f"（並行・共有: {', '.join(k['concurrency'])}。不変条件: {k.get('invariant')}）"
+                                if k.get("concurrency") else ""))
         lines.append("")
     if state.get("assumptions"):
         lines += ["## こちらで決めたこと（仮定）"] + [f"- {a['id']} {a['text']}" for a in state["assumptions"]] + [""]

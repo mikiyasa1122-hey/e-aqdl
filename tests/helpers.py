@@ -302,10 +302,10 @@ if __name__ == "__main__":
 '''
 
 
-def build_to_review(e, with_question=True, config=None, memo_src=None):
+def build_to_review(e, with_question=True, config=None, memo_src=None, k1_args=(), v2_args=()):
     """仕様承認 → 設計 → 実装 → gate 合格まで進める（各テストの前提）。config: プロジェクト設定に足す項目。
 
-    memo_src: 実装する src/memo.py（既定は MEMO_V1）。
+    memo_src: 実装する src/memo.py（既定は MEMO_V1）。k1_args・v2_args: リスク K1・検証 V2 の登録に足す引数。
     """
     py = f'"{sys.executable}"'
     e.aq("init", "メモ")
@@ -319,9 +319,9 @@ def build_to_review(e, with_question=True, config=None, memo_src=None):
     e.as_role("requirements", "req", "R2", "1秒以内に応答する", "--kind", "nonfunctional")
     e.as_role("requirements", "accept", "R1", "AC1", "追加したメモが一覧に出る")
     e.as_role("requirements", "accept", "R2", "AC2", "応答が1秒以内")
-    e.as_role("requirements", "risk", "R1", "K1", "空のメモが保存される")
+    e.as_role("requirements", "risk", "R1", "K1", "空のメモが保存される", *k1_args)
     e.as_role("requirements", "verify", "AC1", "V1", "追加の単体テスト", "--level", "unit")
-    e.as_role("requirements", "verify", "K1", "V2", "空のメモを拒否する単体テスト", "--level", "unit")
+    e.as_role("requirements", "verify", "K1", "V2", "空のメモを拒否する単体テスト", "--level", "unit", *v2_args)
     e.as_role("requirements", "verify", "AC2", "V3", "全テストが通る", "--level", "unit")
     if with_question:
         e.as_role("requirements", "question", "Q1", "メモの最大文字数は？", "--options", "制限なし（推奨）|100文字")

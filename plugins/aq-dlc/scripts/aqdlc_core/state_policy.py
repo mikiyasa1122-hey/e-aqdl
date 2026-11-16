@@ -190,7 +190,8 @@ def graph_issues(state):
         for k in r.get("risks", []):
             if not k.get("verifications"):
                 out.append(f"{k['id']} に検証がない")
-    return out
+    from .concurrency import graph_issues as conc_issues
+    return out + conc_issues(state)
 
 
 def problems(ctx, stage="pr"):
