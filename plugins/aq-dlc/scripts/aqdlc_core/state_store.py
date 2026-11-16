@@ -50,7 +50,7 @@ def empty_state(rid, title):
         "awaiting_human": False, "question": "", "asked_seq": 0, "waiting": None,
         "agents": {"running": {}, "history": []},
         "requirements": [], "assumptions": [], "out_of_scope": [], "questions": [],
-        "decisions": [], "escalations": [],
+        "decisions": [], "design_decisions": [], "escalations": [],
         "spec": {}, "design": {"map": {}}, "impl": {"rounds": [], "map": {}},
         "gate": None, "reviews": [], "fix_iterations": 0,
         "human_events": [], "history": [],
@@ -191,6 +191,11 @@ def new_run(project, title):
 
 
 # ------------------------------------------------------------------ fingerprints
+def _dec_fp_items(state):
+    from .design_decisions import spec_items
+    return spec_items(state)
+
+
 def spec_hash(state, rd):
     return fingerprint({
         "doc": doc_hash(rd, "spec"),
@@ -202,6 +207,8 @@ def spec_hash(state, rd):
         # 判断シートで決める（決めた）質問と推奨。提示の後に推奨を変えたら、提示し直さないと承認できない。
         # 該当がなければ鍵ごと入れない（判断シートを使わない run の指紋を変えないため）
         **({"sheet": items} if (items := _sheet_fp_items(state.get("questions", []))) else {}),
+        # 要求担当が出した設計方針の論点（選択肢と推奨）。選んだ案は入れない（design_decisions.spec_items）
+        **({"dec": dec} if (dec := _dec_fp_items(state)) else {}),
     })
 
 
@@ -217,6 +224,8 @@ class Ctx:
         self.spec_hash = spec_hash(state, self.rd)
         self.design_hash = doc_hash(self.rd, "design")
         self.graph_fp = graph_fp(state)
+        from .design_decisions import decisions_fp
+        self.decisions_fp = decisions_fp(state)
         self.checks = self.cfg.get("checks", [])
         self.checks_fp = G.checks_fp(self.cfg)
         self._snap = None

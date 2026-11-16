@@ -167,10 +167,12 @@ class TestPermissionsUnchanged(unittest.TestCase):
             self.assertTrue(res)
             for role in ("requirements", "design", "implementer", "reviewer"):
                 self.assertEqual(A.ROLE_COMMANDS[role] - A.COMMON_READ,
-                                 {"requirements": {"req", "accept", "risk", "verify", "assume", "question", "drop"},
+                                 # dec・dec-revisit: 設計方針の選択（DEC）。論点の登録と、再確認に戻す操作だけ（選ぶのは人と統括）
+                                 {"requirements": {"req", "accept", "risk", "verify", "assume", "question", "drop", "dec"},
                                   # holdout: 隠し受け入れテストの登録（0.6.3 で設計担当に追加。設定で有効なときだけ使える）
-                                  "design": {"design-map", "decision", "add-check", "remove-check", "bind", "holdout"},
-                                  "implementer": {"bind", "impl-map", "add-check", "gate", "cf"},
+                                  "design": {"design-map", "decision", "add-check", "remove-check", "bind", "holdout",
+                                             "dec", "dec-revisit"},
+                                  "implementer": {"bind", "impl-map", "add-check", "gate", "cf", "dec-revisit"},
                                   "reviewer": set()}[role])
         finally:
             e.cleanup()

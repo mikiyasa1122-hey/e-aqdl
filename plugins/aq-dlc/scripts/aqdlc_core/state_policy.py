@@ -343,6 +343,13 @@ def _problems(ctx, stage):
     if esc:
         out.append(P("escalation", f"未対応の差し戻し: {', '.join(esc)}", "orchestrator"))
         return out
+    from . import design_decisions as DD
+    pend = DD.pending(s)
+    if pend:
+        out.append(P("dec_pending", "未決定の設計方針（人の選択が必要）: "
+                     + "、".join(f"{d['id']} {d.get('topic')}" + ("（再確認）" if d.get("revisit") else "") for d in pend)
+                     + "。decisions --pending の表で人に選んでもらい、dec-select で記録する", "human"))
+        return out
 
     from . import workflow as WF
     wf = WF.effective(s, cfg)
@@ -359,6 +366,8 @@ def _problems(ctx, stage):
         out.append(P("design_changed", "設計書が登録後に変更された（aq-dlc:design で登録し直す）", "design"))
     elif d.get("spec_hash") != ctx.spec_hash:
         out.append(P("design_stale", "承認済み仕様の変更後に設計が更新されていない", "design"))
+    elif d.get("decisions_fp") is not None and d["decisions_fp"] != ctx.decisions_fp:
+        out.append(P("design_stale", "設計方針（DEC）の選択が変わった後に、設計が更新されていない", "design"))
     else:
         unmapped = [r["id"] for r in s["requirements"] if r["id"] not in d.get("map", {})]
         if unmapped:
@@ -383,6 +392,9 @@ def _problems(ctx, stage):
         return out
     if li.get("design_hash") != ctx.design_hash or li.get("spec_hash") != ctx.spec_hash:
         out.append(P("impl_stale", "仕様・設計の変更後に実装が更新されていない", "implementer"))
+        return out
+    if li.get("decisions_fp") is not None and li["decisions_fp"] != ctx.decisions_fp:
+        out.append(P("impl_stale", "設計方針（DEC）の選択が変わった後に、実装が更新されていない", "implementer"))
         return out
     if li.get("code_fp") and li["code_fp"] != ctx.code_fp:
         diff = G.describe_diff(li.get("snapshot"), ctx.snap) if li.get("snapshot") else ""

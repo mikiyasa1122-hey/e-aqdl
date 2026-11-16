@@ -43,7 +43,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 統括が使うコマンド:
 `setup` `doctor` `init` `publish` `new` / `memory-scope none|project|all` / `spec [--present | --approve "<人間の返答の要約>"]` `show <ID>` `answer <質問ID> "<回答>"` / `ask "<質問>"` `resume` / `escalation [<ID> --resolve "<対応>"]` / `gate [--after-merge]` `cf [--plan]` `cf-add` `cf-mark` `ci --wait 8` / `evidence` `roles` `audit` / `memory --tags .. --record` `memory-use` `memory-approve` `memory-share propose|decide` `memory-done --end project|share|none --saved/--merged/--skipped` / `metrics` `report`（1ページの完了報告）`workflow [--set <工程> "<理由>"]`（工程の確認・変更）/ `holdout <受け入れ条件ID> --command ... | --list | --dir`（設計担当）/ `complete` `abort` / `confirm <検証ID> "<人間の確認内容>"` `defer <検証ID>[,…] "<人間の返答の要約>"`（人が確認できない検証を、人間の承認のもとで未確認のまま進める）/ `config-accept "<人間の返答の要約>"`（設定がエンジン以外で変わったとき、人間に確認してから）
 
-要求・設計・実装の登録コマンド（req, accept, risk, verify, question, assume, drop, design-map, decision, add-check, bind, impl-map）は各担当のもので、**統括は使えない**（hook で止まる）。state.json と config.json は誰も直接編集しない。
+要求・設計・実装の登録コマンド（req, accept, risk, verify, question, assume, drop, dec, design-map, decision, add-check, bind, impl-map）は各担当のもので、**統括は使えない**（hook で止まる）。state.json と config.json は誰も直接編集しない。
 
 ## 進め方
 
@@ -70,6 +70,7 @@ $AQ trace     # 要求 → 受け入れ条件/リスク → 設計 → 実装 �
 1. `aq-dlc:requirements` を呼ぶ。prompt には**ユーザーの依頼文をそのまま**含める。
 2. **人間への確認は、原則として仕様の提示の1回にまとめる（判断シート）。** 推奨の選択肢がある質問と、人の確認が必要な検証は、仕様シートの「判断シート」に出る。先に聞くのは、推奨のない質問（`next` が「未回答の質問（推奨の選択肢なし）」と言うもの）だけ: `$AQ show <質問ID>` で内容を見て AskUserQuestion で聞き、`$AQ answer` で記録して `aq-dlc:requirements` に反映を依頼する。
 3. `$AQ spec --present` で仕様シートを出し、要点（要求・重要な失敗とその扱い・決めたこと・作らないもの）と**判断シート**（質問ごとの推奨、人の確認が必要な検証）を**短く**見せてから、1回で確認する（選択肢は「この仕様で進める（承認 SPEC-…）」「修正したい」）。質問は推奨でよければ承認だけで決まる。推奨と違う答えは「Q1 は B」のように書いてもらい、その場合は `answer` で記録して仕様を直す（エンジンも承認として扱わない）。「Q1 は推奨で」のように推奨どおりと書いた返答は承認として扱う。返答に推奨以外の選択肢・「ではなく」「変えたい」などがあれば承認にしない。提示の後に質問や推奨が変わったら、提示し直す（仕様の指紋に判断シートの推奨が入っている）。人が確認できない検証は、同じ返答に「承認 DEFER-<ID>」を含めてもらい、承認の記録の後に `$AQ defer` で記録する（あとで改めて聞かない）。
+4. **設計方針の選択（DEC）**: 仕様シートに「設計方針の選択」の表（2〜3案・推奨・現状踏襲の案）があれば、同じ1回の確認で選んでもらう。推奨でよければ承認だけで推奨に決まる。別の案は「DEC-001 = B」の形で承認と一緒に書いてもらう（「B ではなく C」など曖昧な返答は、エンジンが承認として扱わない）。設計・実装の途中で `next` が「未決定の設計方針」と言ったら（設計担当の新しい論点、設計担当・実装担当の `dec-revisit`）、`$AQ decisions --pending` の表を人に見せて AskUserQuestion で選んでもらい、`$AQ dec-select DEC-00x <案> --reason "<返答の要約>"` で記録する。統括が案を選ばない。選び直すと、設計・実装・gate・レビューがやり直しになる（`next` に従う）。
 4. 承認されたら `$AQ spec --approve "<人間の返答の要約>"`。修正の要望なら、内容を `aq-dlc:requirements` に渡して直させ、提示からやり直す。
    - エンジンは、**提示の後に、その版の仕様（SPEC-…）を指定した人間の承認が記録されていないと受け付けない**（AskUserQuestion の回答とユーザーの発言は hook が記録する。選ばれなかった選択肢は承認に使わない）。
    - 聞く観点は `references/spec-review.md`。技術的な好みや「この内容で良いですか？」だけの質問はしない。
