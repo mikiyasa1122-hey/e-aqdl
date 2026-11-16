@@ -30,10 +30,14 @@ def _by(s, project, key, by):
         return actor_hint(project) if actor_hint(project) != "other" else "orchestrator"
     if by != "human":
         die("--by は human か orchestrator")
+    import re
+    key_re = re.compile(rf"(?<![A-Za-z0-9]){re.escape(key)}(?![0-9])")
+    words = re.compile(r"妥当|誤検知|要検証|重複|受容|直す|直した|修正|対応|valid|false|duplicate|accept", re.I)
     for e in reversed(s.get("human_events", [])):
-        if key in (e.get("text") or "") and (not s.get("eaqdl") or AP.in_transcript(s, e)):
+        t = e.get("text") or ""
+        if key_re.search(t) and words.search(t) and (not s.get("eaqdl") or AP.in_transcript(s, e)):
             return "human"
-    die(f"人の返答に {key} がありません。人の判定として記録するなら、人に {key} の判定を聞いてから記録してください。")
+    die(f"人の返答に、{key} への判定がありません。人の判定として記録するなら、人に {key} の判定を聞いてから記録してください。")
 
 
 def cmd_finding_judge(args):
@@ -155,25 +159,4 @@ def cmd_findings(args):
         print(f"| {r['key']} | {RQ.SOURCE_LABEL.get(r['source'], r['source'])}{extra} | {r['severity']} | {jd} | {rs} | "
               f"{', '.join(r['targets'])} | {body} |")
     print()
-    print(summary_text(m))
-
-
-def summary_text(m):
-    tag = "暫定（未判定あり）" if m["provisional"] else "確定"
-    lines = [f"レビュー品質（{tag}）: 指摘 {m['detected_unique']} 件（重複を除く。重複 {m['duplicates']} 件）・"
-             f"判定済み {m['judged']}・未判定 {m['untriaged']}",
-             f"- 妥当 {m['valid']}・受容済みリスク {m['accepted_risk']}・誤検知 {m['false_positive']}・要検証 {m['needs_check']}",
-             "- 指摘の適合率: " + (f"{m['precision']}（判定済み {m['precision_denominator']} 件が分母）" if m["precision"] is not None
-                                 else "算出できず（妥当・誤検知の判定がない）"),
-             "- 重要度別の妥当率: " + "、".join(f"{k} {v['valid_rate'] if v['valid_rate'] is not None else '-'}"
-                                          f"（{v['valid']}/{v['valid'] + v['false_positive']}・未判定 {v['untriaged']}）"
-                                          for k, v in m["by_severity"].items()),
-             f"- 修正率: {m['fix_rate'] if m['fix_rate'] is not None else '-'}（修正済み {m['fixed']}、うち推定 {m['fixed_inferred']}）"
-             f"・重複率: {m['duplicate_rate'] if m['duplicate_rate'] is not None else '-'}",
-             f"- 外部の追加発見: {m['external_additional']} 件（" + "・".join(
-                 f"{RQ.SOURCE_LABEL[k]} {v}" for k, v in m["external_by_source"].items()) + f"）、確定した見逃し {m['confirmed_misses']} 件",
-             "- 観測された追加発見率: " + (f"{m['observed_additional_rate']}" if m["observed_additional_rate"] is not None else "-")
-             + f"（{m['observed_additional_rate_note']}）",
-             f"- レビュー {m['reviews']} 回・1回あたりの妥当な指摘 {m['valid_per_review'] if m['valid_per_review'] is not None else '-'}"
-             + (f"・レビューの時間 {round(m['reviewer_sec'])} 秒" if m.get("reviewer_sec") else "")]
-    return "\n".join(lines)
+    print(RQ.summary_text(m))

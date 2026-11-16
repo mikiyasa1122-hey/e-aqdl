@@ -96,6 +96,25 @@ class SummaryTest(unittest.TestCase):
         self.assertEqual(tot["precision"], 1.0)
 
 
+class ReviewFixesTest(unittest.TestCase):
+    """独立レビューの指摘: 外部の未判定を確定扱いしない・再掲を二重に数えない。"""
+
+    def test_external_untriaged_is_provisional(self):
+        s = copy.deepcopy(SAMPLE)
+        s["finding_judgments"] = {k: {"judgment": "valid"} for k in ("RV1.重大1", "RV1.重大2", "RV1.軽微1", "RV3.重大2")}
+        s["external_findings"] = [{"id": "EXT-1", "source": "production", "severity": "high", "text": "x",
+                                   "missed": "yes", "cause": "c", "prevention": "p"}]
+        m = RQ.summarize(s)
+        self.assertEqual((m["untriaged"], m["external_untriaged"], m["provisional"]), (0, 1, True))
+        self.assertIn("暫定", RQ.summary_text(m))
+
+    def test_repeated_finding_not_double_counted_even_if_judged(self):
+        s = copy.deepcopy(SAMPLE)
+        s["finding_judgments"] = {"RV1.重大2": {"judgment": "valid"}, "RV3.重大1": {"judgment": "valid"}}
+        m = RQ.summarize(s)
+        self.assertEqual((m["valid"], m["duplicates"]), (1, 1))
+
+
 class CommandTest(unittest.TestCase):
     def setUp(self):
         from test_review_actions import FIX, report
@@ -127,7 +146,10 @@ class CommandTest(unittest.TestCase):
         self.assertIn("--of", self.e.aq("finding-judge", "RV1.重大1", "duplicate", "--reason", "x", ok=False))
         self.assertIn("--reason", self.e.aq("finding-judge", "RV1.重大1", "valid", ok=False))
         out = self.e.aq("finding-judge", "RV1.重大1", "valid", "--reason", "x", "--by", "human", ok=False)
-        self.assertIn("人の返答に RV1.重大1 がありません", out)
+        self.assertIn("RV1.重大1 への判定がありません", out)
+        self.e.human_says("RV1.重大10 を見ました")  # 別のキー（部分一致で人の判定にしない）
+        self.assertIn("判定がありません", self.e.aq("finding-judge", "RV1.重大1", "valid", "--reason", "x",
+                                                  "--by", "human", ok=False))
         self.e.human_says("RV1.重大1 は妥当です")
         self.e.aq("finding-judge", "RV1.重大1", "valid", "--reason", "人が確認", "--by", "human")
         self.assertEqual(self.e.state()["finding_judgments"]["RV1.重大1"]["by"], "human")

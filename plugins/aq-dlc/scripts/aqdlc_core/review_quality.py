@@ -107,8 +107,8 @@ def rows(state):
         j = judg.get(f["key"]) or {}
         jd = j.get("judgment")
         of = j.get("of")
-        if not jd and f["key"] in auto:
-            jd, of = "duplicate", auto[f["key"]]
+        if f["key"] in auto and jd != "duplicate":
+            jd, of = "duplicate", auto[f["key"]]  # 再掲は、判定があっても重複として数える（二重に数えない）
         r = res.get(f["key"]) or {}
         st = r.get("status") or ("fixed" if f["key"] in fixed_guess else None)
         out.append(dict(f, judgment=jd, of=of, judged_by=j.get("by") or ("auto" if f["key"] in auto and not j else None),
@@ -144,6 +144,7 @@ def summarize(state, reviewer_sec=None, reviewer_tokens=None):
                        "untriaged": sum(1 for r in g if r["judgment"] is None),
                        "valid_rate": round(v / (v + fp), 3) if v + fp else None}
     ext_valid = [r for r in ext if r["judgment"] in ("valid", "accepted_risk") and not r.get("same_as")]
+    ext_untriaged = [r for r in ext if r["judgment"] is None and not r.get("same_as")]
     valid_internal = cnt["valid"] + cnt["accepted_risk"]
     reviews = [r for r in state.get("reviews", []) if r.get("valid")]
     fixed = sum(1 for r in uniq if r["judgment"] == "valid" and r["resolution"] == "fixed")
@@ -153,7 +154,9 @@ def summarize(state, reviewer_sec=None, reviewer_tokens=None):
         "duplicates": len(internal_rows) - len(uniq),
         "duplicate_rate": round((len(internal_rows) - len(uniq)) / len(internal_rows), 3) if internal_rows else None,
         "judged": len(uniq) - untriaged, "untriaged": untriaged,
-        "provisional": untriaged > 0,
+        # 外部の追加発見の未判定も、暫定の理由に数える（見逃しの数・追加発見率が確定していない）
+        "external_untriaged": len(ext_untriaged),
+        "provisional": untriaged > 0 or bool(ext_untriaged),
         "valid": cnt["valid"], "false_positive": cnt["false_positive"], "needs_check": cnt["needs_check"],
         "accepted_risk": cnt["accepted_risk"],
         # 妥当 = 妥当 + 受容済みリスク（指摘そのものは正しい）。分母は妥当・誤検知の判定が済んだものだけ
@@ -180,7 +183,7 @@ def summarize(state, reviewer_sec=None, reviewer_tokens=None):
 def aggregate(runs):
     """複数の run（[(run_id, summary)]）をまとめる。判定済みの件数だけで率を出し、未判定の数を添える。"""
     keys_ = ("detected_unique", "duplicates", "judged", "untriaged", "valid", "false_positive", "needs_check",
-             "accepted_risk", "fixed", "external_additional", "confirmed_misses", "reviews")
+             "accepted_risk", "fixed", "external_additional", "external_untriaged", "confirmed_misses", "reviews")
     tot = {k: sum((m.get(k) or 0) for _r, m in runs) for k in keys_}
     v = tot["valid"] + tot["accepted_risk"]
     tot["precision"] = round(v / (v + tot["false_positive"]), 3) if v + tot["false_positive"] else None
@@ -188,6 +191,27 @@ def aggregate(runs):
                                        if v + tot["external_additional"] else None)
     tot["fix_rate"] = round(tot["fixed"] / tot["valid"], 3) if tot["valid"] else None
     tot["valid_per_review"] = round(v / tot["reviews"], 2) if tot["reviews"] else None
-    tot["provisional"] = tot["untriaged"] > 0
+    tot["provisional"] = tot["untriaged"] > 0 or tot["external_untriaged"] > 0
     tot["runs"] = len(runs)
     return tot
+
+
+def summary_text(m):
+    tag = "暫定（未判定あり）" if m["provisional"] else "確定"
+    lines = [f"レビュー品質（{tag}）: 指摘 {m['detected_unique']} 件（重複を除く。重複 {m['duplicates']} 件）・"
+             f"判定済み {m['judged']}・未判定 {m['untriaged']}",
+             f"- 妥当 {m['valid']}・受容済みリスク {m['accepted_risk']}・誤検知 {m['false_positive']}・要検証 {m['needs_check']}",
+             "- 指摘の適合率: " + (f"{m['precision']}（判定済み {m['precision_denominator']} 件が分母）" if m["precision"] is not None
+                                 else "算出できず（妥当・誤検知の判定がない）"),
+             "- 重要度別の妥当率: " + "、".join(f"{k} {v['valid_rate'] if v['valid_rate'] is not None else '-'}"
+                                          f"（{v['valid']}/{v['valid'] + v['false_positive']}・未判定 {v['untriaged']}）"
+                                          for k, v in m["by_severity"].items()),
+             f"- 修正率: {m['fix_rate'] if m['fix_rate'] is not None else '-'}（修正済み {m['fixed']}、うち推定 {m['fixed_inferred']}）"
+             f"・重複率: {m['duplicate_rate'] if m['duplicate_rate'] is not None else '-'}",
+             f"- 外部の追加発見: {m['external_additional']} 件（未判定 {m.get('external_untriaged', 0)} 件。" + "・".join(
+                 f"{SOURCE_LABEL[k]} {v}" for k, v in m["external_by_source"].items()) + f"）、確定した見逃し {m['confirmed_misses']} 件",
+             "- 観測された追加発見率: " + (f"{m['observed_additional_rate']}" if m["observed_additional_rate"] is not None else "-")
+             + f"（{m['observed_additional_rate_note']}）",
+             f"- レビュー {m['reviews']} 回・1回あたりの妥当な指摘 {m['valid_per_review'] if m['valid_per_review'] is not None else '-'}"
+             + (f"・レビューの時間 {round(m['reviewer_sec'])} 秒" if m.get("reviewer_sec") else "")]
+    return "\n".join(lines)

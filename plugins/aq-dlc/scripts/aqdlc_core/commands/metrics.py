@@ -274,7 +274,7 @@ def cmd_metrics(args):
     mm = m["memory"]
     print(f"Memory: 利用範囲 {mm['scope']}・読み込み {mm['loaded']} 件・結果 {mm['results'] or 'なし'}・"
           f"共有 {mm['shared']} 件（却下 {mm['share_rejected']}）・終了時 {mm['end']}")
-    from .findings import summary_text
+    from ..review_quality import summary_text
     print(summary_text(m["review_quality"]))
 
 
