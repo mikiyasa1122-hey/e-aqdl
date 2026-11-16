@@ -86,7 +86,10 @@ def git_state(project, cfg=None):
         out["head"] = head.strip()
     code, br = sh_run("git symbolic-ref -q --short HEAD", project, 30)
     out["branch"] = br.strip() if code == 0 and br.strip() else None
-    code, st = sh_run("git status --porcelain=v1 -z --untracked-files=all", project, 120)
+    # プロジェクトがリポジトリのサブフォルダでもよいように、プロジェクトの中だけを見て、パスをプロジェクトからの相対にする
+    code, prefix = sh_run("git rev-parse --show-prefix", project, 30)
+    prefix = prefix.strip() if code == 0 else ""
+    code, st = sh_run("git status --porcelain=v1 -z --untracked-files=all -- .", project, 120)
     if code != 0:
         out["error"] = "git status に失敗した"
         return out
@@ -102,6 +105,10 @@ def git_state(project, cfg=None):
         x, y, path = e[0], e[1], e[3:]
         if x in "RC":
             i += 1  # 名前の変更・コピーは、次の要素が元の名前
+        if prefix:
+            if not path.startswith(prefix):
+                continue
+            path = path[len(prefix):]
         if x == "?":
             out["untracked"] += 1
         else:
@@ -109,9 +116,10 @@ def git_state(project, cfg=None):
                 out["staged"] += 1
             if y not in " ?":
                 out["unstaged"] += 1
-        # 未追跡は指紋の対象（.gitignore・ignore_dirs・依存関係のフォルダを除く）だけ。追跡しているファイルの変更・削除は
-        # E-AQDL の記録（.aq-dlc/・.claude/）を除いてすべて（削除したファイルは指紋の対象の一覧に出ないため）
-        if path in srcs if x == "?" else not path.startswith((".aq-dlc/", ".claude/", ".git/")):
+        # 指紋の対象（未追跡は .gitignore・ignore_dirs・依存関係のフォルダを除く。追跡しているファイルは常に対象。
+        # gate で作り直すカバレッジのレポートと E-AQDL の記録は除く）と、削除したファイル（指紋の一覧に出ない）
+        deleted = x == "D" or y == "D" or not os.path.lexists(os.path.join(project, path))
+        if path in srcs or (deleted and x != "?" and not path.startswith((".aq-dlc/", ".claude/", ".git/"))):
             dirty.append(path)
     out["dirty_source"] = sorted(set(dirty))[:50]
     return out

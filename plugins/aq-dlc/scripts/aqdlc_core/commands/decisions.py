@@ -105,7 +105,7 @@ def cmd_dec_select(args):
     after = max(d.get("updated_seq", 0), (d.get("revisit") or {}).get("seq", 0), d.get("decided_seq", 0))
     ev = None
     for e in reversed([e for e in s.get("human_events", []) if e.get("seq", 0) > after and e.get("parsed", True)]):
-        got, why = DD.choice_in(e.get("text", ""), did, keys)
+        got, why = DD.choice_in(e.get("text", ""), did, keys, d.get("recommended"))
         if got is None and why is None:
             continue
         if why:
@@ -136,20 +136,29 @@ def _select(s, d, key, by, reason, event=None):
     d.pop("revisit", None)
 
 
-def apply_spec_approval(s, event_text):
+def apply_spec_approval(s, texts):
     """仕様の承認で、要求担当の未決定の DEC を決める（cmd_spec から呼ぶ）。
 
-    返答に「DEC-001 = B」があればその案（人の選択）、なければ推奨（仕様の承認）。曖昧なら (None, 理由) を返し、
-    呼び出し側は承認を記録しない。戻り値: (決めた [(id, key, by)], 曖昧の理由の列)。
+    texts: 仕様の提示の後の人の返答（古い順。承認の返答だけでなく、別の返答に選択を書いた場合も読む）。
+    DEC ごとに、最後にその DEC に触れた返答の「DEC-001 = B」を採る（人の選択）。どの返答も触れていなければ推奨
+    （仕様の承認）。曖昧な書き方、または ID を書かずに推奨以外の案の名前で答えた返答があれば、承認として扱わない
+    （(None, 理由) を返し、呼び出し側は承認を記録しない）。戻り値: (決めた [(id, key, by)], 理由の列)。
     """
+    texts = [t for t in (texts if isinstance(texts, list) else [texts]) if t]
     plan, why = [], []
     for d in DD.pending(s):
         if d.get("origin") != "requirements":
             continue
         keys = [o["key"] for o in d.get("options", [])]
-        got, w = DD.choice_in(event_text or "", d["id"], keys)
+        got, w = None, None
+        for t in texts:
+            g, ww = DD.choice_in(t, d["id"], keys, d.get("recommended"))
+            if g or ww:
+                got, w = g, ww  # 後の返答で言い直したら、後のものを採る
         if w:
             why.append(w)
+        elif not got:
+            why += DD.title_conflicts(texts, d)
         plan.append((d, got or d["recommended"], "human" if got else "spec_approval"))
     if why:
         return None, why

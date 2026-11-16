@@ -17,6 +17,7 @@
 このモジュールは状態を書き換えない純粋関数だけを持つ（cli と state_policy・agents から使う）。
 """
 import re
+import unicodedata
 
 from .util import fingerprint
 
@@ -100,8 +101,8 @@ def spec_items(state):
     """
     out = []
     for d in all_decs(state):
-        if d.get("origin") != "requirements" or d.get("status") == "superseded":
-            continue
+        if d.get("origin") != "requirements":
+            continue  # 置き換えた DEC も元の内容のまま入れる（設計担当の置き換えで、承認済みの仕様を無効にしない）
         out.append([d["id"], d.get("topic"), [[o["key"]] + [o.get(f) for f in FIELDS] for o in d.get("options", [])],
                     d.get("recommended"), sorted(d.get("affects") or []), d.get("assumptions") or ""])
     return out
@@ -113,23 +114,47 @@ def decisions_fp(state):
 
 
 # ------------------------------------------------------------------ 人の返答から選択を読む
-_DIFFERENT = re.compile(r"ではなく|じゃなく|でなく|以外|違う|変え|変更|やめ|保留|未定|迷")
+_DIFFERENT = re.compile(r"ではなく|じゃなく|でなく|以外|違う|変え|変更|やめ|保留|未定|迷|けど|けれど|やっぱり|やはり|いや|でも|"
+                        r"\bNOT\b|\bINSTEAD\b")
 
 
-def choice_in(text, did, keys):
+def normalize(text):
+    """全角・半角、大文字・小文字、ダッシュの揺れをそろえる（ＤＥＣ－００１ → DEC-001、dec-001 → DEC-001）。"""
+    t = unicodedata.normalize("NFKC", text or "").upper()
+    return re.sub(r"[‐‑‒–—―ー−－]", "-", t)
+
+
+def _id_re(did):
+    m = re.match(r"DEC-(\d+)$", did)
+    num = str(int(m.group(1))) if m else re.escape(did)
+    return rf"DEC\s*-\s*0*{num}(?![0-9])"
+
+
+def mentions(text, did):
+    return re.search(_id_re(did), normalize(text)) is not None
+
+
+def choice_in(text, did, keys, recommended=None):
     """返答の中の「DEC-001 = B」「DEC-001: B」「DEC-001 は B」。戻り値: (キー or None, 曖昧の理由 or None)。
 
-    同じ DEC に違うキーが書かれている、「ではなく」などの言葉と一緒に書かれている、DEC に触れているのに
-    キーを読めない、のどれかなら、曖昧として扱う（推奨で上書きしない）。
+    表記の揺れ（全角・小文字・DEC-1）はそろえて読む。引用の行（> で始まる）は読まない。次のどれかなら曖昧とする
+    （推奨で上書きしない）: 同じ DEC に違うキーがある、案の並び（A / B / C）を書き写している、否定・言い直しの言葉
+    （ではなく・けど・やっぱり など）が同じ文にある、推奨と言いながら推奨以外の案を書いている、DEC に触れているのに
+    キーを読めない。
     """
-    if not text or did not in text:
+    t = "\n".join(ln for ln in normalize(text).splitlines() if not ln.lstrip().startswith(">"))
+    idre = _id_re(did)
+    if not re.search(idre, t):
         return None, None
-    pat = re.compile(rf"{re.escape(did)}(?![0-9])\s*(?:=|＝|:|：|は|を|→)\s*(?:案\s*)?([A-Ca-cＡ-Ｃ])(?![A-Za-z0-9])")
-    found = set()
-    for m in pat.finditer(text):
-        k = m.group(1).upper().translate(str.maketrans("ＡＢＣ", "ABC"))
-        found.add(k)
-    near = [seg for seg in re.split(r"[\n。]", text) if did in seg]
+    # その DEC に触れた文と、その後ろ（別の DEC に触れるまで）。「DEC-001 = B。いや、やっぱり推奨で」のような言い直しを読む
+    near = []
+    for m in re.finditer(idre, t):
+        nxt = re.search(r"DEC\s*-\s*\d+", t[m.end():])
+        near.append(t[max(0, t.rfind("\n", 0, m.start()) + 1):m.end() + (nxt.start() if nxt else len(t) - m.end())])
+    if any(re.search(rf"{idre}\s*(?:=|:|は|を|→)?\s*[A-C]\s*/\s*[A-C]", seg) for seg in near):
+        return None, f"{did} の案の並び（A / B …）が書き写されていて、どれを選んだか読めない"
+    pat = re.compile(rf"{idre}\s*(?:=|:|は|を|→)\s*(?:案\s*)?([A-C])(?![A-Z0-9])")
+    found = {m.group(1) for m in pat.finditer(t)}
     if len(found) > 1:
         return None, f"{did} に複数の案（{'・'.join(sorted(found))}）が書かれている"
     if found:
@@ -137,9 +162,23 @@ def choice_in(text, did, keys):
         if k not in keys:
             return None, f"{did} の案 {k} はない（{'・'.join(keys)} のどれか）"
         if any(_DIFFERENT.search(seg) for seg in near):
-            return None, f"{did} の選択に、否定・保留の言葉が一緒に書かれている"
+            return None, f"{did} の選択に、否定・言い直し・保留の言葉が一緒に書かれている"
+        if k != recommended and any("推奨" in seg for seg in near):
+            return None, f"{did} に「推奨」と書きながら、推奨（{recommended or '?'}）以外の案 {k} がある"
         return k, None
     return None, f"{did} に触れているが、選んだ案（{did} = {' / '.join(keys)}）を読めない"
+
+
+def title_conflicts(texts, d):
+    """返答の中に、推奨以外の案の名前（方針）があるか（ID を書かずに、選択肢の名前で答えた場合）。"""
+    flat = normalize("\n".join(texts))
+    flat = re.sub(r"\s+", "", flat)
+    out = []
+    for o in d.get("options", []):
+        name = re.sub(r"\s+", "", normalize(o.get("title")))
+        if o["key"] != d.get("recommended") and len(name) >= 4 and name in flat:
+            out.append(f"{d['id']}: 推奨以外の案の名前（{o['key']}: {o['title']}）が返答にある")
+    return out
 
 
 # ------------------------------------------------------------------ 表示
