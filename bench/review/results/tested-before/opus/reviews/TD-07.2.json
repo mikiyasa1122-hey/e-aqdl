@@ -1,0 +1,49 @@
+{
+ "case": "TD-07",
+ "rep": 2,
+ "sec": 85.3,
+ "exit": 0,
+ "cost_usd": 0.4627198,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 34982,
+  "cache_read_input_tokens": 281639,
+  "output_tokens": 6324,
+  "output_tokens_details": {
+   "thinking_tokens": 1893
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 34982,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3152,
+    "cache_read_input_tokens": 61347,
+    "cache_creation_input_tokens": 511,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 511
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7dd26fa8\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8（notes/share.py `verify_link` の期限判定 `if int(now ...) > expires:`） / 対応区分: 修正必須 / 内容: 期限の時刻ちょうど（now == expires）のリンクが有効として通る。R8 は「期限の時刻ちょうど以降は無効」と定めており、関数の docstring にも「期限の時刻ちょうどを含む」とあるが、比較が `>` になっている。 / 成立条件: 期限の秒と検証時刻の秒が同じとき（例: make_link(now=1000, ttl_sec=60) で作ったリンクを now=1060 で検証する）。 / 影響: 期限切れのはずのリンクで、メモの note_id が1秒だけ余分に返る。AC8 の「期限の境界を含む」を満たしていない（K8 の期限切れリンクを通すリスク）。 / 確認した保証: 呼び出し元や上流に期限を見直す処理はない。share.py の中で判定はこの1か所だけ。tests/test_ac8_share.py は now=1059（有効）と now=1001 しか確かめず、now=1060 の境界のテストがないため gate でも見つからない。 / 根拠: 実際に `python3 -B -c` で `verify_link('s', make_link('s',7,ttl_sec=60,now=1000), now=1060)` を実行したところ、Forbidden にならず `7` が返った。 / 提案: 比較を `>=` に変える。test_ac8_share.py に「now=expires（1060）で Forbidden になる」と「now=expires-1（1059）で有効」の境界テストを加える（今の `>` に戻すと失敗するテストにする）。\n- [軽微1] 区分: 実装 / 対象: R8, K8（notes/share.py `LINK_RE` と `int()` での解釈） / 対応区分: 改善提案 / 内容: 頭に0を付けた形（`007.1060.<署名>`）も、`7.1060.<署名>` と同じリンクとして通る。署名する値は int にしたものと同じなので、別のメモや別の期限には変えられない。実害はないが、1つのリンクに複数の書き方が許される。 / 提案: 数字の部分を `(0|[1-9][0-9]{0,17})` にして、正規の書き方だけを受け付ける。\n- [軽微2] 区分: テスト / 対象: AC4, K3 / 対応区分: 改善提案 / 内容: 更新の競合は、同じ接続と hook の中で別の更新を挟んで再現している。順序が決まった再現として役目は果たしているが、別々のスレッドと接続から更新が同時に来る経路（BEGIN IMMEDIATE のロック待ちの中で version の判定が働くこと）は確かめていない。閲覧数（test_concurrent_views_from_threads）にはスレッドのテストがある。 / 提案: ファイルの DB と2つの接続を使い、片方が before_write で止まっている間にもう片方が更新するテストを足す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグを境界値と異常値（101文字、空白だけ、改行付きのタグ、型の違い、文字列で渡したタグ、重複の数え方）で確かめている。途中の失敗（create:tags）の後に notes・note_tags・audit が0件であることも見ており、妥当。\n- AC2: 他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しないメモが、すべて NotFound になることを確かめている。閲覧数は、割り込んだ閲覧と、4スレッド×10回で40になることを別々の接続で確かめており、妥当。\n- AC3: 一覧の範囲・並べ替え・ページ分け・範囲外の値（bool・float・文字列・sort=\"title; DROP\"）を確かめている。検索は % と _ と \\ を普通の文字として扱うこと、タグの OR、入力の拒否、組織と非公開の範囲を確かめており、妥当。\n- AC4: 作成者と管理者の権限、Forbidden と NotFound の分け方、非公開のメモ、古い version の Conflict、読み出しから書き込みの間に入った更新、判定の後の移管、更新でも入力を検証すること、削除の途中の失敗でロールバックし例外を伝えることを確かめており、妥当。スレッドをまたぐ競合は軽微2のとおり。\n- AC5: 管理者だけであること、組織をまたぐ4通りの組み合わせ、途中の失敗で元のままになること、非公開のメモも移ることを確かめており、妥当。\n- AC6: 末尾4文字以外を伏せること、境界（7文字と8文字）、空の鍵、管理者だけで自分の組織だけであることを確かめており、妥当。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドが Barrier で同時に呼んで上限5件に収まること、判定の途中への割り込みを確かめており、妥当。\n- AC8: 改ざん（note_id・期限・署名・鍵）と形の崩れ（16種類）は十分に確かめている。ただし期限の境界（now == expires）のテストがなく、実装の欠陥（重大1）を見逃しているため不十分。\n- AC9: ログ・例外のメッセージ・監査の出力に、本文・署名・api_key・鍵が出ないことを確かめており、妥当。\n- AC10: Conflict・ValidationError・注入した失敗・外部キー違反・SQLite が先にロールバックした後のそれぞれで、トランザクションが閉じて接続を使い続けられることを確かめており、妥当。\n- K1: AC2・AC3・AC4・AC5 のテストで確かめており、妥当。\n- K2: 検索語とタグはプレースホルダーで渡し、ESCAPE '\\' を使い、`_like_escape` は \\ → % → _ の順で検索語に実際に適用されている。sort は許可した一覧の値だけを SQL に入れ、IN 句は ? の数だけを組み立てている。テストも `' OR 1=1 --` などで確かめており、妥当。\n- K3: 閲覧数とレート制限はスレッドで、更新は hook で確かめている（軽微2）。\n- K4・K6: 途中の失敗のテストがあり、妥当。\n- K5・K7: AC6・AC9 のとおりで、妥当。\n- K8: 期限の境界が不十分（重大1）。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは見つからなかった。自分でも確かめた）。\n\n### E2E の要否\n- 不要（HTTP や画面のないライブラリで、HTTP の API は対象外。単体テストで実際の SQLite とスレッドを使っている）\n\n### 不足しているリスク\n- K8: 共有リンクの期限の境界（now == expires）の検証がなく、実装も境界で誤っている（重大1）\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py をすべて読んだ。\n- `python3 -B -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）: 62件すべて合格。\n- `python3 -B -c` で verify_link を now=1060（期限ちょうど）で実行したところ、Forbidden にならず 7 が返った。重大1を実際の動作で確かめた。頭に0を付けたリンクも通った（軽微1）。\n- `$AQ trace`: R1〜R10・AC1〜AC10・K1〜K8 のどれにも検証の対応があり、gate 20261111 で合格（反証テストは無効）。\n- `$AQ history --since 0`: 検証の追加の記録だけで、検証条件を弱めた・消した記録はない。\n- gate のログ（20261111-091749-check-unit.log）: exit=0、62件合格。\n- `git status`: notes/ と tests/ はコミットされていない（初期状態のコミットだけ）ため、git diff での比較はできなかった。テストの改ざんは history とテストの中身で確かめ、見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

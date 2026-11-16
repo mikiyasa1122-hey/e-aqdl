@@ -1,0 +1,49 @@
+{
+ "case": "TD-05",
+ "rep": 3,
+ "sec": 24.1,
+ "exit": 0,
+ "cost_usd": 0.0995248,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 13674,
+  "cache_read_input_tokens": 166788,
+  "output_tokens": 2813,
+  "output_tokens_details": {
+   "thinking_tokens": 423
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13674,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1807,
+    "cache_read_input_tokens": 40098,
+    "cache_creation_input_tokens": 1034,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1034
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 78281336\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 (`notes/service.py:295-311` の `search_notes`) / 対応区分: 修正必須 / 内容: 検索の SQL が `org_id = ?` でしか絞っておらず、非公開メモの条件（`private = 0 OR owner_id = ?`）がない。R3 は「他人の非公開メモは含めない」と定めている。設計の `_visible` の規則にも反する。 / 成立条件: 同じ組織の利用者 A が非公開メモを作り、同じ組織の別の利用者 B（管理者を含む）が、その題名か本文に当たる語で検索する。 / 影響: 他人の非公開メモの id と題名が漏れる。R2 と R4 は「存在を明かさない」としているので、K1 に直接当たる。 / 確認した保証: 呼び出し元や上流で絞られておらず、DB の制約もない。`list_notes` だけは正しく絞っている。 / 根拠: 再現した。A が非公開の「秘密の題」を作り、B で `search_notes(conn, B, \"秘密\")` を呼ぶと `[{'id': 1, 'title': '秘密の題'}]` が返る。 / 提案: `search_notes` の WHERE に `AND (private = 0 OR owner_id = ?)` を足し、`user[\"id\"]` を args に渡す。\n- [重大2] 区分: テスト / 対象: AC3, K1 (`tests/test_ac3_list_search.py` の SearchTest) / 対応区分: 証拠不足 / 内容: SearchTest は bob の非公開メモ「secret 100%」を作っているが、alice で検索したときにそれが結果に含まれないことを確かめていない。`ids(\"100%\")` を使ったアサーションの確認が必要。重大1のバグがあるのに 61 件すべてが通っており、検索の可視性を確かめる検証が空洞化している。 / 根拠: 検索は K1 の主要な漏えい経路で、AC3 が検索結果の範囲を求めている。 / 提案: alice が検索しても bob の非公開メモが出ない（bob 自身なら出る、管理者にも出ない）テストを追加する。重大1の修正前は失敗し、修正後に通ること。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成の検証、タグ、トランザクションの途中失敗は、コードを読むと R1 を満たしている。`hooks.before_write(\"create:tags\")` で巻き戻りも確かめている。妥当。\n- AC2: `_visible` と NotFound への統一、閲覧数の加算は `BEGIN IMMEDIATE` 内で行っており、数え漏れはない。コード上は妥当。\n- AC3: 一覧は妥当。検索は上記のとおり非公開メモの除外が未達で、検証も不十分。LIKE のエスケープ（`\\`、`%`、`_`）、ESCAPE 句、プレースホルダー、タグの検査は、題名と本文の両方に正しく適用されている。\n- AC4: 認可、楽観的ロック（UPDATE の WHERE に version）、トランザクション内で読み直した行での再検証、削除の巻き戻しは、コードを読むと妥当。\n- AC5: 役割と組織の確認、全部移すか何もしないか、は妥当。\n- AC6: 8文字未満はすべて伏せ、それ以外は末尾4文字を残す。コード上は妥当。\n- AC7: ロック内の判定と `>=` の境界は妥当。\n- AC8: `fullmatch` の正規表現、`compare_digest`、期限の境界は妥当。\n- AC9: ログと例外のメッセージに本文・署名・api_key は出ていない。\n- AC10: `_rollback` で元の例外を保ち、接続は再利用できる。\n- エンジンが検出したテストの兆候は、skip・`.only`・アサーションなしのいずれもなし。\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、unittest による結合テストでリスクに見合っている。\n### 不足しているリスク\n- K1: 検索経由の非公開メモの漏えいが未対策（重大1・2）。\n### 確認したこと\n- 仕様、設計、`notes/*.py` の全ソースを通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、61 件すべてが OK だった。\n- 一時のインメモリ DB で重大1を再現した。他人の非公開メモが検索結果に出た。\n- SearchTest の setUp と既存のアサーションを読み、非公開メモの除外を確かめていないことを確認した。\n- `git history` と `trace` は実行していない。ファイルの書き換えはしていない。",
+ "files_changed": [],
+ "valid": true
+}

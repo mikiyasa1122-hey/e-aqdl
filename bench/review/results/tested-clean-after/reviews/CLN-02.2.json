@@ -1,0 +1,49 @@
+{
+ "case": "CLN-02",
+ "rep": 2,
+ "sec": 31.3,
+ "exit": 0,
+ "cost_usd": 0.11891810000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17156,
+  "cache_read_input_tokens": 124881,
+  "output_tokens": 3779,
+  "output_tokens_details": {
+   "thinking_tokens": 1382
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17156,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2042,
+    "cache_read_input_tokens": 37894,
+    "cache_creation_input_tokens": 6743,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6743
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8d27e925\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `list_notes`（notes/service.py:131-139）は COUNT と SELECT を別々に実行し、トランザクションで囲んでいない。他の接続の書き込みが間に入ると、total と items が食い違うことがある。仕様に一貫性の規定はないため欠陥とはしない。 / 提案: 必要になった時点で、読み取りを 1 つのトランザクションにまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当。作成時の検証（題名・本文・タグの形と数・文字列そのもののタグ）、途中失敗（hook `create:tags`）での巻き戻し、重複タグが保存時に除かれることを確かめている。実装は `_tag_list`、`_validate`、`transaction` で仕様どおり。\n- AC2: V2 は妥当。他の組織・他人の非公開・存在しないメモがすべて NotFound になり、その場合は閲覧数が増えない。判定後に隠された場合も NotFound になる。別接続・別スレッドからの同時閲覧で数え漏れがないことも、割り込み再現とスレッドの両方で確かめている。実装の `UPDATE views=views+1` は `BEGIN IMMEDIATE` の中で行われ、順序に依存しない。\n- AC3: V3 は妥当。page・per_page・sort の範囲外と bool、`%` と `_` と `\\` の部分一致、タグの OR 絞り込みとタグの検査を確かめている。実装は ESCAPE `'\\'` とプレースホルダーを使い、題名と本文の両方に同じエスケープ済みの値を渡している。タグの IN 句もプレースホルダーで、利用者の入力が SQL 文字列に入る経路はない。\n- AC4: V4 は妥当。作成者と管理者の更新・削除、他人の非公開メモが NotFound になること、古い version での Conflict を確かめている。読み出しと書き込みの間に更新が入った場合の Conflict、書き込み直前の権限の再確認、更新時の検証、失敗時に何も残らないこと、削除失敗が呼び出し側に伝わることも確かめている。実装は UPDATE の `WHERE version` と rowcount で判定し、認可と検証をトランザクション内で読み直した行に対して行っている。\n- AC5: V5 は妥当。管理者以外と組織をまたぐ場合の Forbidden、途中失敗での全件巻き戻しを確かめている。\n- AC6: V6 は妥当。実装は 8 文字未満をすべて伏せ、それ以上は末尾 4 文字以外を伏せている。\n- AC7: V7 は妥当。枠の境界（ちょうど window 秒で新しい枠）、拒否が枠を延長しないこと、スレッドでの同時呼び出し、判定の途中に割り込む hook を確かめている。実装は Lock の中で判定と加算を行う。sleep には依存していない。\n- AC8: V8 は妥当。期限ちょうど（`>=`）、改ざん、形の崩れ、末尾の改行を確かめている。実装は `fullmatch` と `compare_digest` を使っている。\n- AC9: V9 は妥当。ログ・例外・監査の detail に本文・署名・api_key が出ないことを確かめている。ログには ID だけを出す実装で、例外メッセージにも機密値は入らない。\n- AC10: V10 は妥当。`transaction` が BaseException で ROLLBACK し、ROLLBACK の失敗で元の例外を隠さない。例外の後に同じ接続で操作できることを確かめている。\n- リスク K1〜K8 は、上記のテストで確かめられている。テストの改ざん・弱体化は見つからなかった（`history` では要求・検証の追加のみ）。エンジンが検出したテストの兆候（skip、`.only`、アサーションなし）もなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、並行・失敗・境界は別接続・別スレッドと hook による単体テストで決定論的に確かめられている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、63 件すべて合格した。\n- notes/ の全ソース（db・service・ratelimit・share・errors）を仕様・設計と突き合わせて読んだ。次の点を確かめた。\n  - SQL のプレースホルダー、LIKE の ESCAPE、利用者の入力が SQL 文字列に入る経路がないこと\n  - 認可（`_visible` / `_can_modify`）が書き込み時に再確認されていること\n  - 楽観的ロックが UPDATE の条件で判定されていること\n  - 移管の組織検査\n  - 共有リンクの形式・期限・署名の検証\n- `aqdlc history --since 0` と `trace` を確認し、検証条件の弱体化がないこと、すべて unit・合格であることを見た。\n- `gate` の再実行と、コード・依存関係の変更はしていない。",
+ "files_changed": [],
+ "valid": true
+}

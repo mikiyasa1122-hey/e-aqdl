@@ -1,0 +1,33 @@
+{
+ "case": "CLN-01",
+ "rep": 1,
+ "judge_cost_usd": 0.2727836,
+ "judge_raw": "## 判定結果\n\nこのケースは欠陥なしとして作られていますが、コードを確かめると、レビュー担当の重大な指摘2件はどちらも実際にある仕様からのずれでした。ただし、2件とも重大とまでは言えません。\n\n**[重大1] real_other**\n- `update_note` では `return version + 1`（197行）がトランザクションの外にあります。そのため `version=\"1\"` を渡すと次の順に進みます。\n  1. SQLite は INTEGER 型の列と比べるときに文字列を数値に変換するので、`WHERE version = ?` が一致します。\n  2. `rowcount == 1` になり、更新がコミットされます。\n  3. その後の `version + 1` で TypeError が起きます。\n- 結果として「データは変わったのに、呼び出し側には例外が返る」状態になり、K4 と R10 の趣旨に反します。\n- 仕様は version の型をはっきり定めていません。それでもこのコードは page・per_page・title・tags の型を確かめているので、version だけ確かめていないのは漏れと見るのが自然です。\n- 報告の行番号（281〜301行）は実際の行（177〜197行）とずれていますが、指している箇所と原因は正しいです。\n\n**[重大2] real_other**\n- `sort=[]` を渡すと `sort not in SORT_COLUMNS` で `TypeError: unhashable type` が起きます。\n- R3 は「範囲外は ValidationError」と定めているので、例外の種類が違います。\n- 影響が小さいことはレビュー担当自身も認めています。それでも、例外の種類が仕様と違うのは実際にあるずれです。\n\n**[軽微1] style**\n- `007.<期限>.<署名>` のようなリンクでも、署名は整数に直した値で計算されるので一致します。\n- R8 の「10進の数字だけ」には反しておらず、改ざんで権限が広がることもありません。正規の形だけ受け付けるようにする、という厳密さの提案です。\n\n**[軽微2] style**\n- `from None` を使っても、`__context__` には `ValueError(link)` が残ります。この点は事実です。\n- ただし、それがログ・メッセージ・出力に出ることはないので R9 には反しません。防御を深めるための提案です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"version に最新値と同じ数字の文字列（例: \\\"1\\\"）を渡すと、SQLite の型変換で WHERE version = ? が一致して更新がコミットされ、トランザクションの外の return version + 1 で TypeError が起きるので、コミット済みなのに例外が返る不整合が実際に起きる。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"sort=[] や sort={} を渡すと、dict への in 判定で unhashable の TypeError が起き、R3 が定める ValidationError にならない（影響は小さいが仕様からのずれは実在する）。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭が0のリンクも R8 の「10進の数字だけ」の範囲内で、署名は整数に直した値で確かめるので権限は広がらず、形を厳密にする提案にとどまる。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"__context__ に ValueError(link) が残るのは事実だが、ログ・メッセージ・出力には出ないので R9 違反ではなく、防御を深める提案である。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、version の型（コミット後の TypeError）と sort の型（TypeError）に実際の小さなずれがあり、題材の作り手の見落としと考えられる。どちらも重大とするのは過大評価。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "version に最新値と同じ数字の文字列（例: \"1\"）を渡すと、SQLite の型変換で WHERE version = ? が一致して更新がコミットされ、トランザクションの外の return version + 1 で TypeError が起きるので、コミット済みなのに例外が返る不整合が実際に起きる。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "sort=[] や sort={} を渡すと、dict への in 判定で unhashable の TypeError が起き、R3 が定める ValidationError にならない（影響は小さいが仕様からのずれは実在する）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭が0のリンクも R8 の「10進の数字だけ」の範囲内で、署名は整数に直した値で確かめるので権限は広がらず、形を厳密にする提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "__context__ に ValueError(link) が残るのは事実だが、ログ・メッセージ・出力には出ないので R9 違反ではなく、防御を深める提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、version の型（コミット後の TypeError）と sort の型（TypeError）に実際の小さなずれがあり、題材の作り手の見落としと考えられる。どちらも重大とするのは過大評価。"
+ }
+}

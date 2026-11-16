@@ -1,0 +1,49 @@
+{
+ "case": "TD-04",
+ "rep": 3,
+ "sec": 102.3,
+ "exit": 0,
+ "cost_usd": 0.44410299999999997,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 33534,
+  "cache_read_input_tokens": 289075,
+  "output_tokens": 5898,
+  "output_tokens_details": {
+   "thinking_tokens": 1481
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 33534,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2670,
+    "cache_read_input_tokens": 59753,
+    "cache_creation_input_tokens": 655,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 655
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3472c88d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6, K1（notes/service.py `transfer_notes` 313〜326行） / 対応区分: 修正必須 / 内容: 移管先 `to_user` の組織を確かめていない。判定しているのは `admin[\"role\"]` と `from_user[\"org_id\"] == admin[\"org_id\"]` だけで（315〜318行）、R5 の「移す元・移す先・管理者がすべて同じ組織のときだけ（それ以外は Forbidden）」を満たしていない / 成立条件: 組織10の管理者が `transfer_notes(conn, admin, alice(org10), eve(org99))` を呼ぶ / 影響: Forbidden にならず移管が成立する。メモは `org_id=10, owner_id=9` という組織が食い違った状態になる。元の所有者は非公開メモを失い（NotFound）、移管先にも見えない（org が違うので NotFound）。組織の外の利用者にメモが渡るという K6 のリスクがそのまま起き、データ整合性も壊れる / 確認した保証: 上流に検証はない（仕様の対象外の欄で、呼び出し側が渡す dict の org_id は信用する前提）。DB にも owner と org の整合を保つ制約はない。tests/test_ac5_transfer.py には他の組織への移管を拒否するテストがない / 根拠: 再現スクリプトを実行した結果は `moved: 1`、行は `(org_id=10, owner_id=9)`、eve の get は NotFound、alice の update も NotFound / 提案: 317行の判定を `from_user[\"org_id\"] == to_user[\"org_id\"] == admin[\"org_id\"]` に直す。to_user の org が違う場合に Forbidden になり何も変わらないことを確かめるテストを test_ac5_transfer.py に足す（from_user が他の組織の場合も同じ）\n- [軽微1] 区分: 設計 / 対象: R1〜R10（trace の impl-map） / 対応区分: 改善提案 / 内容: impl-map では全要求の実装ファイルが `notes/__init__.py` になっている。設計の対応は service.py・ratelimit.py・share.py で、追跡表が実態と合っていない / 提案: impl-map を実際のファイルに直す\n- [軽微2] 区分: 実装 / 対象: R8, K8（notes/share.py 348行・370行） / 対応区分: 改善提案 / 内容: `007.<期限>.<署名>` のように先頭に0が付いたリンクも、int に変換してから署名を照合するので有効になる（実行して確認）。署名済みの値と同じなので改ざんとまでは言えず、仕様の「10進の数字だけ」にも反しないが、リンクの正規形が1つに決まらない / 提案: 先頭の0を拒否する（`0|[1-9][0-9]*`）か、文字列のまま署名を照合する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界値（100/101、10000/10001、空白だけ、20/21文字、改行、文字列の tags、重複の数え方）と、途中の失敗で3つの表がどれも0件のままになることを確かめており妥当\n- AC2: 他の組織、管理者を含む他人の非公開、存在しないメモがどれも NotFound になること、NotFound のときは閲覧数が増えないこと、確認の後に非公開へ変わった場合、ファイル DB に4スレッド×10回の閲覧をして40になることを確かめており妥当\n- AC3: 範囲（他の組織・他人の非公開・管理者）、並び順、ページング、範囲外の値・bool・型、% と _ と \\ を普通の文字として扱うこと、タグの OR、SQL の文字列を値として扱うこと、を確かめており妥当。SQL はすべてプレースホルダーで、LIKE は ESCAPE '\\' を付け、\\ 自体もエスケープしている。題名と本文の両方に同じパターンが渡っていることも確認した。ORDER BY は固定の対応表からだけ選んでいる\n- AC4: 作成者と管理者の許可、Forbidden と NotFound の区別、非公開メモは作成者だけ、古い version、読み出しと書き込みの間の割り込み（hook で決定論的に再現）、トランザクションの中での認可の再確認、更新時の入力検証、削除の途中の失敗と例外を伝えること、を確かめており妥当\n- AC5: 管理者以外を拒否すること・途中の失敗・version の増加は確かめているが、「移す先・移す元が他の組織なら Forbidden」の検証がない。そのため実装の欠陥（重大1）を見逃しており、不十分\n- AC6: 末尾4文字だけを出すこと、7文字・8文字・空の鍵の境界、管理者だけであること、他の組織のログが出ないことを確かめており妥当\n- AC7: 枠の境界（159.999 と 160.0）、拒否した呼び出しで枠が延びないこと、20スレッドを Barrier で同時に呼んでも5回だけ通ること、hook でのインターリーブを確かめており妥当（Event の待ち時間に上限はあるが、ロックがあれば結果は決定論的になる）\n- AC8: 期限ちょうどが無効であること、note_id・期限・署名の改ざん、別の鍵、形の崩れ（大文字、改行、アラビア数字、bytes など）を確かめており妥当\n- AC9: ログ・例外のメッセージ・監査ログの出力に、本文・署名・鍵・secret が出ないことを確かめており妥当\n- AC10: Conflict・ValidationError・注入した例外・外部キー違反・ROLLBACK できない状態の後も、接続を使い続けられることを確かめており妥当\n- K6/K1（移管）: 組織をまたぐ移管の検証がなく、空洞化している（重大1と同じ根本原因なので1件にまとめた）\n- エンジンが検出したテストの兆候: なし。history にある bind はどれも新規（before: null）で、検証の弱体化・改ざんは見られない\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、公開関数を実際の SQLite に対して直接呼ぶ単体テストが、利用者の経路をそのまま確かめているため）\n### 不足しているリスク\n- K6: 移管先（および移管元）が他の組織の場合の拒否と、そのとき元のままであることの検証がない（重大1）\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）→ 62件すべて合格\n- スクラッチパッドの再現スクリプト（メモリ上の DB）で他の組織への移管を試した → Forbidden にならず `moved: 1`、行は (10, 9) になり、eve も alice も NotFound\n- `share.verify_link` に先頭に0が付いたリンクを渡した → 7 が返り、有効と判定された\n- `$AQ history --since 0`・`$AQ trace` を確認 → 検証は弱められていない。trace の実装ファイルはすべて `__init__.py`\n- gate のログ（20261111-091616-check-unit.log）を確認 → 62件合格\n- `git status` / `git diff` → 追跡中のファイルに変更なし。実装・テストは未追跡（未コミット）。レビュー中にファイルは変更していない",
+ "files_changed": [],
+ "valid": true
+}

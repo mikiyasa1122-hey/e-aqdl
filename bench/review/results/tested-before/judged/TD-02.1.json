@@ -1,0 +1,23 @@
+{
+ "case": "TD-02",
+ "rep": 1,
+ "judge_cost_usd": 0.1133002,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込まれた欠陥と同じ箇所（`list_notes` の OFFSET）で、原因も影響も一致しています。\n- 原因: `MAX_OFFSET` が定義されているのに使われておらず、OFFSET が SQLite の整数範囲を超えるかを確かめないまま SQL に渡している。\n- 影響: `page=2**64` で ValidationError でも空の結果でもなく、OverflowError になる。\n- 再現の根拠も挙げています。したがって matches_defect です。\n\n**軽微1**: `search_notes` のタグ検査が `_validate` と重複している、という保守性の提案です。欠陥の主張ではないので style です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で OFFSET が SQLite の整数範囲を超えるか確かめず（MAX_OFFSET が未使用）、page=2**64 で OverflowError になると原因・影響・再現を正しく指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"search_notes のタグ検査の重複を共通化する保守性の提案であり、欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（巨大な page で OverflowError）を箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で OFFSET が SQLite の整数範囲を超えるか確かめず（MAX_OFFSET が未使用）、page=2**64 で OverflowError になると原因・影響・再現を正しく指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "search_notes のタグ検査の重複を共通化する保守性の提案であり、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（巨大な page で OverflowError）を箇所・原因・影響とも正確に捉えている。"
+ }
+}

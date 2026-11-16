@@ -1,0 +1,49 @@
+{
+ "case": "TD-05",
+ "rep": 3,
+ "sec": 93.1,
+ "exit": 0,
+ "cost_usd": 0.34658,
+ "num_turns": 6,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 24916,
+  "cache_read_input_tokens": 216920,
+  "output_tokens": 5191,
+  "output_tokens_details": {
+   "thinking_tokens": 1202
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24916,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2945,
+    "cache_read_input_tokens": 46609,
+    "cache_creation_input_tokens": 5179,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5179
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "独立レビューが終わりました。結論は**要修正**です。重大な欠陥を1件見つけ、実行して再現を確認しています。\n\n## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 78281336\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1（notes/service.py `search_notes` 258〜259行） / 対応区分: 修正必須 / 内容: 検索の WHERE 句が `org_id = ?` だけで、`private = 0 OR owner_id = ?` の条件がない。このため同じ組織の他人の非公開メモが検索結果に出る（題名と ID が漏れる）。R3 の「他人の非公開メモは含めない」に反する / 成立条件: 同じ組織の利用者（管理者も含む）が、他人の非公開メモの題名・本文に含まれる語で search_notes を呼んだとき / 影響: 非公開メモの存在・題名・ID が組織内の他の利用者に漏れる（K1）。get_note では NotFound で隠しているのに、検索からは存在が分かり、R2 の「存在を明かさない」も崩れる / 確認した保証: 呼び出し元や DB の制約に、非公開を除く仕組みはない。list_notes（241行）には条件があるが、search_notes では使われていない。既存のテストも防いでいない / 根拠: 再現スクリプトで、bob の非公開メモ「secret plan」が alice の `search_notes(c, alice, \"secret\")` にも、管理者の検索にも返った。テスト（tests/test_ac3_list_search.py SearchTest）は bob の非公開メモ「secret 100%」を用意しているのに、そのメモに当たる語（\"secret\" や \"100%\"）で検索していない / 提案: search_notes の WHERE を `org_id = ? AND (private = 0 OR owner_id = ?)` にして、引数に `user[\"id\"]` を加える（list_notes と同じ条件を使う）\n- [重大2] 区分: テスト / 対象: AC3, K1, K2 / 対応区分: 証拠不足 / 内容: (a) 検索で他人の非公開メモが除かれることを確かめるテストがない。(b) R3 の「% と _ も普通の文字として探す」を確かめるテストもない。\"100% done\"・\"file_name\" のデータはあるが、\"%\" や \"_\" を含む語で検索しておらず、ESCAPE を外しても通ってしまう / 根拠: K1（漏えい）は重要なリスクで、AC3 は検索の範囲と LIKE の扱いを求めている。実際に (a) の欠陥はテストをすり抜けた。いまの LIKE のエスケープは手で確かめると正しく動く（\"0%\" は 100% done だけ、\"e_n\" は file_name だけに当たる）が、それを守るテストがない / 提案: bob の非公開メモに当たる語で alice と管理者が検索したときに含まれないこと、bob 本人には含まれることを確かめる。\"0%\"→[a]（1000 done を含まない）、\"e_n\"→[b]（filexname を含まない）、\"\\\\\" を含む語を確かめるテストも加える\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: update_note の version に型の検査がない（bool の True は 1 と同じに扱われる）。呼び出し側の誤りが分かりにくい / 提案: list_notes と同じように、int で bool ではないことを確かめる\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成・拒否・途中の失敗でのロールバックを hooks で確かめるテストがあり、テストの構成は妥当（コードとテストの全体を通した確認はしていない）\n- AC2: 見えないメモがすべて NotFound になること、見えない閲覧で数が増えないこと、確かめた後に非公開になる競合（hook）、4スレッド×10回のファイル DB で閲覧数が 40 になることを確かめており、妥当\n- AC3: 一覧の範囲・並び順・ページ・不正な入力は妥当。検索は、他人の非公開を除くことと、% と _ を普通の文字として扱うことの検証がないため不十分（[重大1][重大2]）\n- AC4: 作成者と管理者の許可、他人は Forbidden・他組織と非公開は NotFound、古い version の Conflict、読み出しと書き込みの間の競合（hook）、トランザクションの中での認可の再確認、入力の検証、削除の失敗時のロールバックと例外が伝わることを確かめており、妥当\n- AC5: test_ac5_transfer.py は中身を読んでいない（未確認）。実装は管理者・同じ組織の条件と、1つのトランザクションでの移管になっている\n- AC6: test_ac6_audit.py は中身を読んでいない（未確認）。実装は8文字未満の鍵をすべて伏せ、それ以外は末尾4文字だけを出す\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier による20スレッドの同時呼び出し、hook で割り込みの順序を決めたテストがあり、妥当\n- AC8: test_ac8_share.py は読み切れていない（未確認）。実装は fullmatch での形の検査、期限の時刻ちょうどを無効とすること、compare_digest での比較になっている\n- AC9: test_ac9_secrets.py は中身を読んでいない（未確認）。コードを見た範囲では、ログには ID だけを出し、例外のメッセージに本文・署名・鍵を含めていない\n- AC10: test_ac10_recovery.py は中身を読んでいない（未確認）。transaction() は例外のときに ROLLBACK し、例外をそのまま伝える\n- K1: 閲覧・一覧・更新・削除は妥当。検索に漏えいがあり、そのテストもない（[重大1][重大2]）\n- K2: SQL はすべてプレースホルダーで値を渡している。sort はホワイトリストの辞書、タグの IN 句は ? の数だけを組み立てている。SQL の文字列による攻撃（\"' OR 1=1 --\"）のテストはあるが、LIKE のワイルドカードのテストはない（[重大2]）\n- K3: 閲覧数・楽観的ロック・回数の制限の競合を、hook と Barrier を使い、sleep に頼らずに確かめており、妥当\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見当たらない）\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、本物の SQLite に対する unittest が利用の経路そのものになっているため）\n### 不足しているリスク\n- R3/K1: 検索の範囲に、非公開メモを除く検証が抜けている（[重大1][重大2]で指摘済み）\n### 確認したこと\n- `$AQ trace`：すべての受け入れ条件とリスクが unit の検証に結び付き、gate 20261111-091648 は合格。反証テストは無効\n- `$AQ history --since 0`：検証条件の追加と結び付けだけで、弱めたり消したりした履歴はない\n- `git status`：notes/ と tests/ はどちらも未追跡で、比べる元のテストがないため改ざんはない\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . -q`：61件すべて合格（gate のログと同じ）\n- メモリ上の DB で再現スクリプトを実行：他人の非公開メモが、同じ組織の利用者と管理者の検索に返ることを確かめた。\"0%\" と \"e_n\" の検索は、普通の文字として正しく当たることを確かめた\n- notes/*.py をすべて読んだ。tests/base.py、test_ac2・test_ac3・test_ac4・test_ac7 は読んだ。test_ac1・test_ac5・test_ac6・test_ac9・test_ac10 は読んでおらず、test_ac8 は読み切れていない。そのため AC1 の評価はテストの構成からの判断にとどまり、AC5・AC6・AC8・AC9・AC10 の検証の妥当性は未確認",
+ "files_changed": [],
+ "valid": true
+}

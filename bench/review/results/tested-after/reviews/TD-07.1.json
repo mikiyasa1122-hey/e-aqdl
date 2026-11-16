@@ -1,0 +1,49 @@
+{
+ "case": "TD-07",
+ "rep": 1,
+ "sec": 23.7,
+ "exit": 0,
+ "cost_usd": 0.1242047,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 20416,
+  "cache_read_input_tokens": 160807,
+  "output_tokens": 2644,
+  "output_tokens_details": {
+   "thinking_tokens": 606
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20416,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1480,
+    "cache_read_input_tokens": 40822,
+    "cache_creation_input_tokens": 223,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 223
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7dd26fa8\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 共有リンクの期限の境界が仕様と逆。仕様は「期限の時刻ちょうど以降は無効」だが、実装は期限ちょうどでも有効と判定する。 / 成立条件: `now == expires`（例: `make_link(..., now=1000, ttl_sec=60)` で作ったリンクを `now=1060` で検証）。 / 影響: 期限切れのリンクが1秒分通り、K8（期限切れリンクを通す）が起きる。 / 根拠: notes/share.py の `verify_link` 内の `if int(now ...) > expires:`。実行で `verify_link('s', link, now=1060)` が 7 を返すことを確認した。上流の検証や DB の制約でこの判定は補われない。 / 提案: 比較を `>=` に直す。\n- [重大2] 区分: テスト / 対象: AC8, K8 / 対応区分: 証拠不足 / 内容: tests/test_ac8_share.py に、期限切れ・期限ちょうどを確かめるテストがない。確かめているのは now=1059（有効）だけで、now=1060 と now=1061 以降で Forbidden になることは確かめていない。 / 根拠: AC8 は「期限の境界を含む」と明記している。そのため重大1の欠陥も、62件すべて合格のまま見逃されている。 / 提案: now=exp-1 で有効、now=exp と now=exp+1 で Forbidden になるテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create.py が検証規則と失敗時のロールバックを確認しており、コードの経路とも一致している。妥当。\n- AC2: 可視性の規則と閲覧数を確認しており、hooks で判定の後に割り込む場合も確認している。妥当。\n- AC3: 範囲外の入力、LIKE のエスケープ、タグの OR を確認している。SQL はプレースホルダーと ESCAPE で組み立てられている。妥当。\n- AC4: 認可、Conflict、非公開メモ、削除の失敗を確認している。妥当。\n- AC5: 組織をまたぐ移管の拒否と、全部か何もしないかを確認している。妥当。\n- AC6: 8文字未満と8文字以上の伏せ方を確認している。妥当。\n- AC7: 枠の境界は `>=` で仕様どおり。hook を使って決定論的に並行実行を再現している。妥当。\n- AC8: 形式の崩れと改ざんは網羅されているが、期限の境界と期限切れは未検証。不十分（重大1・2）。\n- AC9・AC10: テストが通ることを確認した。コードにも本文・署名・api_key をログや例外に出す箇所は見つからなかった。ROLLBACK も例外経路で実行される。妥当。\n- エンジンが検出したテストの兆候はなし。履歴上の検証の弱体化も確認していない（git のコミットは初期状態の1件だけ）。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest が SQLite の実物に対して実行されている）。\n### 不足しているリスク\n- K8: 期限の境界の検証が欠けている（重大2）。それ以外は、R1〜R7・R9・R10 に未対応のリスクは見つからなかった。\n### 確認したこと\n- `python3 -m unittest discover` で 62 件が OK。\n- service.py・ratelimit.py・share.py・db.py を全読みした。認可（`_visible`・`_can_modify`）、SQL のプレースホルダーと LIKE の ESCAPE、トランザクションの境界、楽観的ロック、移管、api_key の伏せ方、RateLimiter の排他を仕様と突き合わせた。\n- `verify_link` を `now=1060`（期限ちょうど）で実行し、7 が返ること（仕様違反）を確認した。",
+ "files_changed": [],
+ "valid": true
+}

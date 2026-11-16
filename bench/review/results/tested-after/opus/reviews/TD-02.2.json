@@ -1,0 +1,49 @@
+{
+ "case": "TD-02",
+ "rep": 2,
+ "sec": 88.2,
+ "exit": 0,
+ "cost_usd": 0.5475744,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 40039,
+  "cache_read_input_tokens": 304032,
+  "output_tokens": 8320,
+  "output_tokens_details": {
+   "thinking_tokens": 3476
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 40039,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3174,
+    "cache_read_input_tokens": 65243,
+    "cache_creation_input_tokens": 2225,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2225
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fda594\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3（notes/service.py:244-247 `list_notes`、:121 `MAX_OFFSET`） / 対応区分: 修正必須 / 内容: 仕様では page は「1以上」が正しい値です。しかし、(page-1)*per_page が SQLite の整数の上限（2^63-1）を超えると、`OverflowError: Python int too large to convert to SQLite INTEGER` が出ます。これは ValidationError でも結果の一覧でもありません。`MAX_OFFSET` は「これを超える page は結果なしにする」というコメント付きで定義されていますが、どこからも使われていません。 / 成立条件: page=2**62、per_page=50 のように、offset が 2^63-1 を超える正の整数の page を渡したとき（per_page=1 なら page≥2^63+1）。 / 影響: 仕様の範囲内の入力なのに、業務エラー（NotesError）ではない例外で落ちます。呼び出し側は NotesError を前提に扱うため、取り扱えない例外が上がります。データは壊れず、トランザクションの外なので接続も使い続けられます。 / 確認した保証: 上流の検査は `isinstance(page,int) and page>=1` だけで、上限はありません。呼び出し側での制限は対象外（HTTP なし）です。既存のテスト（test_paging）は page=3 までしか確かめていません。 / 根拠: 実行した probe で page=2**40 と 2**57 は `[]` でした。page=2**62 と 10**20 は OverflowError でした。 / 提案: `offset > MAX_OFFSET` なら SQL を実行せずに `items: []`（total は COUNT の値）を返し、そのテストを足す。\n\n- [軽微1] 区分: 実装 / 対象: R4, AC4（notes/service.py:281-301 `update_note`） / 対応区分: 改善提案 / 内容: version の型を検査していません。`version=\"2\"` を渡すと、SQLite の型の親和性で `version = '2'` が一致し、UPDATE はコミットされます。その後 `return version + 1` で TypeError になるため、更新は確定したのに呼び出し側には例外が返ります。`True` は 1 として扱われます。version の型は仕様にないため改善提案にしています。 / 提案: 冒頭で `isinstance(version, int) and not isinstance(version, bool)` を確かめ、違えば ValidationError にする。\n\n- [軽微2] 区分: 実装 / 対象: R8, R9（notes/share.py:348, 369-372） / 対応区分: 改善提案 / 内容: (a) 数字を `{1,18}` 桁に制限しています。仕様は「10進の数字だけ」で桁数を定めていないので、19桁以上の note_id で make_link が作ったリンクを verify_link が通しません（実際に使う範囲では問題ありません）。(b) `ValueError(link)` に署名を含むリンクを入れています。`from None` で表示はされませんが、`__context__` には残ります。 / 提案: 桁の制限を仕様にそろえるか、make_link 側でも同じ制限をかける。ValueError に link を入れない。\n\n- [軽微3] 区分: テスト / 対象: AC4, K3 / 対応区分: 改善提案 / 内容: 更新の競合は、hook を使い同じ接続で入れ子に呼ぶ形で再現しており、決定論的で妥当です。ただし、別スレッド・別接続での BEGIN IMMEDIATE とロック待ちの組み合わせは、閲覧数でしか確かめていません。 / 提案: 2つの接続から同じ version で更新し、一方だけが成功してもう一方が Conflict になるテストを足す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグの境界（100/101、10000/10001、空白だけ、改行付きタグ、型の違い、文字列の tags、重複を数えて保存は除く）を確かめています。hook で途中に失敗させ、notes・note_tags・audit が0件のままになることも確かめており妥当です。\n- AC2: 他の組織・他組織の管理者・他人の非公開・管理者から見た非公開・存在しない ID の5通りがどれも NotFound になることを確かめています。確かめた後に非公開になる場合と、4スレッド×10回の別接続での閲覧数（40）も確かめており妥当です。\n- AC3: 範囲・ソート・ページ・不正な入力（bool・float・文字列・SQL 片）、% と _ と \\ を普通の文字として扱うこと、タグの OR、範囲（他組織と他人の非公開）を確かめており概ね妥当です。ただし、巨大な page を確かめていないため [重大1] を見逃しています。\n- AC4: 作成者と管理者の許可、他人の Forbidden、他組織と非公開の NotFound、古い version、読み出しと書き込みの間の更新（hook）、書き込みの中での認可のやり直し、更新での入力検証、削除の途中の失敗のロールバックと例外の伝わり方を確かめており妥当です。\n- AC5: 管理者だけであること、組織をまたぐ4通りの組み合わせ、途中の失敗で何も移らないこと、非公開のメモも移ること、監査ログを確かめており妥当です。\n- AC6: 末尾4文字だけ見えること、7文字はすべて伏せ、8文字は末尾4文字だけ見えるという境界、空文字、他組織のログが含まれないこと、管理者だけであることを確かめており妥当です。\n- AC7: 枠の境界（159.999 では拒否、160.0 では新しい枠）、拒否された呼び出しが枠を延ばさないこと、Barrier を使った20スレッドの同時呼び出し、hook で判定の途中に割り込む直列化を確かめています。sleep に頼っておらず妥当です。\n- AC8: 期限ちょうど、改ざん（id・期限・署名・鍵）、形の崩れ（大文字・改行・前後の空白・負の数・指数表記・アラビア数字・型の違い）を確かめており妥当です。\n- AC9: ログ・例外のメッセージ・監査ログの出力に、本文・署名・api_key・秘密鍵が出ないことを確かめており妥当です。\n- AC10: Conflict・ValidationError・注入した例外・IntegrityError・ROLLBACK がすでに済んだ状態の後でも、in_transaction=False で次の操作ができることを確かめており妥当です。\n- K1/K2/K3/K4/K5/K6/K7/K8: 上の各テストで確かめています。K2 は、LIKE の ESCAPE と、動的に作る部分がホワイトリストの ORDER BY 句とプレースホルダーの数だけであることを、コードでも確かめました。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは見つかりませんでした。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、仕様でも対象外です。実際の SQLite（ファイル DB と複数の接続を含む）を使う単体テストで十分です。\n\n### 不足しているリスク\n- R3: 仕様の範囲内の巨大な page（[重大1]）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）: 62件すべて合格。gate のログ 20261111-085447-check-unit.log も exit=0 で62件合格。\n- probe スクリプト（スクラッチパッド内）での確認:\n  - list_notes で page=2**62 と 10**20 が OverflowError になる。\n  - update_note で version=\"2\" はコミットされた後に TypeError になる。\n  - 19桁の期限のリンクは Forbidden になる。\n- `$AQ trace`: すべての AC とリスクにテストが対応し、合格している（反証テストは無効）。\n- `$AQ history --since 0`: 検証条件は追加と bind だけで、削除や弱める変更はない。git では全ファイルが未追跡（初期のコミット以降）で、既存のテストを書き換えた跡はない。\n- コードをたどった範囲:\n  - 認可は _visible と _can_modify を、更新と削除ではトランザクションの中で読み直した行に適用している。\n  - 閲覧数は BEGIN IMMEDIATE の中で `views = views + 1` として増やしている。\n  - 移管は、管理者・組織の確認と、org_id での WHERE をトランザクションの中で行っている。\n  - SQL はすべてプレースホルダーを使い、LIKE は `\\` をエスケープ文字にして `\\`・%・_ をエスケープしている。\n  - 伏せ字の境界と、RateLimiter のロックの中での時刻の取得と判定を確かめた。",
+ "files_changed": [],
+ "valid": true
+}

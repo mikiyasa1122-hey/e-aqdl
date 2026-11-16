@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 3,
+ "sec": 23.9,
+ "exit": 0,
+ "cost_usd": 0.09522230000000001,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13557,
+  "cache_read_input_tokens": 126583,
+  "output_tokens": 2832,
+  "output_tokens_details": {
+   "thinking_tokens": 319
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13557,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1867,
+    "cache_read_input_tokens": 39227,
+    "cache_creation_input_tokens": 1796,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1796
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6, R10 / 対応区分: 修正必須 / 内容: `transfer_notes`（notes/service.py:209-223）が全部移すか何も移さないかを守っていない。メモ1件ごとに別のトランザクション（217-220行）で UPDATE し、監査ログは最後の別トランザクション（221-222行）で書いている。 / 成立条件: 移す対象が2件以上あり、2件目以降の UPDATE か監査ログの書き込みで失敗する（ロック待ちのタイムアウト、プロセスの停止、`hooks.before_write(\"transfer:<id>\")` で例外が起きるなど）。 / 影響: 一部のメモだけ to_user に移り、残りは from_user に残る。1件目はコミット済みで巻き戻らない。全件を移した後に監査ログだけ失敗した場合も、移管の記録なしでメモが移ったままになる。R5 の「途中で失敗したら元のまま」に違反する。メモの所有者、つまり閲覧・変更の権限が不整合になる。 / 確認した保証: 呼び出し元に外側のトランザクションはない。接続は自動コミットで、DB の制約でも防げない。ids の取得（215行）もトランザクションの外にあり、取得後に別の接続でメモが追加・移管されても拾えない。tests/test_ac5_transfer.py には失敗時のテストが1件もない。 / 根拠: service.py:215-222 のコードの経路。`hooks.before_write(f\"transfer:{i}\")` を2件目で失敗させれば、1件目だけ owner_id が変わって残る。 / 提案: ids の取得・全件の UPDATE・監査ログの INSERT を1つの `with transaction(conn):` にまとめる。フックは UPDATE の途中に残す。\n- [重大2] 区分: テスト / 対象: AC5, K4, K6 / 対応区分: 証拠不足 / 内容: 移管の失敗時に元のままであることを確かめるテストがない。AC1・AC4 には fail_at を使った巻き戻しのテストがあるが、AC5 にはない。 / 根拠: AC5 に「失敗時に元のまま」が明記されており、実際に重大1の欠陥がテストをすべて通過している。 / 提案: `service.hooks.before_write` で `transfer:<2件目の id>` を失敗させ、全メモの owner_id・version が移管前のままで、監査ログも増えていないことを確かめるテストを追加する。監査ログの書き込みで失敗する場合も確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: tests/test_ac1_create.py が検証の規則と、タグ挿入時の失敗による巻き戻しを確かめている。実装（service.py:93-105）も1つのトランザクションで妥当。\n- AC2: 実装は非公開・他組織・不在を NotFound にまとめ、閲覧数の加算と再判定を同じトランザクションで行う。並行の検証あり。妥当。\n- AC3: LIKE のエスケープ（`\\`・`%`・`_`）、ESCAPE 句、プレースホルダー、tags の検査、page と per_page の範囲検査（bool も拒否）を確認した。妥当。\n- AC4: version を条件にした UPDATE と rowcount による判定、トランザクション内での認可の再判定、delete の失敗時の巻き戻しを確認した。妥当。\n- AC5: 不十分。正常系・権限・組織違いは確かめているが、失敗時に元のままであることは確かめていない（重大1・2）。\n- AC6: export_audit の伏せ方（8文字未満は全部、それ以外は末尾4文字を残す）は仕様どおり。\n- AC7: ロック内で判定して数えており、枠の境界は `>=`。仕様どおり。\n- AC8: fullmatch と compare_digest を使っており、期限は `>=` で無効にする。妥当。\n- AC9・AC10: ログには ID だけを出し、`_rollback` で例外を隠さない。エンジンが検出したテストの兆候はなし。\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、unittest が DB を含めて検証している）。\n### 不足しているリスク\n- K4・K6: 移管の途中失敗に対する検証がない。上の重大2を参照。\n### 確認したこと\n- spec.md・design.md・notes/*.py の全体を読み、各 R の経路を追った。\n- `python3 -m unittest discover -s . -t .` を実行し、62件が OK だった。ただし AC5 の失敗系はテストが存在しない。\n- skip・.only の兆候がないこと（エンジンの検出結果）を確認した。\n- SQL は全てプレースホルダーを使い、LIKE には ESCAPE を付けていた。f 文字列で埋め込まれているのは固定のカラム名と ? の個数だけ。\n- `$AQ history` と `$AQ trace` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

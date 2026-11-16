@@ -1,0 +1,23 @@
+{
+ "case": "TD-02",
+ "rep": 3,
+ "judge_cost_usd": 0.1125202,
+ "judge_raw": "重大1は、埋め込んだ欠陥そのものを指摘しています。箇所は notes/service.py の list_notes で、原因は OFFSET が SQLite の整数の範囲を超えるかを確かめずに SQL に渡している点です。影響は、ValidationError でも空の結果でもなく OverflowError になる点です。報告はこの原因と影響の両方を述べ、実際に再現もしています。\n\n軽微1は、共有リンクの先頭ゼロを許してしまう点です。仕様は「note_id と期限は10進の数字だけ」としており、先頭ゼロは仕様違反とまでは言えません。報告自身も欠陥ではないと述べているので、style に分類します。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で offset の上限を確かめずに SQL へ渡すため、巨大な page で OverflowError になるという、埋め込んだ欠陥の原因と影響を再現付きで指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロ付きのリンクが有効になるのは仕様違反とは言えず、報告自身も欠陥扱いしていない改善提案である。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥（巨大な page による OverflowError）を、原因・影響・箇所とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で offset の上限を確かめずに SQL へ渡すため、巨大な page で OverflowError になるという、埋め込んだ欠陥の原因と影響を再現付きで指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロ付きのリンクが有効になるのは仕様違反とは言えず、報告自身も欠陥扱いしていない改善提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥（巨大な page による OverflowError）を、原因・影響・箇所とも正しく指摘している。"
+ }
+}

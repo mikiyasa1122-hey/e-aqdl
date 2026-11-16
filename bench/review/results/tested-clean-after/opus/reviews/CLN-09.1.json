@@ -1,0 +1,49 @@
+{
+ "case": "CLN-09",
+ "rep": 1,
+ "sec": 112.2,
+ "exit": 0,
+ "cost_usd": 0.6824534,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 16,
+  "cache_creation_input_tokens": 50524,
+  "cache_read_input_tokens": 360087,
+  "output_tokens": 10309,
+  "output_tokens_details": {
+   "thinking_tokens": 5539
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 50524,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3355,
+    "cache_read_input_tokens": 69546,
+    "cache_creation_input_tokens": 1558,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1558
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 542df200\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, AC4, R10 / 対応区分: 改善提案 / 内容: `update_note` は `version` の型を確かめていない。文字列の `\"1\"` を渡すと、SQLite の型の変換で `WHERE version = '1'` が一致して更新がコミットされる。そのあと `return version + 1`（notes/service.py:301）で TypeError になる。呼び出し側には失敗に見えるが、データは更新されている（scratchpad の probe で再現: version=2, body='x'）。version の型は仕様に規定がないので、改善提案にとどめる / 提案: トランザクションの前で `version` が int であること（bool は除く）を確かめ、違えば ValidationError にする。または戻り値を `UPDATE ... RETURNING version` やコミット前の値から作る\n- [軽微2] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `LINK_RE`（notes/share.py:11）は先頭の0を受け付ける。`007.<期限>.<署名>` も note 7 として通る（probe で確認）。署名した内容（`7:期限`）と同じ意味なので偽造にはならないが、同じリンクを表す文字列が複数できる。また、桁数の上限 18 は仕様にない制約で、19桁の note_id を表せない / 提案: 先頭の0を拒む形（`0|[1-9][0-9]*`）にして、リンクの表し方を1つにそろえる。桁数の上限は仕様か設計に書く\n- [軽微3] 区分: 設計 / 対象: R1〜R10 / 対応区分: 改善提案 / 内容: trace の impl-map では、全要求の実装ファイルが `notes/__init__.py`（空のファイル）になっている。実際の実装は service.py・ratelimit.py・share.py で、設計書の「要求との対応」とも合わない。要求から実装をたどれない / 提案: impl-map を設計書どおりの実装ファイルに直す\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create が次を確かめており妥当。題名の境界（0・100・101文字、空白だけ、型の違う値）、本文の境界（10000・10001文字）、タグの規則（大文字、21文字、改行の前後、`_`、日本語、非 str）、タグの個数は重複を数えて保存は重複を除くこと、文字列の tags を拒むこと、検証での拒否と途中の失敗（hook）のあとに notes・note_tags・audit の3表がすべて0件であること、監査が同時に記録されること。\n- AC2: 他の組織（管理者を含む）・他人の非公開（同じ組織の管理者を含む）・存在しない ID がすべて NotFound になること、NotFound では閲覧数が増えないこと、判定の後に非公開に変わった場合を確かめており妥当。閲覧数はファイル DB を使い、4スレッドが別々の接続で40回閲覧して40になることを確かめている。コードでも `views = views + 1` を BEGIN IMMEDIATE の中で原子的に増やしており、数え漏れはない。\n- AC3: 範囲と並び順、ページの境界（per_page=50/51/0、page=0/-1、bool・str・float、巨大な page）、sort の許可リスト（`title; DROP` を含む）、`%`・`_`・`\\` をそのままの文字として扱うこと、題名と本文の両方を探すこと、タグの OR、タグの検証を確かめており妥当。K2: 値はすべて `?` で渡している。ORDER BY は許可リストの辞書からだけ組み立て、IN 句のプレースホルダーの数は検証済みのタグの数から作る。LIKE は `\\` を先にエスケープし、`ESCAPE '\\'` を題名と本文の両方の条件に付けていることをコードで確認した。\n- AC4: 作成者と同じ組織の管理者による更新・削除、他人は Forbidden、他の組織と非公開は NotFound を確かめている。古い version は Conflict。読み出しと書き込みの間に他の更新が入った場合は、hook で決定論的に再現して Conflict になり、先の更新が残ることを確かめている。変えない項目を最新の行から取ること、判定の後に移管されたら Forbidden になること、R1 と同じ入力検証、途中で失敗した削除で巻き戻り例外が伝わることも確かめており妥当。コードでは `WHERE id=? AND version=?` と rowcount で判定しており、条件を外せば test_stale_version_conflicts と test_concurrent_update_between_read_and_write_conflicts が失敗する。\n- AC5: 非公開を含めて全部移ること、管理者以外を拒むこと、組織をまたぐ4通りの組み合わせを拒むこと、途中で失敗したら元のままであること、version が上がることを確かめており妥当。\n- AC6: 末尾4文字以外を伏せること、7文字・8文字・0文字の境界、管理者だけであること、自分の組織だけであることを確かめており妥当。\n- AC7: 時刻を差し替えて、枠の境界（159.999秒は拒否、160.0秒で新しい枠）を確かめている。同時の呼び出しは Barrier を使った20スレッドと、hook で判定の途中に割り込む決定論的な順序で確かめており妥当。判定から記録までがロックの中にあることもコードで確認した。\n- AC8: 期限ちょうどが無効になること、note_id・期限・署名の改ざん、別の鍵、形の崩れ（大文字の署名、末尾の改行、先頭の空白、負の数、指数表記、全角などの Unicode の数字、None・int・bytes）を確かめており妥当。比較は hmac.compare_digest を使っている。\n- AC9: ログ・例外のメッセージ・監査の出力に、本文・署名・鍵・秘密鍵が出ないことを確かめており妥当。log.info に出るのは ID と期限だけ。verify_link は `from None` で元のリンクを含む例外を切っている。\n- AC10: Conflict・ValidationError・hook での失敗・外部キー違反・SQLite がすでにロールバックした状態のそれぞれのあとで、`in_transaction` が False になり、次の操作が成功することを確かめており妥当。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストがないことを目視でも確認した。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、HTTP の API は対象外。並行実行は、ファイル DB に別々の接続で書く結合のテストと、hook による決定論的な再現で確かめている）\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- spec.md・design.md と notes/*.py・tests/*.py をすべて読み、要求ごとに呼び出しの入口から SQL・認可・トランザクション・戻り値まで追った。\n- `python3 -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）: 63件がすべて合格。gate のログ 20261111-085512-check-unit.log も63件がすべて合格。\n- `$AQ trace`: R1〜R10・K1〜K8 はすべて合格（反証テストは無効）。impl-map の実装ファイルの対応がずれている（軽微3）。\n- `$AQ history --since 0`: 検証条件の弱体化・削除はない（check.add が1件、bind だけ）。git では main に未追跡の成果物があり、既存の追跡ファイルへの差分はない。\n- scratchpad の probe（`python3 -I`）で次を確認した: 文字列の version で更新がコミットされたあと TypeError になる（軽微1）、先頭0のリンクが通る（軽微2）、ASCII の大文字と小文字を区別しない LIKE（仕様に規定がないので指摘しない）。\n- テストにない入力と順序も、コードの経路で確かめた:\n  - 型の違う note_id や org_id は、比較で一致しないので、見えない・拒否される側に倒れる。\n  - トランザクションの前の検証で例外が出たときは、トランザクションを開いていない。\n  - 移管先の利用者が存在しなければ外部キー違反で全体がロールバックされる。\n  - 削除と更新が競合しても、更新はトランザクションの中で読み直すので NotFound になる。\n  - COMMIT が失敗しても `_rollback` が実行される。\n- 対象外とした点: 移す元・移す先の利用者の dict の org_id を DB の値と照合していない。仕様の「対象外」で、呼び出し側の dict を信用すると決めているので、指摘にしていない。",
+ "files_changed": [],
+ "valid": true
+}

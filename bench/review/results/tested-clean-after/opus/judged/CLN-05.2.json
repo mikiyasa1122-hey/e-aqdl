@@ -1,0 +1,33 @@
+{
+ "case": "CLN-05",
+ "rep": 2,
+ "judge_cost_usd": 0.27945960000000003,
+ "judge_raw": "## CLN-05 判定結果\n\nこのケースには欠陥を埋め込んでいません（タグの読み出しを関数に分けただけ）。そのため、どの指摘にも matches_defect は使いません。コードとテストに照らして、指摘を1つずつ確かめました。\n\n### [重大1] sort にハッシュできない値を渡すと TypeError になる → real_other\n- **指摘は正しい。** `notes/service.py` の139行目 `if sort not in SORT_COLUMNS:` は dict のキーを探すので、`sort=[\"updated\"]` のようなリストや dict を渡すと `TypeError: unhashable type` になります。\n- **仕様に反する。** 仕様 R3 は「sort は updated か title だけ。範囲外は ValidationError」と決めています。リストはどちらでもない値なので ValidationError になるべきです。\n- **テストも試していない。** `test_invalid_paging_and_sort` が試している不正な sort は、文字列の `\"id\"` と `\"title; DROP\"` だけです。\n- **ただし重さは言い過ぎ。** データにも漏えいにも影響しない入力検証のずれなので、「重大」は言い過ぎです。報告の行番号（243）も実際の位置（139）と違います。それでも欠陥としては実在します。\n\n### [軽微1] version を文字列 \"1\" で渡すと、コミットの後に TypeError → ambiguous\n- **起きることは正しい。** `version` 列は INTEGER なので、SQLite が `'1'` を整数に変換して条件に一致し、更新がコミットされます。そのあと `return version + 1` で TypeError になります。呼び出し側には失敗に見えるのに、DB は更新済みになります。\n- **欠陥と言い切れない理由。** 仕様は version の型を決めていません。呼び出し側の使い方の誤りへの耐性の問題で、仕様違反とは言えません。ただ「失敗に見えて実は更新済み」というずれは実害になりえます。ここは人が判断すべきなので ambiguous にしました。\n\n### [軽微2] 19桁以上の期限を持つリンクは、自分で作ったものでも拒否される → style\n- 仕様は桁数を決めていません。拒否は Forbidden になる安全側の失敗で、レビュー担当自身も「現実の値では起きない」と書いています。上限を設計書に書くか、`make_link` でも同じ上限を確かめるという提案にとどまるので style です。\n\n### [軽微3] 8文字未満の鍵は、伏せ字の数で長さが分かる → style\n- レビュー担当自身が「仕様の『すべて伏せる』は満たしている」と認めています。欠陥の主張ではなく好みの提案なので style です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"list_notes に sort=[\\\"updated\\\"] などハッシュできない値を渡すと、notes/service.py:139 の `sort not in SORT_COLUMNS` が ValidationError ではなく TypeError を出し、R3 の「範囲外は ValidationError」に反する（重大という評価は言い過ぎだが、欠陥は実在する）。\"}, {\"label\": \"軽微1\", \"class\": \"ambiguous\", \"reason\": \"version=\\\"1\\\" では SQLite の型変換で更新がコミットされた後に `version + 1` が TypeError になるのは事実だが、仕様は version の型を決めておらず、呼び出し側の誤用への耐性を欠陥とみなすかは人の判断が要る。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"19桁以上の期限は現実に起きず、拒否は安全側の Forbidden なので、上限をそろえる・設計書に書くという提案にとどまる。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"8文字未満の鍵はすべて伏せていて仕様を満たしており、伏せ字の長さを固定する提案は好みの改善にとどまる。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、sort に型違いの値を渡すと TypeError になる実在の欠陥（R3 違反）が1件見つかった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "list_notes に sort=[\"updated\"] などハッシュできない値を渡すと、notes/service.py:139 の `sort not in SORT_COLUMNS` が ValidationError ではなく TypeError を出し、R3 の「範囲外は ValidationError」に反する（重大という評価は言い過ぎだが、欠陥は実在する）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "ambiguous",
+    "reason": "version=\"1\" では SQLite の型変換で更新がコミットされた後に `version + 1` が TypeError になるのは事実だが、仕様は version の型を決めておらず、呼び出し側の誤用への耐性を欠陥とみなすかは人の判断が要る。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "19桁以上の期限は現実に起きず、拒否は安全側の Forbidden なので、上限をそろえる・設計書に書くという提案にとどまる。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "8文字未満の鍵はすべて伏せていて仕様を満たしており、伏せ字の長さを固定する提案は好みの改善にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、sort に型違いの値を渡すと TypeError になる実在の欠陥（R3 違反）が1件見つかった。"
+ }
+}

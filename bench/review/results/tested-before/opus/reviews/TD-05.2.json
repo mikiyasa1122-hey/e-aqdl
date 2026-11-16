@@ -1,0 +1,49 @@
+{
+ "case": "TD-05",
+ "rep": 2,
+ "sec": 75.1,
+ "exit": 0,
+ "cost_usd": 0.3714464,
+ "num_turns": 6,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 28091,
+  "cache_read_input_tokens": 215352,
+  "output_tokens": 5180,
+  "output_tokens_details": {
+   "thinking_tokens": 1521
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 28091,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2859,
+    "cache_read_input_tokens": 47622,
+    "cache_creation_input_tokens": 7341,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7341
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "進捗: 確認は終わりました。検索結果に他人の非公開メモが混ざる漏えいを、実行して再現できました。報告をまとめます。\n\n## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 78281336\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1（notes/service.py `search_notes`） / 対応区分: 修正必須 / 内容: 検索の SQL の条件が `org_id = ?` と LIKE だけで、`(private = 0 OR owner_id = ?)` がない。そのため、同じ組織の他人の非公開メモが検索結果（id と題名）に出る / 成立条件: 同じ組織の他の利用者（管理者も含む）が、非公開メモの題名か本文に含まれる語で `search_notes` を呼んだとき / 影響: R3「他人の非公開メモは含めない」に違反する。非公開メモの存在と題名が漏れ、本文の内容も検索語を変えて試すことで推測できる（K1 の漏えい）。R2 の「存在を明かさない」とも食い違う / 確認した保証: 上流に可視性の絞り込みはない。`_visible` は get/update/delete だけで使われ、search では使われていない。list_notes には同じ条件があるが、search_notes にはない。既存のテストは検出しない（[重大2] を参照） / 根拠: service.py:255-271 の SQL の組み立て。再現: bob が非公開で「secret 100%」を作成し、alice が `search_notes(c, alice, 'secret')` を呼ぶと `[{'id': 4, 'title': 'secret 100%'}]` が返る。admin でも同じ結果になった（`python3 -B -c` で実際に確認） / 提案: WHERE に `AND (private = 0 OR owner_id = ?)` を加え、`user[\"id\"]` をプレースホルダーで渡す。あわせて、他人の非公開メモが検索結果に出ないこと（本人には出ること・管理者にも出ないこと）を確かめるテストを加える\n- [重大2] 区分: テスト / 対象: AC3, K2, K1 / 対応区分: 証拠不足 / 内容: SearchTest は fixture に「100%」を含む題名と「file_name」を用意しているのに、`%` や `_` を検索語にしたテストがない。`\"name\"` の検索は file_name と filexname の両方に当たるため、`_` を普通の文字として扱っているかを確かめていない。さらに、bob の非公開メモ「secret 100%」を作っているのに、それに当たる語（\"100%\"・\"secret\"）で検索しておらず、[重大1] の漏えいが見逃されている / 根拠: R3 は「% と _ も普通の文字として部分一致」と「他人の非公開を含めない」を明記している。K1・K2 は重要なリスク。ESCAPE を外したり可視性の条件が抜けたりしても、今のテストはすべて通る（tests/test_ac3_list_search.py:91-112） / 提案: `ids(\"100%\") == [self.a]`（\"1000 done\" と非公開・他の組織のメモは出ない）、`ids(\"_\")` は file_name の b だけ、`\\` を含む語を検索できること、`ids(\"secret\")` が alice と admin には空で bob には出ること、を検証に加える\n- [軽微1] 区分: 実装 / 対象: R1〜R10（trace の impl-map） / 対応区分: 改善提案 / 内容: impl-map がすべて `notes/__init__.py`（空のファイル）を指している。実装の本体は service.py・ratelimit.py・share.py で、設計の「要求との対応」とも合わない / 提案: impl-map を実際のファイルに直す\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成・入力の拒否・途中の失敗（create:tags）で何も残らないことを確かめている（test_ac1）。妥当\n- AC2: 見えないメモ5種類がすべて NotFound、NotFound のとき閲覧数が増えない、確認の後に非公開へ変わる場合、別々のスレッドと接続による40回の同時閲覧を確かめており妥当\n- AC3: 一覧の範囲・並び順・ページ・入力の拒否は妥当。検索は、非公開メモを除くことと `%`・`_` を普通の文字として扱うことを確かめておらず不十分（[重大1]・[重大2]）\n- AC4: 権限・非公開・古い version・読み出しと書き込みの間に入る更新・書き込みの中での権限の再確認・入力検証・削除のロールバックと例外の伝達を確かめており妥当\n- AC5: 管理者だけ・同じ組織だけ（4通り）・途中の失敗で元のまま・非公開メモも移ることを確かめており妥当\n- AC6: test_ac6 で伏せ字（8文字未満を含む）を確かめている。コード（service.py export_audit）も仕様どおり。妥当\n- AC7: 枠の境界（159.999 と 160.0）・拒否で枠が延びないこと・20スレッドで上限を超えないこと・hook による割り込みを確かめており妥当\n- AC8: test_ac8 で期限の境界・改ざん・形の崩れを確かめている。share.py は fullmatch・compare_digest・`>=` で仕様どおり。妥当\n- AC9: test_ac9 で本文・署名・api_key がログと例外に出ないことを確かめている。妥当。ただし、検索の漏えいは AC9 ではなく K1 の問題として [重大1] に書いた\n- AC10: test_ac10 と transfer の `in_transaction` が False になる確認で、例外の後もロールバックされることを確かめている。妥当\n- K1: get・update・delete・list は妥当。search で空洞化している（[重大1]・[重大2]）\n- K2: プレースホルダーの使用はコードで確認した。sort はホワイトリスト。ESCAPE の効き目のテストがない（[重大2]）\n- K3・K4・K6・K7・K8: 上のとおり妥当\n- エンジンが検出したテストの兆候: なし（skip・.only は見つからなかった）\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、仕様でも対象外。単体テストで実際の SQLite と別々のスレッド・接続を使っているので、リスクに見合っている）\n### 不足しているリスク\n- K1: 検索で他人の非公開メモが漏れることを確かめる検証がない（[重大1]・[重大2]）\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` → 61件すべて合格\n- `python3 -B -c ...`（メモリ上の DB）で検索の漏えいを再現した。alice と admin の \"secret\" の検索で bob の非公開メモが返った。`_` の検索は file_name だけに当たり、エスケープは正しく効いていた\n- `$AQ history --since 0`: 検証条件の削除や弱体化はなかった（unit を追加し、bind しただけ）\n- `$AQ trace`: すべての項目が unit で合格。反証テストは無効。impl-map は __init__.py を指している\n- notes/*.py と tests/base.py・test_ac2・test_ac3・test_ac4・test_ac5・test_ac7 を読んだ。git は初期コミットだけで、変更はすべて未追跡のファイル",
+ "files_changed": [],
+ "valid": true
+}

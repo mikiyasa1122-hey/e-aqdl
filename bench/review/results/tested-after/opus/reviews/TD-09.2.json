@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 2,
+ "sec": 68.6,
+ "exit": 0,
+ "cost_usd": 0.46430820000000006,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 33917,
+  "cache_read_input_tokens": 290181,
+  "output_tokens": 6744,
+  "output_tokens_details": {
+   "thinking_tokens": 1961
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 33917,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3510,
+    "cache_read_input_tokens": 57422,
+    "cache_creation_input_tokens": 3910,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3910
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6（notes/service.py `transfer_notes` 215〜223行） / 対応区分: 修正必須 / 内容: 移管が全体で1つのトランザクションになっていない。メモ1件ごとに `with transaction(conn)` を開いてコミットし（219〜220行）、監査ログはさらに別のトランザクションで書いている（221〜222行）。対象 ID の一覧も、どのトランザクションにも入らない状態で読んでいる（215行）。このため、R5 の「全部移すか、何も移さないか（途中で失敗したら元のまま）」に違反している / 成立条件: 2件目以降のメモを移す前後で例外が起きたとき（DB エラー、ロック待ち5秒のタイムアウト、プロセスの中断など。テストでは `hooks.before_write(\"transfer:<id>\")` で起こせる）。また、ID を読んでから移し終えるまでの間に、元の利用者が別の接続からメモを作ると、そのメモだけが移されずに残る / 影響: 一部のメモだけが新しい所有者に移った状態が確定してしまう。元に戻す手段はなく、監査ログにも記録されない（K6 の「一部だけ移る」がそのまま起きる） / 確認した保証: 呼び出し元や DB の制約に、これを防ぐものはない。既存のテスト（tests/test_ac5_transfer.py）は正常系と拒否だけを確かめており、途中で失敗する場合は検証していない / 根拠: 再現スクリプト（scratchpad の repro.py）で、3件のうち2件目の `transfer:<id>` で RuntimeError を起こしたところ、失敗の後の所有者は `[2, 1, 1]` になった（1件目だけ移った） / 提案: `transfer_notes` の権限チェックの後の処理（ID の取得・各 UPDATE・監査ログ）を、1つの `with transaction(conn):` にまとめる。`UPDATE notes SET owner_id=?, version=version+1 WHERE owner_id=? AND org_id=?` を1文で実行し、件数は rowcount で取る形でもよい。あわせて、`fail_at(\"transfer:<2件目のid>\")` で失敗させた後に、所有者・version・audit の件数がすべて元のままであることを確かめるテストを追加する\n- [軽微1] 区分: 実装 / 対象: R8, K8（notes/share.py:11, 33） / 対応区分: 改善提案 / 内容: 正しいリンクの note_id や期限の先頭に 0 を付けても受け付けてしまう（`\"0\"+link` が note_id 7 として通ることを確認した）。署名は int に直した値に対して計算しているため、文字列としては改ざんされたリンクが有効になる。同じ note_id・同じ期限を表すだけなので、権限が広がることはない。ただし、リンクの正規形が一意ではない / 提案: `[1-9][0-9]*|0` のように先頭の 0 を禁止するか、文字列のまま署名を検証する\n- [軽微2] 区分: 実装 / 対象: R4（notes/service.py:177, 197） / 対応区分: 改善提案 / 内容: `version` の型を確かめていない。文字列の `\"1\"` を渡すと、SQLite の型変換で UPDATE が成功してコミットされた後に、`return version + 1` で TypeError になる（コードの経路から推定。実行はしていない）。仕様に規定はない / 提案: 先頭で `isinstance(version, int) and not isinstance(version, bool)` を確かめ、満たさなければ ValidationError にする\n- [軽微3] 区分: 設計 / 対象: R1〜R10（trace の impl-map） / 対応区分: 改善提案 / 内容: impl-map がすべて空の `notes/__init__.py` を指しており、実際の実装（service.py・ratelimit.py・share.py）と対応していない。設計書の「要求との対応」とも合わない / 提案: impl-map を実際のファイルに直す\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名・本文・タグの境界値と型違い（文字列の tags、末尾の改行など）、重複を数えること、途中の失敗で何も残らないことを確かめており、妥当\n- AC2: V2 は他の組織・他人の非公開・存在しないメモがどれも NotFound になること、判定の後に非公開へ変わった場合、別々の接続を使う4スレッドから同時に閲覧したときの閲覧数（40）を確かめており、妥当\n- AC3: V3 は範囲、並び順、ページ送りの境界、型違い、% と _ と \\ を普通の文字として扱うこと、タグの OR、SQL 片を値として扱うことを確かめており、妥当\n- AC4: V4 は権限ごとの Forbidden・NotFound、古い version、読み出しから書き込みの間に入った更新や移管、更新時の入力検証、削除の途中の失敗を確かめており、妥当\n- AC5: V5 は正常系・管理者以外・組織違いだけを確かめており、不十分。「途中で失敗したら元のまま」を確かめるテストがなく、そのため [重大1] の欠陥を検出できていない（[重大1] の提案にテストの追加を含めた）\n- AC6: V6 は8文字ちょうど・7文字・空の鍵の伏せ方と、他の組織のログを含めないことを確かめており、妥当\n- AC7: V7 は枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドからの同時の呼び出し、hook で判定の中に割り込んだ場合を確かめており、妥当\n- AC8: V8 は期限ちょうど、改ざん、さまざまな形の崩れ（大文字、改行、全角の数字、型違い）を確かめており、妥当（先頭の 0 は [軽微1]）\n- AC9: V9 はログ・例外のメッセージ・監査の出力に、本文・署名・鍵が出ないことを確かめており、妥当\n- AC10: V10 は Conflict・ValidationError・注入した例外・IntegrityError・ROLLBACK が済んだ後の例外のどの後でも、接続を使い続けられることを確かめており、妥当。ただし、移管の途中の失敗（K4）は確かめていない\n- K1: 閲覧・一覧・検索・更新・削除は確かめている。移管では、組織違いを Forbidden にすることを確かめている\n- K2: プレースホルダーと ESCAPE を、利用者の入力から SQL まで実際にたどって確かめた。ORDER BY は許可した値の対応表からしか組み立てていない\n- K3: 閲覧・更新・回数の制限は確かめている\n- K4・K6: 移管については不十分（[重大1]）\n- エンジンが検出したテストの兆候: なし（skip・アサーションなしは見つからず、目視でも確かめた）\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、単体テストが実際の SQLite を使って公開関数を直接確かめているため）\n\n### 不足しているリスク\n- K6: 移管の途中の失敗と、移管中に同時に作成された場合（[重大1]）\n\n### 確認したこと\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .` → 62件すべて合格\n- scratchpad の repro.py（`python3 -I` で実行し、リポジトリは変更していない）で次を確かめた\n  - 移管の途中の失敗で、所有者が `[2, 1, 1]` になる（一部だけ移る）\n  - 先頭に 0 を付けたリンクが受け付けられる\n- `$AQ history --since 0`: check の追加と bind だけで、検証を弱めた変更はない\n- `$AQ trace`: impl-map が `__init__.py` を指していることを確認した\n- gate のログ（20261111-085821-check-unit.log）: 62件すべて合格\n- `git status`: レビューの前後で変更なし\n- service.py・ratelimit.py・share.py・db.py を、仕様のすべての R と突き合わせて読んだ。読んだ観点は次のとおり\n  - 認可の判定（_visible・_can_modify）と、トランザクションの中での判定のやり直し\n  - LIKE のエスケープと ESCAPE 句\n  - 楽観的ロック（WHERE の version と rowcount）\n  - ROLLBACK の失敗で元の例外を隠さないこと\n  - RateLimiter のロックの範囲\n  - HMAC の compare_digest",
+ "files_changed": [],
+ "valid": true
+}

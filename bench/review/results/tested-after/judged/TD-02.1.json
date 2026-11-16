@@ -1,0 +1,18 @@
+{
+ "case": "TD-02",
+ "rep": 1,
+ "judge_cost_usd": 0.1106342,
+ "judge_raw": "指摘は軽微1の1件です。`notes/service.py:17` の `MAX_OFFSET` が使われていないことを挙げ、`list_notes(page=10**30)` を実際に実行して `OverflowError` を再現しています。埋め込んだ欠陥は、OFFSET が SQLite の整数の範囲を超えるかを確かめずに SQL へ渡すことで `OverflowError` になる、というものです。指摘は同じ関数（`list_notes`）で、原因（OFFSET の範囲を確かめていない）も影響（`OverflowError`）も一致します。重大度を軽微としている点は欠陥の同定には関係しないので、matches_defect と判定します。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で OFFSET の範囲を確かめず MAX_OFFSET が未使用のため、巨大な page で OverflowError になると再現つきで指摘しており、原因・影響とも埋め込んだ欠陥と一致する。\"}],\n  \"defect_detected\": \"yes\", \"matched_label\": \"軽微1\", \"note\": \"重大度は軽微とされたが、欠陥の箇所・原因・影響は正しく特定されている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "matches_defect",
+    "reason": "list_notes で OFFSET の範囲を確かめず MAX_OFFSET が未使用のため、巨大な page で OverflowError になると再現つきで指摘しており、原因・影響とも埋め込んだ欠陥と一致する。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "軽微1",
+  "note": "重大度は軽微とされたが、欠陥の箇所・原因・影響は正しく特定されている。"
+ }
+}

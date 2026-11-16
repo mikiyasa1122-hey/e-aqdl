@@ -1,0 +1,49 @@
+{
+ "case": "TD-10",
+ "rep": 2,
+ "sec": 43.5,
+ "exit": 0,
+ "cost_usd": 0.1648256,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 21411,
+  "cache_read_input_tokens": 264636,
+  "output_tokens": 5269,
+  "output_tokens_details": {
+   "thinking_tokens": 1563
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21411,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2573,
+    "cache_read_input_tokens": 47793,
+    "cache_creation_input_tokens": 542,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 542
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 68583c30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `search_notes` が検索語の `%`・`_`・`\\` をエスケープしていない。`_like_escape`（notes/service.py:147）は定義されているが、プロジェクト内のどこからも呼ばれていない。`pattern = f\"%{q}%\"`（service.py:156）に検索語がそのまま入る。SQL 側に `ESCAPE '\\'` があっても、パターンにエスケープ済みの文字が来ないため効かない。 / 成立条件: 検索語に `%` か `_` を含めるだけで成立する。権限は不要で、通常の利用者の入力で起きる。 / 影響: 仕様は「% と _ も普通の文字として部分一致」と定めているが、守られていない。`%` や `_` だけで検索すると自組織の見えるメモがすべて一致する。`file_name` で検索すると `filexname` も一致する。`\\` を含む語の扱いも、エスケープ文字として解釈されて壊れる。他組織・他人の非公開メモは org_id と private の条件で除外されるため漏えいはしない。誤ヒットと設計書の「LIKE は ESCAPE」の不履行にとどまる。確認した保証: 上流の検証は長さと空白だけで、ワイルドカードは除去していない。既存テストにも防ぐものはない。 / 根拠: 実行結果。メモ4件（'100% done'、'1000 done' の本文 'file_name'、本文 'filexname'、題名 'back\\slash'）を作って検索した。`'%'` → [1,2,3,4]、`'_'` → [1,2,3,4]、`'file_name'` → [2,3]（期待は [2] のみ）、`'\\'` → []（期待は [4]）。`grep -rn _like_escape` で、定義の1件以外に使用箇所がないことも確認した。 / 提案: `pattern = f\"%{_like_escape(q)}%\"` に直す。題名・本文の両方に同じ `pattern` を渡しているので、1か所の修正で足りる。\n- [重大2] 区分: テスト / 対象: AC3, R3, K2 / 対応区分: 証拠不足 / 内容: `%`・`_`・`\\` を普通の文字として検索することを確かめるテストが一つもない。`test_ac3_list_search.py` の `setUp` には `100%`・`1000 done`・`file_name`・`filexname` といった検証用データがあるが、それらを使う検索のアサーションがない。実際に `ids(\"done\")`、`ids(\"name\")` などで検索しているだけで、`%`・`_` を含む語では検索していない。そのため重大1の欠陥が 62 件すべて合格のまま見逃された。 / 根拠: R3 とリスク K2 が明示する必須要件で、仕様に「% と _ も普通の文字として」と書かれている。AC3 の検証が空洞化している。 / 提案: `ids(\"100%\")` が a だけ、`ids(\"file_name\")` が b だけ、`ids(\"%\")` が a と bob の非公開以外の `%` を含むものだけ、`ids(\"_\")` が `_` を含むものだけ、`ids(\"\\\\\")` が `\\` を含むものだけ、となるテストを追加する。実装から `_like_escape` を外すと失敗することを確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証あり。題名・本文・タグの境界、重複タグ、失敗時に何も残らないこと、改行付きタグの拒否を確かめており妥当。\n- AC2: 同一組織・非公開・他組織・存在しないの NotFound、確認後に非公開へ変わる競合、スレッド4本×10回の別接続で閲覧数が 40 になることを確かめており妥当。\n- AC3: 範囲外の page・per_page・sort の拒否、page が巨大な場合、スコープの除外、タグの OR、SQL 文字列を値として扱うことは確かめている。しかし R3 の `%`・`_` を普通の文字とする規則が未検証で、実装も誤っているため不十分（重大1・2）。\n- AC4: 作成者・管理者・非公開の NotFound、古い version、読み出しと書き込みの間の更新、移管後の再認可、検証、失敗時のロールバックを確かめており妥当。\n- AC5: テストは5件あり、ざっと読んだ範囲では問題なし。移管元・先・管理者の組織が同じであることの条件を、実装（transfer_notes）で確認した。テスト内容の詳細までは精査していない。\n- AC6: 実装は仕様どおり（8文字未満は全伏せ、それ以外は末尾4文字以外を伏せる）。テスト3件あり。詳細は未精査。\n- AC7: 枠の境界（159.999 と 160.0）、拒否が枠を延ばさないこと、20スレッド同時で上限 5 回に収まること、判定中の割り込みが直列化されることを、決定論的に確かめており妥当。\n- AC8: 実装は正規表現の fullmatch・HMAC・`compare_digest`・期限ちょうど以降は無効のとおり。テスト4件あり。詳細は未精査。\n- AC9・AC10: 実装にログへ本文・署名・api_key を出す箇所は見当たらない。`ValueError(link)` は `from None` で隠している。トランザクションは例外時に ROLLBACK して接続を使える状態に戻す。テスト各3件あり。詳細は未精査。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。`history` では `bind` のみで、検証条件の弱体化は見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、公開関数を単体テストで直接呼べる。並行実行は別接続のスレッドと差し込み口で確かめている。\n\n### 不足しているリスク\n- K2: LIKE のワイルドカードとエスケープ文字の扱いが、実装でも検証でも欠けている（重大1・2）。\n- 未確認: 共有リンクで先頭がゼロの note_id（`007.…`）が正規化されて同じ署名で通る点。仕様は「10進の数字だけ」としか定めておらず、欠陥とは断定しない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` → 62 件すべて OK。ただし重大1は検出されなかった。\n- `aqdlc.py history --since 0` → `bind` のみ。検証の弱体化なし。\n- notes/*.py（db・errors・ratelimit・service・share）を全文読んだ。\n- tests/test_ac2・ac3・ac4・ac7 を読んだ。ac1・ac5・ac6・ac8・ac9・ac10 は件数の確認と実装側の読み合わせにとどまり、全文は読んでいない。\n- 再現スクリプト（重大1の根拠）はメモリ上の DB だけを使い、リポジトリのファイルは変更していない。\n- `grep -rn _like_escape notes tests` → 定義のみで呼び出しなし。",
+ "files_changed": [],
+ "valid": true
+}

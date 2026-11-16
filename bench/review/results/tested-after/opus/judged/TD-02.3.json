@@ -1,0 +1,28 @@
+{
+ "case": "TD-02",
+ "rep": 3,
+ "judge_cost_usd": 0.2653436,
+ "judge_raw": "## 判定結果（TD-02）\n\n**[重大1] は埋め込んだ欠陥と一致します（matches_defect）。**\n- 指摘の (a) は、埋め込んだ欠陥と箇所も原因も影響も同じです。\n  - 箇所: `list_notes`（notes/service.py:128〜144）\n  - 原因: OFFSET が SQLite の整数の範囲を超えるかを確かめていません。17行の `MAX_OFFSET` は定義されていますが、どこからも使われていません。\n  - 影響: `page=2**60` などを渡すと、ValidationError でも空の結果でもなく OverflowError になります。\n- レビュー担当は実際に動かして例外を確かめています。直し方として、offset が `MAX_OFFSET` を超えたら SQL を実行せず `items=[]` を返す案と、そのテストも出しています。\n- 指摘の (b)（`sort=[\"title\"]` で TypeError になり ValidationError にならない）も、R3 の「範囲外は ValidationError」に反する実在の欠陥です。ただし (a) と同じ指摘の中にあるので、指摘全体の分類は matches_defect とします。\n\n**[軽微1] はコードに実在する別の欠陥です（real_other）。**\n- `version=\"1\"` を渡すと、SQLite の型変換で `version = '1'` が一致して UPDATE がコミットされます。その後、197行の `version + 1` で TypeError になります。\n- 呼び出し側には例外が届くのに、更新は残ります。R10 は「例外が起きたらロールバックする」と決めているので、これに反します。\n- レビュー担当は、body と version が実際に変わったことを確かめています。\n\n**[軽微2] は欠陥ではなく、堅牢化の提案です（style）。**\n- 「007」のように先頭に 0 を付けた note_id も、仕様の「10進の数字だけ」に当てはまります。署名は int に直した値で比べるので、改ざんにもなりません。\n- make_link が負の note_id を受け付ける点も、仕様に決まりがありません。そうして作ったリンクは verify_link が必ず拒否するので、安全上の穴にもなりません。\n- レビュー担当自身も改善提案として出しています。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で巨大な page を渡すと OFFSET が SQLite の整数の範囲を超えて OverflowError になること、MAX_OFFSET を使っていないことを、実行して確かめた上で、箇所・原因・影響を正しく指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"version に文字列を渡すと UPDATE がコミットされた後に TypeError になり、例外なのに変更が残る（R10 に反する）ことを、実行して確かめている。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭に 0 を付けた note_id は仕様の「10進の数字だけ」に当てはまり改ざんにもならず、負の id のリンクも必ず拒否されるので、欠陥ではない堅牢化の提案である。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1(a) が埋め込んだ OverflowError の欠陥と一致し、同じ指摘の (b) にあるハッシュできない sort の TypeError も実在の欠陥である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で巨大な page を渡すと OFFSET が SQLite の整数の範囲を超えて OverflowError になること、MAX_OFFSET を使っていないことを、実行して確かめた上で、箇所・原因・影響を正しく指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "version に文字列を渡すと UPDATE がコミットされた後に TypeError になり、例外なのに変更が残る（R10 に反する）ことを、実行して確かめている。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭に 0 を付けた note_id は仕様の「10進の数字だけ」に当てはまり改ざんにもならず、負の id のリンクも必ず拒否されるので、欠陥ではない堅牢化の提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1(a) が埋め込んだ OverflowError の欠陥と一致し、同じ指摘の (b) にあるハッシュできない sort の TypeError も実在の欠陥である。"
+ }
+}

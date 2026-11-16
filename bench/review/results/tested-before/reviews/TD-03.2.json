@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 2,
+ "sec": 24.5,
+ "exit": 0,
+ "cost_usd": 0.0985202,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14754,
+  "cache_read_input_tokens": 122582,
+  "output_tokens": 2723,
+  "output_tokens_details": {
+   "thinking_tokens": 925
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14754,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1386,
+    "cache_read_input_tokens": 37313,
+    "cache_creation_input_tokens": 4353,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4353
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py の update_note / 対応区分: 改善提案 / 内容: title・body が None のとき、現在値をトランザクションの外で読んだ行（`row`）から取っている。version の条件付き UPDATE があるので、古い値で上書きされることはない（古ければ Conflict になる）。ただし読み方が二通り（外で読む・中で読み直す）あり、紛らわしい。 / 提案: トランザクション内で読み直した行から現在値を取る。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create が、題名・本文・タグの境界、tags が文字列のときの拒否、タグ登録途中の失敗（hooks.before_write）で何も残らないことを確かめており妥当。\n- AC2: 同じ組織・他の組織・他人の非公開・存在しないメモがすべて NotFound になることを確認している。確認の後に非公開へ変わった場合も NotFound になる。閲覧数は、割り込み（hooks）と実スレッド＋ファイル DB の2通りで数え漏れがないことを確かめており妥当。\n- AC3: コードを読んで、入力の検査・LIKE の ESCAPE（% と _ とバックスラッシュ）・プレースホルダー・タグの OR・非公開の除外を確認した。62件のテストが通っている。テスト本体は先頭部分のみ読んだ。\n- AC4: コードでは認可（NotFound / Forbidden）と、UPDATE の version 条件＋rowcount による楽観的ロックを確認した。トランザクション内で認可を再確認している。更新と削除の途中失敗のテストも通っている。\n- AC5: 管理者・同じ組織の検査と、途中失敗で元に戻ることを、コードとテストで確認した。\n- AC6: コードで、8文字未満は全部伏せ、それ以外は末尾4文字を除いて伏せることを確認した。テストも通っている。\n- AC7: 枠の境界（159.999 と 160.0）、拒否が枠を延長しないこと、20スレッドの Barrier による同時呼び出しで上限を超えないこと、チェック中に割り込まれても直列化されることを確かめており妥当。\n- AC8: コードで、形式の厳密な照合（fullmatch）、期限ちょうど以降の無効、compare_digest による署名の比較を確認した。テストも通っている。\n- AC9・AC10: ログと例外に ID だけを出していることをコードで確認した。transaction は BaseException で ROLLBACK し、元の例外をそのまま伝える。テストも通っている。\n- エンジンが検出したテストの兆候はなし。skip・.only・アサーションなしのテストは見つからなかった。history は bind の記録のみで、検証条件が弱められた形跡はない。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、実 SQLite（ファイル DB）と実スレッドを使うテストがある。\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様・設計・全ソース（notes/*.py）を読み、認可、SQL のプレースホルダーと ESCAPE、トランザクション境界、競合を確認した。\n- `python3 -m unittest discover -s tests -t .` で 62 件がすべて OK。\n- `aqdlc.py history --since 0` を確認し、検証の弱体化はなかった。",
+ "files_changed": [],
+ "valid": true
+}

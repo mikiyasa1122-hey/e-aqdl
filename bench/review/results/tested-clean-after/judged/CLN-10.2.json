@@ -1,0 +1,18 @@
+{
+ "case": "CLN-10",
+ "rep": 2,
+ "judge_cost_usd": 0.11301220000000001,
+ "judge_raw": "このケースは欠陥なしなので、レビュー担当の指摘 [軽微1] だけを分類します。\n\n**[軽微1]**: 指摘は「transfer_notes のテストが薄い」というものです。ただし実際の test_ac5_transfer.py には、次のテストが揃っています。\n- 全件移管と、非公開メモが移ること\n- 管理者以外の拒否\n- 組織をまたぐ移管の拒否（4通り）\n- 途中失敗でのロールバック\n- version の加算（`test_transfer_bumps_version`）\n\n提案された「非公開メモを含む移管」と「移管後の version 加算」の確認は、すでにテストにあります。レビュー担当はこのファイルを精読していないと自分で書いており、テストがあるのに「ない」と言っている形です。コードの欠陥の主張でもありません。したがって false_positive です。\n\n報告の判定「合格」は、欠陥なしのケースとして正しい結果です。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"false_positive\", \"reason\": \"test_ac5_transfer.py には非公開メモの移管（test_moves_all_notes_of_the_user）と version 加算（test_transfer_bumps_version）のテストが既にあり、不足していると言うのは読み違い。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビュー担当は合格と判定した。唯一の指摘は未精読のテストを薄いと誤認したもの。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "false_positive",
+    "reason": "test_ac5_transfer.py には非公開メモの移管（test_moves_all_notes_of_the_user）と version 加算（test_transfer_bumps_version）のテストが既にあり、不足していると言うのは読み違い。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は合格と判定した。唯一の指摘は未精読のテストを薄いと誤認したもの。"
+ }
+}

@@ -1,0 +1,23 @@
+{
+ "case": "CLN-01",
+ "rep": 2,
+ "judge_cost_usd": 0.1176359,
+ "judge_raw": "**重大1**: `sort=[]` や `sort={}` を渡すと、`sort not in SORT_COLUMNS` の dict 検索でハッシュ不能エラー（TypeError）になる。この点はコードを読んで確認でき、報告は実行でも確認したとしている。仕様は範囲外の sort を ValidationError とするので、仕様に反する実在のバグである。ただし、呼び出し側が型付きの入力を渡す前提なら影響は小さい。テストの不足でもあるが、コード側の欠陥が実在するので real_other とする。\n\n**軽微1**: `version='1'` を渡すと、SQLite の型親和性により `version = '1'` の比較が一致して UPDATE が通る。その後 `return version + 1` で TypeError になり、更新はコミット済みのまま例外が出る。実在する欠陥であり、仕様の「失敗したら何も残さない」にも関わる。ただし version の型検査は仕様に明記されていないため、改善提案としては妥当だが、実在の挙動不備として real_other とする。\n\nこの案件は欠陥なしと設計されているため、`matches_defect` は使えない。defect_detected は n/a とする。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"sort にハッシュ不能な値（[] や {}）を渡すと ValidationError ではなく TypeError になり、R3 の範囲外は ValidationError という規定に反する。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"version='1' を渡すと SQLite の型変換で UPDATE が一致してコミットされ、その後の version + 1 で TypeError になるため、更新が残ったまま例外が出る。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、型の不正入力に対する実在の軽微なバグを2件指摘しており、どちらも実在すると確認できた。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "sort にハッシュ不能な値（[] や {}）を渡すと ValidationError ではなく TypeError になり、R3 の範囲外は ValidationError という規定に反する。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "version='1' を渡すと SQLite の型変換で UPDATE が一致してコミットされ、その後の version + 1 で TypeError になるため、更新が残ったまま例外が出る。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、型の不正入力に対する実在の軽微なバグを2件指摘しており、どちらも実在すると確認できた。"
+ }
+}

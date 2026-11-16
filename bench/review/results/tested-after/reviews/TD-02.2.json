@@ -1,0 +1,49 @@
+{
+ "case": "TD-02",
+ "rep": 2,
+ "sec": 29.6,
+ "exit": 0,
+ "cost_usd": 0.106792,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14583,
+  "cache_read_input_tokens": 126840,
+  "output_tokens": 3576,
+  "output_tokens_details": {
+   "thinking_tokens": 1099
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14583,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2074,
+    "cache_read_input_tokens": 39347,
+    "cache_creation_input_tokens": 2716,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2716
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fda594\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:161・272-288 / 対応区分: 修正必須 / 内容: `list_notes` は page に上限を設けていない。page が大きいと `offset = (page-1)*per_page` が SQLite の整数の上限（2**63-1）を超え、`OverflowError: Python int too large to convert to SQLite INTEGER` が呼び出し側へ漏れる。`MAX_OFFSET` は定義されているが、どこにも使われていない。 / 成立条件: page が 1 以上の整数で、`(page-1)*per_page` が 2**63-1 を超えるとき（例: `page=2**62, per_page=50` や `page=2**64`）。型・下限・上限の検査はすべて通る。 / 影響: R3 では page は「1以上」なら有効で、範囲外は ValidationError と決まっている。この入力は有効なのに、結果なしの返却でも ValidationError でもなく、想定外の例外（NotesError ではない）で落ちる。呼び出し側が NotesError だけを処理していると、利用者の入力ひとつで 500 相当の障害になる。 / 確認した保証: 上流の検証は型・下限・per_page・sort だけで、上限の検査はない。DB の制約は関係しない。tests/test_ac3_list_search.py には巨大な page のケースがない。 / 根拠: 実行して再現した（`page=2**62` と `2**64` の両方で OverflowError）。`list_notes` は 273-280 行で検証した後、284 行で offset を計算し、287 行でそのまま SQL に渡している。 / 提案: `offset > MAX_OFFSET` なら `items=[]` で `total` を返す（定数はそのために定義されている）。または ValidationError にする。あわせて巨大な page のテストを追加する。\n\n- [軽微1] 区分: 実装 / 対象: R5, notes/service.py:353-366 / 対応区分: 改善提案 / 内容: 移管先の `to_user` が DB に存在するかを確かめていない。移す元のメモが 1 件以上あれば外部キー違反の IntegrityError でロールバックされ、整合性は保たれる。0 件のときは存在しない利用者への移管が監査ログに記録されて成功する。仕様は利用者の dict を呼び出し側が確かめてから渡す前提なので、欠陥とはしない。 / 提案: 仕様に合わせて、必要なら移管先の存在確認を追加する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。入力検証の境界値・タグの重複・タグ INSERT 時のフック失敗によるロールバックを確かめている。\n- AC2: 概ね妥当。公開・非公開・他組織・不在の NotFound と、閲覧数の同時加算（フックで再現）を確かめている。\n- AC3: 不十分。LIKE のエスケープ（% と _）、プレースホルダー、タグの OR、不正値の拒否は確かめている。しかし page の上限の外にある値（重大1）のテストがない。\n- AC4: 妥当。コードを読み、認可・Conflict・判定後の変更・タグの検証・削除の失敗がトランザクション内で処理されていることを確認した。\n- AC5: 妥当。同じ組織の検査と途中失敗時の元に戻る動作を確かめている。\n- AC6: 妥当。8 文字未満・ちょうど 8 文字の鍵の伏せ方をコードで確認した。\n- AC7: 妥当。枠の境界と、ロック内のフックによる同時呼び出しを確かめている。コードはロック内で判定と加算をしている。\n- AC8: 妥当。期限ちょうど、改ざん、`fullmatch` による形の崩れを確かめている。\n- AC9: 妥当。ログ・例外に本文・署名・api_key が出ないことをコードで確認した。\n- AC10: 妥当。`_rollback` が元の例外を隠さず、`conn.in_transaction` を見ている。\n- エンジンが検出したテストの兆候: なし。skip・弱いアサーションは見当たらない。`history` には bind だけがあり、検証の弱体化はなかった。\n\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、unittest が DB の実体（SQLite）とスレッド・フックで十分に確かめている。\n\n### 不足しているリスク\n- R3/K2 周辺: 巨大な page の入力（重大1）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、62 件がすべて OK だった。\n- `list_notes` を `page=2**62` と `2**64` で実行し、OverflowError を再現した。\n- `notes/*.py` をすべて読み、認可（`_visible`・`_can_modify`）、プレースホルダー、LIKE の ESCAPE、`BEGIN IMMEDIATE` のトランザクション、楽観的ロックの `rowcount`、`RateLimiter` のロックを確認した。\n- `aqdlc.py history --since 0` で、検証条件の変更が bind だけであることを確認した。",
+ "files_changed": [],
+ "valid": true
+}

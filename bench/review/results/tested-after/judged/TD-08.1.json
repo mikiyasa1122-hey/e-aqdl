@@ -1,0 +1,23 @@
+{
+ "case": "TD-08",
+ "rep": 1,
+ "judge_cost_usd": 0.1107162,
+ "judge_raw": "**重大1**: 埋め込んだ欠陥そのものです。`get_note` が `service.py:116` で閲覧数を読み、`:119` で `views + 1` として書き戻している点を、原因として挙げています。同時に閲覧されると数え漏れが起きる点も、影響として挙げています。提案の `views = views + 1` による原子的な加算も正解の修正と一致します。\n\n**重大2**: コードの欠陥ではなく、同時閲覧のテストがないという指摘です。`test_ac2_view.py` には逐次の3回のテストしかなく、`threading` と `tempfile` は未使用でした。指摘は実際のテスト不足に当たるので test_gap です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note で views を読み出して views+1 を書き戻す非原子的な加算を原因に挙げ、同時閲覧での数え漏れを影響に挙げており、埋め込み欠陥と一致する。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"同時閲覧の数え漏れを確かめるテストがないというテスト不足の指摘で、実際に test_ac2_view.py には逐次の閲覧テストしかない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が欠陥の箇所・原因・影響をすべて正しく特定し、再現もしている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note で views を読み出して views+1 を書き戻す非原子的な加算を原因に挙げ、同時閲覧での数え漏れを影響に挙げており、埋め込み欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "同時閲覧の数え漏れを確かめるテストがないというテスト不足の指摘で、実際に test_ac2_view.py には逐次の閲覧テストしかない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が欠陥の箇所・原因・影響をすべて正しく特定し、再現もしている。"
+ }
+}

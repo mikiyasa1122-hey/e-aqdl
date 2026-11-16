@@ -1,0 +1,49 @@
+{
+ "case": "TD-02",
+ "rep": 3,
+ "sec": 111.5,
+ "exit": 0,
+ "cost_usd": 0.6318634,
+ "num_turns": 10,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 20,
+  "cache_creation_input_tokens": 40379,
+  "cache_read_input_tokens": 464157,
+  "output_tokens": 10796,
+  "output_tokens_details": {
+   "thinking_tokens": 4607
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 40379,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3884,
+    "cache_read_input_tokens": 66702,
+    "cache_creation_input_tokens": 1106,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1106
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fda594\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3（notes/service.py の list_notes、128〜144行） / 対応区分: 修正必須 / 内容: list_notes に渡した値によって、R3 が決めている「結果を返す」か「ValidationError」のどちらにもならず、別の例外が出る。(a) 仕様では有効な大きい page（例: page=2**60、per_page=50）で OverflowError「Python int too large to convert to SQLite INTEGER」が出る。17行の MAX_OFFSET は「これを超える page は結果なしにする」というコメント付きで定義されているが、どこからも使われていない。(b) sort にハッシュできない値（例: [\"title\"]）を渡すと、135行の `sort not in SORT_COLUMNS` で TypeError が出て、ValidationError にならない / 成立条件: (a) (page-1)*per_page が 2^63-1 を超える page（1以上なので R3 では有効）を渡す。(b) sort に list や dict を渡す / 影響: R3 は「page は1以上」「範囲外は ValidationError」と決めているのに、有効な入力で想定外の例外が出る。範囲外の入力でも、呼び出し側が受け取るのは業務エラー（NotesError）ではない。呼び出し側の業務エラーの処理をすり抜けて、上位で 500 相当の扱いになる。トランザクションの外なので、データと接続は壊れない（in_transaction=False を確認済み） / 確認した保証: 上流で page の上限を検査する箇所はない（仕様では HTTP 層は対象外。このライブラリが入口になる）。既存のテストは page=0, -1, \"1\", True, 1.0 と sort=\"id\", \"title; DROP\" しか試しておらず、この2つの経路は通っていない / 根拠: 一時スクリプトで `service.list_notes(conn, a, page=2**60, per_page=50)` を呼ぶと OverflowError、page=10**30 でも OverflowError、`sort=[\"title\"]` では TypeError「unhashable type: 'list'」になった / 提案: offset が MAX_OFFSET を超えるときは、SQL を実行せずに items=[] を返す（total は数えて返す）。sort は `not isinstance(sort, str) or sort not in SORT_COLUMNS` で ValidationError にする。どちらもテストを追加する（例: page=2**62 で items が空、sort=[\"title\"] で ValidationError）\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py の update_note、177〜197行） / 対応区分: 改善提案 / 内容: version に文字列 \"1\" を渡すと、SQLite の型変換で `version = '1'` が一致して UPDATE がコミットされる。その後、197行の `version + 1` で TypeError になり、呼び出し側は「失敗した」と受け取るのに更新は残る（確認済み: body が 'x'、version が 2 になった）。2.0 を渡すと 3.0 が返る。version の型は仕様に決まりがないので、改善提案とする / 提案: トランザクションの前に version が bool でない int かを検査して、そうでなければ ValidationError にする\n- [軽微2] 区分: 実装 / 対象: R8（notes/share.py の LINK_RE と make_link） / 対応区分: 改善提案 / 内容: 先頭に 0 を付けた「007.<期限>.<署名>」のような書き方の違うリンクも、note_id=7 として通る。署名は int に直した値で比べるので、改ざんにはならない。逆に make_link は負の note_id でも、verify_link が必ず拒否するリンクを作ってしまう / 提案: LINK_RE を `(0|[1-9][0-9]{0,17})` のような正規の形に限る。make_link では note_id が0以上の int であることを検査する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は、題名・本文・タグの境界（100/101、10000/10001、20/21、5個/6個、重複の数え方、改行・大文字・全角・型違い）と、文字列の tags の拒否、途中の失敗（hook）で3つのテーブルが0件になることを確認しており、妥当\n- AC2: 他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しないメモが、どれも NotFound になることを確認している。確認の後に非公開になる場合も確認している。閲覧数は、同じ接続の割り込みと、4スレッド×10回をファイルの DB の別々の接続で回して 40 になることを確認しており、妥当\n- AC3: 一覧の範囲・並び順・ページ送り・小さい範囲外の値と、検索の % _ \\ の文字どおりの扱い、範囲、タグの OR、SQL を含む文字列、入力の拒否を確認している。ただし大きい page と、ハッシュできない sort の経路は検証していない（[重大1]）。この欠陥を除けば、検証の作り方は妥当\n- AC4: 作成者と管理者の更新、Forbidden と NotFound の分け方、非公開を作成者だけが扱えること、古い version の Conflict、読み出しから書き込みの間の割り込み（Conflict と、変更していない欄が最新の行から来ること）、移管の後の権限の再確認、更新の入力検証、削除の途中の失敗のロールバックと例外の伝わり方を確認しており、妥当。スレッドを使った同時の更新はテストしていないが、BEGIN IMMEDIATE と `WHERE version = ?` と rowcount を使っていることをコードで確認し、割り込みは hook で決まった順に再現している\n- AC5: 管理者だけであること、4通りの組織違い、途中の失敗で何も移らないこと、非公開も移ること、version が増えることを確認しており、妥当\n- AC6: 末尾4文字、7文字と8文字の境界、空の鍵、管理者だけで自分の組織の分だけ出ることを確認しており、妥当\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier で20スレッドを同時に呼んで上限の5回だけ通ること、判定の中の割り込みが直列になることを確認しており、妥当（hook の待ち時間は時間切れの保険で、判定の根拠にはしていない）\n- AC8: 期限の時刻ちょうど・期限の1秒前・改ざん（id・期限・署名・鍵）・多くの崩れた形（大文字、改行、アラビア数字、bytes、None など）を確認しており、妥当\n- AC9: ログ・例外のメッセージ・監査の出力に、本文・署名・api_key・秘密の鍵が出ないことを、実際にログを取り込んで確認しており、妥当\n- AC10: Conflict・ValidationError・挿入された障害・外部キー違反・ROLLBACK できない状態の後も、in_transaction が False で次の操作ができることを確認しており、妥当\n- K1: 一覧・検索・閲覧・更新・削除・移管のそれぞれで、他の組織と他人の非公開を確認しており、妥当\n- K2: 値はすべてプレースホルダーで渡している。ORDER BY は許可リストの辞書から選び、IN の ? は個数だけを組み立てている。LIKE は `\\` を先に、`%` と `_` をその後にエスケープし、`ESCAPE '\\'` を題名と本文の両方の条件に付けている。どちらにも同じ pattern を渡していることをコードで確認した。テストも妥当\n- K3: AC2・AC4・AC7 のとおり、妥当\n- K4: 作成・更新・削除・移管の途中の失敗をテストしており、妥当\n- K5 / K7: AC6・AC9 のとおり、妥当\n- K6: AC5 のとおり、妥当\n- K8: AC8 のとおり、妥当\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは、読んで確かめても見つからなかった）\n### E2E の要否\n- 不要（ライブラリで、HTTP と UI は仕様の対象外。ファイルの DB を使い、スレッドごとに別の接続を使う並行のテストが、結合の検証の役目を果たしている）\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/*.py をすべて読んだ。`$AQ trace` で R1〜R10、AC、K がすべて V に対応していることを確認した。`$AQ history --since 0` で、検証条件の弱体化や削除がないことを確認した（check は unit が1件追加されただけ）\n- gate のログ 20261111-085447-check-unit.log: 62件のテストが合格\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . -q` を自分で実行し、62件が OK になった\n- スクラッチパッドで一時スクリプトを動かして挙動を確かめた（メモリ上の DB を使い、リポジトリは変更していない）:\n  - list_notes は page=2**60 / 2**63 / 10**30 で OverflowError、sort=[\"title\"] で TypeError、sort=None で ValidationError、per_page=2**70 で ValidationError\n  - update_note は version=\"1\" で TypeError になるが、更新はコミット済み。version=2.0 では 3.0 が返る。題名が空白だけなら ValidationError\n  - search_notes: q が list、全角空白だけのときは ValidationError。重複したタグは問題ない\n  - 共有リンク: 先頭に 0 を付けた note_id でも通る。期限の 0.1秒前（1059.9）なら有効。make_link は負の id でもリンクを作る\n  - create_note: タグに set を渡すと ValidationError。絵文字100文字の題名は作れる\n  - どの例外の後も in_transaction は False だった\n- コードの経路をたどって確認したこと: _visible / _can_modify がすべての閲覧・更新・削除の経路で使われているか。update と delete がトランザクションの中で読み直してから認可しているか。transfer で組織と管理者を検査しているか。transaction() が BaseException でも ROLLBACK し、ROLLBACK 自体の失敗で元の例外を隠さないか。export_audit が組織で絞り込み、鍵を伏せる規則どおりか。RateLimiter の判定と更新が1つのロックの中にあるか",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-04",
+ "rep": 2,
+ "sec": 82.3,
+ "exit": 0,
+ "cost_usd": 0.46592999999999996,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 31166,
+  "cache_read_input_tokens": 282330,
+  "output_tokens": 8004,
+  "output_tokens_details": {
+   "thinking_tokens": 3304
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 31166,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3233,
+    "cache_read_input_tokens": 53735,
+    "cache_creation_input_tokens": 4861,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4861
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3472c88d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6, K1 / 対応区分: 修正必須 / 内容: `transfer_notes` は、移す先（to_user）の組織を確かめていない。そのため、別の組織の利用者にメモを移せてしまう。仕様（R5）は「移す元・移す先・管理者がすべて同じ組織のときだけ（それ以外は Forbidden）」と定めている。 / 成立条件: 組織 10 の管理者が `transfer_notes(conn, admin, alice(org10), eve(org99))` を呼ぶ。to_user が DB に存在すれば、FK の制約も通る。 / 影響: Forbidden にならず、移管が成功する（戻り値は 1）。移した後のメモは `org_id=10, owner_id=9`（他の組織の利用者が所有する）という矛盾した状態になり、監査ログにも「成功」として残る。組織の外にメモが渡るリスク（K6）が、そのまま起きている。 / 確認した保証: 呼び出し元の検証はない。仕様では、呼び出し側は org_id を信用して渡すだけで、組織の照合はこのライブラリの責務。確かめているのは `admin[\"role\"]` と `from_user[\"org_id\"] == admin[\"org_id\"]` だけ（notes/service.py:315-318）。SELECT の `org_id = admin[\"org_id\"]` で絞っているのは移す元の側だけ。DB に組織をまたぐ制約はなく、テスト（tests/test_ac5_transfer.py）にも移す先が別の組織になるケースはない。 / 根拠: notes/service.py:313-326。スクラッチの再現スクリプトで `transfer to other org -> 1`、`{'org_id': 10, 'owner_id': 9}` を確認した。 / 提案: notes/service.py:317 の条件を `from_user[\"org_id\"] != admin[\"org_id\"] or to_user[\"org_id\"] != admin[\"org_id\"]` に変えて Forbidden にする。あわせて、移す先が別の組織（および移す元が別の組織）のときに Forbidden になり、owner_id が変わらず、監査ログが増えないことを確かめるテストを、test_ac5_transfer.py に追加する。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `list_notes` に、ハッシュできない型の sort（例: `[\"x\"]`）を渡すと、`sort not in SORT_COLUMNS` が TypeError を出す。ValidationError にならない。仕様には型の違う値の扱いの規定がなく、SQL への埋め込みも起きない（ホワイトリストで弾かれる）ので、軽微とした。 / 提案: 先に `isinstance(sort, str)` を確かめて、ValidationError にする。\n- [軽微2] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `verify_link` は、先頭に 0 を付けた「01.<期限>.<署名>」のような正規形でないリンクも、有効として受け入れる（int に変換してから署名を照合するため）。note_id と期限の意味は変わらないので、権限が広がることはない。ただし、文字列としては改変されたリンクが通る。 / 提案: 照合の前に `str(int(x)) == x` で正規形を求めるか、受け取った文字列そのものを署名の対象にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は、題名・本文・タグの境界、重複の数え方、文字列の tags の拒否、hook による途中失敗で何も残らないこと（notes・note_tags・audit）を確かめており、妥当。\n- AC2: 見え方（他の組織・他人の非公開・存在しないメモがどれも NotFound、管理者にも非公開は見えない）、NotFound のときに閲覧数が増えないこと、判定の後に非公開へ変わった場合、hook での割り込み、実ファイルの DB に4スレッドから計40回閲覧して 40 になること、を確かめており妥当。\n- AC3: 範囲（他の組織・他人の非公開を含まない）、ソート、ページング、範囲外の値・bool・文字列・float の拒否、% と _ と \\ の文字としての扱い、タグの OR、SQL 文字列が値として扱われること、を確かめており妥当（sort の型の違いは軽微1）。\n- AC4: 作成者と管理者の更新、Forbidden と NotFound の区別、非公開は作成者だけ、古い version での Conflict、読み出しから書き込みの間の他の更新（hook で決定論的に再現）、トランザクション内での認可の再判定、更新時の入力検証、削除の途中失敗のロールバックと例外の伝達、を確かめており妥当。\n- AC5: 全部の移管、管理者以外の拒否、途中失敗で元のままになること、は確かめている。しかし「移す先・移す元が別の組織なら Forbidden」の検証がなく、実装も欠けている（重大1）。このため不十分。\n- AC6: 管理者だけ・自分の組織だけ、末尾4文字以外を伏せる、8文字未満はすべて伏せる、を確かめており妥当。\n- AC7: 偽の時計を使って、枠の内側、ちょうど window 秒での切り替え、拒否された呼び出しが枠を延ばさないこと、同時の呼び出し（hook を使用）を確かめており妥当。実装もロックの中で判定と更新を行っている。\n- AC8: 期限の時刻ちょうど、改ざん（id・期限・署名・鍵）、形の崩れ（改行・大文字・全角数字・型の違い）を確かめており妥当（正規形でないリンクは軽微2）。\n- AC9: ログ・例外のメッセージ・監査ログの出力に、本文・署名・api_key・秘密鍵が含まれないことを確かめており妥当。\n- AC10: 失敗の種類ごとに接続が使い続けられること、DB のエラーの伝達、ROLLBACK ができないときに元の例外を隠さないこと、を確かめており妥当。\n- K1: 閲覧・一覧・検索・更新・削除は妥当。移管は重大1のとおり穴がある。\n- K2: プレースホルダー、ESCAPE '\\'、ORDER BY のホワイトリスト、タグの IN 句もプレースホルダー。題名と本文の両方の条件に、エスケープ済みの pattern が渡っていることを確認した。妥当。\n- K3: 閲覧数は `views = views + 1` を BEGIN IMMEDIATE の中で実行し、更新は `version = ?` の条件と rowcount で判定している。決定論的なテストもあり、妥当。\n- K4・K6・K7・K8: 上記のとおり。K6 は、組織の外へ移す経路が未対策。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest が実際の SQLite（メモリと実ファイル）を通して公開関数を呼んでいるため）\n\n### 不足しているリスク\n- K6: 移す先・移す元が別の組織のときに拒否されることの検証がない（重大1で対応する）。\n\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/*.py を読み、呼び出しの経路（認可 → トランザクション → SQL → 戻り値）をたどった。\n- `PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tests -t . -q` を実行し、62件すべて OK だった。gate のログ（20261111-085601-check-unit.log、exit=0）とも一致した。\n- `$AQ trace` と `$AQ history --since 0` で、検証条件 unit の追加と bind だけで、弱められた変更がないことを確認した。git の上では notes/ と tests/ は未追跡（初回の実装）。\n- スクラッチの再現スクリプト（/tmp/claude-0/-tmp-claude-0-td-after-work-aqdlc-test-n7tkqk4--app/58e70adb-d871-4884-b973-a558d9bdeab6/scratchpad/repro.py）で、次を確認した。別の組織への移管が成功すること（重大1）、`sort=[\"x\"]` が TypeError になること（軽微1）、先頭に 0 を付けたリンクが通ること（軽微2）、文字列の version が Conflict で扱われること（問題なし）。\n- テストが確かめていない入力・順序も検討した。判定の後の移管・削除・非公開への変更（update・delete・get はトランザクションの中で読み直している）、巨大な page（MAX_OFFSET）、空のタグ列、ROLLBACK の失敗、float の now による期限の判定、LIKE の大文字小文字（仕様に規定がないので指摘しない）。",
+ "files_changed": [],
+ "valid": true
+}

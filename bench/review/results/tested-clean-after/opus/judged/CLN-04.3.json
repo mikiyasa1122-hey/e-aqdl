@@ -1,0 +1,28 @@
+{
+ "case": "CLN-04",
+ "rep": 3,
+ "judge_cost_usd": 0.28151960000000004,
+ "judge_raw": "# CLN-04 判定結果\n\nケースは「欠陥なし」なので、`matches_defect` は使っていません。\n\n## 軽微1 → real_other（実在する欠陥）\n\nコードを確かめると、指摘のとおりに起きます。\n\n- **成立する入力**: 1回も更新していないメモ（version=1）に、`update_note(conn, alice, nid, \"1\", body=\"x\")` と呼ぶ。\n- **何が起きるか**:\n  1. `notes.version` は INTEGER の列です。バインドした値には型の指定がないので、SQLite は文字列 `'1'` を数値として比べます。そのため `WHERE version = ?` が一致します。\n  2. UPDATE はそのまま COMMIT されます。\n  3. その後 `return version + 1`（`notes/service.py:202`）で TypeError が起きます。\n- **結果**: 呼び出し側は例外を受け取るのに、DB は更新済みです。R10 は「例外が起きたらロールバックする」と定めているので、それに反します。\n- 報告の行番号（306）は実際とずれています。ただし内容は正しいです。\n- 仕様に version の型の定めはなく、契約の外の入力ではあります。それでも「例外を返したのに書き込みは確定している」という不整合が、根拠つきで再現できるため real_other にしました。\n\n## 軽微2 → style（好み・改善提案）\n\n- **先頭の 0**（`07.<期限>.<署名>`）: R8 は「10進の数字だけ」と定めていて、`07` もそれに当たります。署名は int にした値の組に対して検証するので、別のメモや別の期限には変えられません。表記が1通りでないのは堅牢化の提案で、欠陥ではありません。\n- **18桁の上限**: note_id が 10^18 以上のときに通らないのは事実です。ただし報告自身が「現実的にはない」としていて、欠陥とは主張していません。\n\n## 軽微3 → style（好み・改善提案）\n\n- 読み出しと書き込みの間に更新が入る場合の Conflict は、すでにテストがあります。hooks で割り込ませる2件（`test_concurrent_update_between_read_and_write_conflicts`・`test_unchanged_fields_come_from_the_latest_row`）で、AC4 と K3 の更新の競合は確かめられています。\n- スレッドをまたぐテストは必須でない追加です。報告も改善提案として出しているので、テストの欠落（test_gap）には当たりません。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"version に文字列 \\\"1\\\" を渡すと、INTEGER 列との比較で数値として一致し UPDATE が COMMIT された後に return version + 1 で TypeError が起き、例外なのにデータが更新済みになる（R10 の趣旨に反する）ことがコードから成立する。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭0のリンクも署名は int 化した組で検証され改ざんにはならず、仕様の「10進の数字だけ」にも反しないため、表記の正規化・桁数をそろえる堅牢化の提案にとどまる。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"読み出しと書き込みの間の競合は hooks で割り込ませるテストで AC4・K3 を確かめており、スレッドをまたぐテストは必須でない追加の提案である。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、軽微1は文字列の version で COMMIT 後に例外となる実在の不整合として real_other と判定した。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "version に文字列 \"1\" を渡すと、INTEGER 列との比較で数値として一致し UPDATE が COMMIT された後に return version + 1 で TypeError が起き、例外なのにデータが更新済みになる（R10 の趣旨に反する）ことがコードから成立する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭0のリンクも署名は int 化した組で検証され改ざんにはならず、仕様の「10進の数字だけ」にも反しないため、表記の正規化・桁数をそろえる堅牢化の提案にとどまる。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "読み出しと書き込みの間の競合は hooks で割り込ませるテストで AC4・K3 を確かめており、スレッドをまたぐテストは必須でない追加の提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、軽微1は文字列の version で COMMIT 後に例外となる実在の不整合として real_other と判定した。"
+ }
+}

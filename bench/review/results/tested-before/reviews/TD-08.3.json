@@ -1,0 +1,49 @@
+{
+ "case": "TD-08",
+ "rep": 3,
+ "sec": 26.5,
+ "exit": 0,
+ "cost_usd": 0.0983547,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 12900,
+  "cache_read_input_tokens": 161747,
+  "output_tokens": 3056,
+  "output_tokens_details": {
+   "thinking_tokens": 415
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12900,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1762,
+    "cache_read_input_tokens": 39221,
+    "cache_creation_input_tokens": 583,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 583
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード（`git status` は未コミットのため指紋は確認していない）\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3, notes/service.py の get_note（約 97〜108 行） / 対応区分: 修正必須 / 内容: 閲覧数を「トランザクションの外で読んだ値 +1」で書き込んでいる。`views = row[\"views\"]` を読み、`UPDATE notes SET views = ?`（views+1 の値）で上書きする。仕様の「同時に閲覧されても数え漏れがないこと」を満たさない。 / 成立条件: 別々の接続・別々のスレッドが、同じメモを重なるタイミングで閲覧する。両方が同じ旧値を読み、後の書き込みが先の加算を上書きする。 / 影響: 閲覧数が実際より少なくなる（数え漏れ）。AC2 の「閲覧数が正確に増える」が未達。 / 根拠: 読み取り（初回の `_row`）は BEGIN IMMEDIATE の前にあり、UPDATE は絶対値の代入。確認した保証は、DB の制約もトランザクションによる直列化も、この読み取りを守っていない点。再現: 一時ファイルの DB に接続を2つ作り、1つ目の `get_note` が `hooks.before_write(\"view\")` の時点で2つ目の接続から `get_note` を呼ぶ。2回閲覧したのに `views=1`（期待は2）になった（スクリプトは scratchpad の r.py。リポジトリは変更していない）。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` に変える。可視性の判定はトランザクション内で読み直した行で行う。\n\n- [重大2] 区分: テスト / 対象: AC2, K3, tests/test_ac2_view.py / 対応区分: 証拠不足 / 内容: 閲覧数の同時実行の検証がない。ViewCountTest は同じ接続で逐次に3回閲覧するだけ。`os`・`tempfile`・`threading`・`db` を import しているのに、同時実行のテストを書いていない。設計書は `hooks.before_write(\"view\")` で並行を再現する方針を示している。 / 根拠: AC2 の「同時に閲覧されても数え漏れがない」と K3 は必須。重大1の欠陥を、61件の全テストが通ったまま見逃している。 / 提案: 2接続・一時ファイル DB で、`before_write(\"view\")` の中から2つ目の閲覧を行い、最終的な views が2であることを確かめるテストを足す（sleep は使わない）。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証あり。tests/test_ac1_create.py を `fail_at` によるタグ挿入時の途中失敗で確認でき、全体のロールバックは妥当とみられる。実装は検証・トランザクションとも仕様どおり。\n- AC2: 可視性（他組織・非公開・存在しない → NotFound）の検証は妥当。閲覧数の同時実行の検証がなく不十分（重大1・2）。\n- AC3: tests/test_ac3_list_search.py の個別の中身は精査していない。実装は ESCAPE 句・プレースホルダー・範囲検査・タグ検査とも仕様どおりで、`%`・`_`・`\\` のエスケープも適切。\n- AC4: version を UPDATE の条件に入れ、トランザクション内で認可・検証を読み直しており、設計どおり。テストは精査していない。\n- AC5: 同じ組織の検査とトランザクションは妥当。\n- AC6: 8文字未満はすべて伏せ、それ以外は末尾4文字だけ見せる実装になっている。\n- AC7: ロック内で判定し、境界は `>=` で仕様どおり。テストの中身は精査していない。\n- AC8: 形式の正規表現は fullmatch、期限は `>=`、署名比較は `hmac.compare_digest`。実装は妥当。\n- AC9・AC10: ログに ID のみを出し、例外メッセージに機密情報を含めていない。ROLLBACK は `_rollback` で行う。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest による結合的なテストで足りる。\n\n### 不足しているリスク\n- K3（閲覧数の同時実行）: 重大1・2のとおり。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py の全体を読んだ。\n- `python3 -m unittest discover -s . -t .` の結果: 61件が OK。\n- 閲覧数の競合を再現するスクリプトを scratchpad に作り、`views=1`（期待は2）を確認した。\n- `$AQ trace`・`$AQ history`・gate は未実行。",
+ "files_changed": [],
+ "valid": true
+}

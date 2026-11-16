@@ -1,0 +1,49 @@
+{
+ "case": "TD-12",
+ "rep": 2,
+ "sec": 71.3,
+ "exit": 0,
+ "cost_usd": 0.4071452,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 26923,
+  "cache_read_input_tokens": 273226,
+  "output_tokens": 6853,
+  "output_tokens_details": {
+   "thinking_tokens": 2661
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 26923,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3287,
+    "cache_read_input_tokens": 51337,
+    "cache_creation_input_tokens": 3001,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3001
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d21222bf\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: 作成と更新で、タグの数（5個まで、重複も数える）を検査していない。`_validate`（notes/service.py:171-178）はタグ1つずつの形しか見ず、件数の上限 `TAGS_MAX` を使っているのは `search_notes`（service.py:261）だけ。 / 成立条件: `create_note(..., tags=[6個以上])` または `update_note(..., tags=[6個以上])` を呼んだとき（重複を含めて6個以上の場合も同じ） / 影響: R1「タグは5個まで」と、R4「更新でも R1 の入力検証を行う（タグを含む）」に反し、上限を超えたタグが保存される。AC1・AC4 を満たしていない / 確認した保証: 呼び出し元の `_tag_list` は型だけを見ており、DB にも件数の制約はない。AC1・AC4 のテストに6個以上を拒否するケースがない（test_ac1_create.py:57-62 の bad_tags は形の誤りだけ）ため、検証も空洞になっている / 根拠: `python3 -B -c` で実行して確かめた。`create_note(c,u,'t','b',['a'..'f'])` は成功してタグ6個を保存し、`update_note(..., tags=list('abcdefg'))` も成功して version 2 を返した。同じ6個を `search_notes` に渡すと ValidationError になる / 提案: `_validate` に `if len(tags) > TAGS_MAX: raise ValidationError` を足す（重複を除く前の列で数える）。AC1・AC4 のテストに、5個は通る・6個（重複を含む）は拒否されて何も残らない、というケースを足す\n- [重大2] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: `list_notes` に、ハッシュできない型の sort（list など）を渡すと、ValidationError ではなく TypeError が出る / 成立条件: `list_notes(conn, user, sort=['x'])`。`sort not in SORT_COLUMNS`（service.py:237）は、dict にハッシュできない値を入れて調べるので TypeError になる / 影響: R3「sort は updated か title だけ。範囲外は ValidationError」に反する。業務エラー（NotesError）を前提にしている呼び出し元が、予期しない例外で落ちる。データへの影響はない / 確認した保証: これより前に型の検査はない。テストは文字列の不正値だけを確かめている（test_ac3_list_search.py:43-44） / 根拠: 実行して確かめた。`list_notes(c,u,sort=['x'])` → TypeError / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS:` にする。テストに `sort=['x']` と `sort=None` を足す\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `LINK_RE` が先頭のゼロを許しており、`int()` で正規化してから署名を確かめている（share.py:346,368）。そのため `07.1060.<sig>` のような、元とは違う文字列のリンクも有効になる。note_id・期限・署名の改ざんにはならない（同じ値として検証される）ので安全上の問題はないが、リンクの表し方が一通りに決まらない / 提案: 先頭のゼロを拒否する（`(0|[1-9][0-9]{0,17})`）か、受け取った文字列そのものに署名する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1（test_ac1_create.py）は、題名・本文の境界、タグの形、文字列を tags に渡すと拒否されること、途中の失敗で何も残らないことを確かめており、その範囲では妥当。ただし、タグの件数の上限を確かめるケースがなく、実装の欠陥（重大1）を見逃しているので不十分\n- AC2: V2 は、他の組織・他人の非公開・存在しないメモが NotFound になること、確かめた後に削除されたら NotFound になること、hook で割り込んだ閲覧と複数スレッドの閲覧で数え漏れがないことを確かめており、妥当\n- AC3: V3 は、範囲（他の組織・他人の非公開）、並び順、ページング、とても大きい page、% と _ と \\ がそのままの文字として扱われること、タグの OR、SQL の文字列が値として扱われることを確かめており、おおむね妥当。sort の型の違う値は確かめていない（重大2）\n- AC4: V4 は、作成者・管理者・他人・他の組織・非公開、古い version での Conflict、読み出しと書き込みの間に入った更新での Conflict、判定の後に移管されたときの再判定、削除の途中の失敗でのロールバックを確かめており、競合の検証は決定論的で妥当。更新のタグ件数の検証がない（重大1）\n- AC5: V5 は、管理者だけであること、組織をまたぐと拒否されること、途中の失敗で元のままになることを確かめている（test_ac5_transfer.py を確認）。妥当\n- AC6: V6 は、末尾4文字以外を伏せること、8文字未満の鍵をすべて伏せることを確かめている。妥当\n- AC7: V7 は、枠の中の上限、境界ちょうどで新しい枠になること、拒否された呼び出しで枠が延びないこと、20スレッドから同時に呼んでも上限を超えないこと、hook で割り込ませても順に処理されることを確かめており、sleep に頼らず妥当\n- AC8: V8 は、期限ちょうどで無効になること、note_id・期限・署名の改ざん、別の鍵、形の崩れ（大文字・改行・空白・欠け）を確かめており、妥当\n- AC9: V9 は、ログの記録を集めて、本文・署名・鍵が出ていないことを確かめている（records が空でないことも確かめており、何も記録されずに通る形ではない）。妥当\n- AC10: V10 は、例外の後に同じ接続を続けて使えることを確かめている。妥当\n- K1〜K8: K2（SQL インジェクション）は、題名・本文・タグのどの条件にもプレースホルダーで値を渡しており、LIKE の ESCAPE '\\' も題名と本文の両方に付いていることをコードで確かめた。ORDER BY は許可した値の対応表からだけ組み立てている。K3・K4・K6 も、上のテストとコード（BEGIN IMMEDIATE、version を条件に入れた UPDATE、トランザクションの中での再判定）で確かめられている\n- エンジンが検出したテストの兆候: なし\n### E2E の要否\n- 不要（HTTP や UI がないライブラリで、仕様でも HTTP の API は対象外。unittest で公開の関数を直接呼ぶ形で、受け入れ条件の範囲を確かめられる）\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md・design.md・notes/*.py をすべて読み、仕様と突き合わせた（認可 `_visible` / `_can_modify` がどこで使われているか、SQL のプレースホルダーと ESCAPE、トランザクションの境界、RateLimiter のロックの範囲、share の正規表現と compare_digest）\n- `$AQ trace`: R1〜R10 がすべて unit の検証に結び付いている。`$AQ history --since 0`: 検証条件を弱めた・消した記録はない\n- gate のログ（20261111-085942-check-unit.log）: 61 件が合格\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . -q` を実行し、61 件が合格した\n- `python3 -B -c` で再現した: タグ6個・7個の作成と更新が成功する（重大1）、`sort=['x']` で TypeError になる（重大2）、search に6個渡すと ValidationError になる\n- `git status` を確かめた: レビュー中にファイルを変更していない（すべて未追跡のまま、初期コミットからの変化はない）",
+ "files_changed": [],
+ "valid": true
+}

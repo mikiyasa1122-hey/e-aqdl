@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 3,
+ "sec": 31.8,
+ "exit": 0,
+ "cost_usd": 0.11242180000000002,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15625,
+  "cache_read_input_tokens": 122558,
+  "output_tokens": 3765,
+  "output_tokens_details": {
+   "thinking_tokens": 1499
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15625,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2113,
+    "cache_read_input_tokens": 37314,
+    "cache_creation_input_tokens": 5224,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5224
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, AC4, notes/service.py の update_note（約 L151–158）/ 対応区分: 改善提案 / 内容: トランザクション内で読み直した行について、(a) コメントは「認可と入力の検証を読み直した行で行う」としているが、`_check_modify` は再実行しておらず `_validate` だけを行っている。(b) 事前確認の後、トランザクションに入る前にメモが削除されると、`title` か `body` が None のとき `row[\"title\"]` が `TypeError` になる。仕様の期待は Conflict か NotFound。/ 提案: トランザクション内で `row = _row(...)` の直後に `_check_modify(user, row, note_id, \"更新\")` を呼ぶ。これで削除時は NotFound になり、コメントとも一致する。なお、(a) の認可すり抜けは version の条件で実質防がれている（移管は version を +1 する）。/ 根拠: コードを読んで確認した。再現は実行していない。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create.py が、入力の境界、タグの規則、途中の失敗（`create:tags` の差し込み口）での全ロールバックを確かめており妥当。\n- AC2: test_ac2_view.py が、他の組織・他人の非公開・存在しないメモがすべて NotFound になることと、閲覧数の加算を確かめている。同時閲覧の数え漏れは、UPDATE の `views = views + 1` を BEGIN IMMEDIATE で囲む実装で担保されており、妥当（テスト内容の詳細は未精査）。\n- AC3: test_ac3_list_search.py が、一覧の範囲外入力、sort、% と _ の LIKE エスケープ（ESCAPE 句）、タグの OR を確かめている。コードも確認した。SQL は `?` で値を渡している。`ORDER BY` は固定の辞書から選んでおり、LIKE は題名・本文のどちらにも同じ `pattern` を渡している。妥当。\n- AC4: test_ac4_update_delete.py が、認可（Forbidden と NotFound の区別）、古い version、読み出しと書き込みの間の更新（hook による決定論的な再現）、検証、失敗時の巻き戻し、削除の失敗が握りつぶされないことを確かめており妥当。「更新直前にメモが削除された」場合のテストはない。軽微1のとおり、必須ではない。\n- AC5: test_ac5_transfer.py が、管理者だけであること、組織をまたぐ移管の拒否、途中失敗での元のままを確かめており妥当。\n- AC6: test_ac6_audit.py が、api_key の伏せ方を確かめている。コードも確認した。8文字未満は全部伏せ、8文字以上は末尾4文字だけ残す。妥当。\n- AC7: test_ac7_ratelimit.py が、枠の境界と、`RateLimiter.hook` による決定論的な並行を確かめている。ロックの中で判定しており、上限を超えない。妥当。\n- AC8: test_ac8_share.py が、期限の境界、改ざん、形の崩れを確かめている。`fullmatch` と `hmac.compare_digest` を使い、`now >= expires` で無効にしている。妥当。\n- AC9: test_ac9_secrets.py が、ログ・例外に本文・署名・api_key が出ないことを確かめている。コードでも、ログは ID だけで、例外メッセージにも本文・署名・api_key はない。妥当。\n- AC10: test_ac10_recovery.py が、例外の後も接続を使えることを確かめている。`transaction()` の ROLLBACK は `in_transaction` を確認し、ROLLBACK の失敗で元の例外を隠さない。妥当。\n- エンジンが検出したテストの兆候はなし。`history` はすべて bind（検証の紐付け）で、検証の弱体化・改ざんは見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使った実 DB の単体テストが、リスクの経路（認可・SQL・トランザクション）を直接確かめている。\n### 不足しているリスク\n- なし（軽微1のみ。同時書き込みの競合は hook による決定論的な再現でカバーされている）。\n### 確認したこと\n- 仕様・設計と、notes/ の全ファイル（db.py, errors.py, service.py, ratelimit.py, share.py）を精読し、認可・SQL・トランザクション・秘密情報の経路をたどった。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。62 件がすべて成功した。\n- `aqdlc history --since 0` を確認した。bind のみで、検証条件の弱体化はなかった。\n- ファイルは変更していない。`gate` も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

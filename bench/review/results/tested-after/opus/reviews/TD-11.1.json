@@ -1,0 +1,49 @@
+{
+ "case": "TD-11",
+ "rep": 1,
+ "sec": 53.9,
+ "exit": 0,
+ "cost_usd": 0.44148580000000004,
+ "num_turns": 5,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 37694,
+  "cache_read_input_tokens": 170469,
+  "output_tokens": 5290,
+  "output_tokens_details": {
+   "thinking_tokens": 1312
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 37694,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3055,
+    "cache_read_input_tokens": 50561,
+    "cache_creation_input_tokens": 7713,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7713
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0af59235\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5（notes/service.py `export_audit` 329〜336行） / 対応区分: 修正必須 / 内容: 監査ログの出力で、利用者の api_key をそのまま `actor_key` に入れて返しています。仕様 R6 は「末尾4文字以外を * で伏せる。8文字未満の鍵はすべて伏せる」と定めていますが、伏せる処理がありません（docstring には伏せると書かれていますが、実装されていません） / 成立条件: 監査ログが1件以上ある組織で、管理者が `export_audit` を呼ぶと必ず起きます。入力や状態の条件はありません / 影響: 組織の全利用者の api_key が平文で出力されます（K7 が起きる）。8文字未満の鍵（例: `short`）もそのまま出ます。AC6 を満たしていません / 確認した保証: SQL（333行）は `u.api_key` を生のまま取り出しています。呼び出し側・DB の制約・別の層で伏せる処理はありません。test_ac6_audit.py は `action` と `actor` しか確かめておらず、test_ac9_secrets.py の `test_audit_detail_has_no_body` も本文が含まれないことしか確かめていないため、既存のテストではこの欠陥を検出できません / 根拠: 再現スクリプトで `export_audit` を実行すると `'actor_key': 'ak-alice-0001'` と `'actor_key': 'short'` が返りました（期待値は `'*********0001'` と `'*****'`） / 提案: `actor_key` を、長さ8以上なら `'*' * (len(k) - 4) + k[-4:]`、8未満なら `'*' * len(k)` にします。あわせて AC6 のテストに次の検証を足します。(a) 13文字の鍵で末尾4文字だけが残り、元の鍵が出力のどこにも含まれないこと、(b) 境界値として7文字の鍵が全部伏せられ、8文字の鍵は末尾4文字が残ること\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 範囲外の値（101文字・空白だけ・6個のタグ・文字列の tags・改行付きのタグ）と、hooks による途中の失敗で何も残らないことを確かめており、妥当です（test_ac1_create.py。実装の 197〜209行と照合しました）\n- AC2: 4つの非可視のケースがすべて NotFound になること、NotFound のときに閲覧数が増えないこと、判定の後に非公開に変わった場合、割り込みの閲覧、4スレッド×10回で40になることを確かめており、妥当です\n- AC3: 範囲、並び順、ページ送り、巨大な page、bool や型の違う値の拒否、% と _ と \\ を普通の文字として扱うこと、タグの OR、タグの検査を確かめており、妥当です\n- AC4: 作成者と管理者の権限、他人の Forbidden、他の組織の NotFound、非公開メモは作成者だけ、古い version と読み出しから書き込みの間の割り込みでの Conflict、トランザクション内で認可をやり直すこと、更新時の入力検証、削除の失敗時のロールバックと例外が伝わることを確かめており、妥当です\n- AC5: test_ac5_transfer.py は権限・組織・途中の失敗で元のままであることを確かめています。実装（313〜326行）も1つのトランザクションで、組織の条件を満たしています。妥当です\n- AC6: test_ac6_audit.py は管理者だけが使えることと組織の範囲しか確かめておらず、api_key を伏せることを一切検証していません。そのため不十分です（[重大1] に含めます）\n- AC7: 時計を差し替えて、枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier を使った20スレッドの同時呼び出し、hook による決定論的な割り込みを確かめており、妥当です\n- AC8: test_ac8_share.py は期限の境界・改ざん・形の崩れたリンクを確かめています。実装は fullmatch・compare_digest・`>=` を使っています。妥当です\n- AC9: ログ・例外のメッセージで本文・署名・鍵・秘密が出ないことは確かめています。ただし「出力」に含まれる監査ログの api_key を検証しておらず、[重大1] の漏えいを見逃しています（同じ根本原因なので [重大1] にまとめます）\n- AC10: test_ac10_recovery.py で、例外の後も接続を使い続けられることを確かめています。transaction() の ROLLBACK も確認しました。妥当です\n- K1: 一覧・検索・閲覧・更新・削除で、他の組織と他人の非公開メモを除外することを確かめています。妥当です\n- K2: プレースホルダー、ソート列のホワイトリスト、LIKE の ESCAPE を確かめています。妥当です\n- K3: 閲覧数・楽観的ロック・RateLimiter の競合を確かめています。妥当です\n- K4: create・update・delete・transfer の途中の失敗を確かめています。妥当です\n- K5 / K7: 監査ログの出力の鍵を確かめていないため、不十分です（[重大1]）\n- K6: 組織の外への移管の拒否と、全部か何もしないかを確かめています。妥当です\n- K8: AC8 と同じく妥当です\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは見当たりませんでした\n### E2E の要否\n- 不要です。HTTP・UI のないライブラリで、仕様も HTTP を対象外にしています。単体テストで実際の SQLite（ファイルの DB と複数のスレッドを含む）を使っており、リスクに見合っています\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md、design.md、notes/*.py の全体、tests/ の base、ac2、ac3、ac4、ac6、ac7、ac9 を読みました。ac1、ac5、ac8、ac10 のテストは読んでおらず、そのファイル名と gate の合格だけを確かめました\n- `aqdlc.py trace` / `history --since 0`: 検証条件はすべて unit に結び付いており、検証が弱められた履歴はありませんでした\n- gate のログ 20261111-085914-check-unit.log: 61件すべて合格（exit=0）\n- `python3 -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）を実行し、61件すべて合格しました\n- 再現スクリプト（DB はメモリ上）で `export_audit` を実行し、api_key が平文で返ることを確かめました\n- コードの経路で次を確かめました\n  - SQL はすべてプレースホルダーで値を渡しています。f-string に入るのは、固定の where、SORT_COLUMNS のホワイトリスト、`?` の個数だけです\n  - LIKE は `\\`・`%`・`_` をエスケープし、題名と本文の両方の条件に `ESCAPE '\\'` を付けています\n  - get_note は、閲覧数の加算と可視性の再確認を BEGIN IMMEDIATE の中で行っています\n  - update_note は、トランザクション内で認可を再確認し、入力を検証し、`WHERE version=?` と rowcount で競合を判定しています\n  - delete_note は、認可の確認・タグの削除・メモの削除を同じトランザクションで行い、例外を呼び出し側に伝えています\n  - transfer_notes は、組織の条件を確かめ、1つのトランザクションで移しています\n  - RateLimiter は、ロックの中で枠の判定をしており、`>= window` でちょうど window 秒に新しい枠になります\n  - verify_link は、fullmatch・`now >= expires`・compare_digest を使っています\n  - ログと例外のメッセージに、本文・署名・鍵は含まれていません",
+ "files_changed": [],
+ "valid": true
+}

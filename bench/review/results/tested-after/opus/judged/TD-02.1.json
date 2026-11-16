@@ -1,0 +1,33 @@
+{
+ "case": "TD-02",
+ "rep": 1,
+ "judge_cost_usd": 0.2663556,
+ "judge_raw": "## 判定結果\n\n**重大1 → matches_defect**\n- 埋め込んだ欠陥と同じ箇所（`list_notes`）を指摘しており、原因も影響も一致しています。\n  - 原因：`MAX_OFFSET` が使われず、範囲を確かめないまま OFFSET を SQL に渡している。\n  - 影響：仕様上は正しい巨大な `page` で、ValidationError でも空の結果でもなく OverflowError になる。\n- 行番号は実際と合っていません（報告は 221〜248 行・121 行、実際は 128〜144 行・17 行）。ただ、関数名と定数名で箇所を特定できるので、判定には影響しません。\n\n**重大2 → real_other**\n- `sort` に list を渡すと、`sort not in SORT_COLUMNS`（dict の検索）で `TypeError: unhashable type` が出ます。\n- R3 は「範囲外は ValidationError」と決めているので、実在する仕様違反です。\n\n**軽微1 → real_other**\n- `version` の列は INTEGER 型として扱われるので、`version = '1'` は 1 と比べられ、UPDATE はコミットされます。そのあと `version + 1` で TypeError になります。\n- 呼び出し側には失敗に見えるのに、データと監査ログが残るという不整合が実際に起きます。\n- 仕様は version の型を決めていませんが、失敗に見えて実際は書き込まれている点は欠陥です。\n\n**軽微2 → real_other**\n- R8 は note_id を「10進の数字だけ」と決めており、桁数の上限はありません。\n- `LINK_RE` の `{1,18}` のせいで、`make_link` が作った正しく署名されたリンクでも、19 桁の note_id だと Forbidden になります。作る側と検証する側の規則がずれた、実在する食い違いです。\n- 行番号（348 行）は誤りで、実際は 11 行です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で MAX_OFFSET を使わず、範囲を確かめないまま OFFSET を SQL に渡すため、巨大な page で OverflowError になるという、埋め込んだ欠陥の原因と影響の両方を、実行結果を付けて指摘している。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"sort に list を渡すと dict の in 判定で TypeError になり、R3 が決める ValidationError にならない、という実在する仕様違反を指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"version='1' は SQLite が型を合わせて UPDATE がコミットされたあとに version+1 で TypeError になり、失敗に見えるのにデータが残る、という実在する不整合を指摘している。\"}, {\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"R8 は note_id の桁数を限っていないのに、LINK_RE の {1,18} のせいで make_link が作った 19 桁の正しいリンクが Forbidden になる、という作る側と検証する側の食い違いを指摘している。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 と軽微2 の行番号は実際のコードと合っていないが、関数名と定数名で箇所を特定できるので判定には影響しない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で MAX_OFFSET を使わず、範囲を確かめないまま OFFSET を SQL に渡すため、巨大な page で OverflowError になるという、埋め込んだ欠陥の原因と影響の両方を、実行結果を付けて指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "sort に list を渡すと dict の in 判定で TypeError になり、R3 が決める ValidationError にならない、という実在する仕様違反を指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "version='1' は SQLite が型を合わせて UPDATE がコミットされたあとに version+1 で TypeError になり、失敗に見えるのにデータが残る、という実在する不整合を指摘している。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "R8 は note_id の桁数を限っていないのに、LINK_RE の {1,18} のせいで make_link が作った 19 桁の正しいリンクが Forbidden になる、という作る側と検証する側の食い違いを指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 と軽微2 の行番号は実際のコードと合っていないが、関数名と定数名で箇所を特定できるので判定には影響しない。"
+ }
+}

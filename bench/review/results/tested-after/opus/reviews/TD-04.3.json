@@ -1,0 +1,49 @@
+{
+ "case": "TD-04",
+ "rep": 3,
+ "sec": 113.1,
+ "exit": 0,
+ "cost_usd": 0.7379642,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 16,
+  "cache_creation_input_tokens": 60619,
+  "cache_read_input_tokens": 316341,
+  "output_tokens": 9484,
+  "output_tokens_details": {
+   "thinking_tokens": 3706
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 60619,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3814,
+    "cache_read_input_tokens": 59306,
+    "cache_creation_input_tokens": 1313,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1313
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3472c88d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6, K1 / 対応区分: 修正必須 / 内容: `transfer_notes` は移す元（from_user）の組織しか確かめておらず、移す先（to_user）が同じ組織かを確かめていない。そのため他の組織の利用者にメモを移せてしまう / 成立条件: 組織10の管理者が `transfer_notes(conn, admin, alice(org10), eve(org99))` を呼ぶ。権限は管理者だけで足りる / 影響: 仕様 R5 では「移す元・移す先・管理者がすべて同じ組織のときだけ（それ以外は Forbidden）」となっているが、実際は Forbidden にならず移管が成功する。メモは org_id=10 のまま owner_id=9 になり、所有者が他の組織にいるという不整合なデータが残る（新しい所有者 eve は閲覧も更新も NotFound になり、元の所有者 alice は扱えなくなる）。監査ログにも成功として記録される / 確認した保証: 上流に検証はない（仕様で利用者の dict はそのまま信用する。呼び出し元のチェックはない）。DB にも owner と org の整合を保つ制約はない。既存のテスト（test_ac5_transfer.py）は同じ組織への移管と管理者以外の拒否しか確かめていない / 根拠: notes/service.py:279-283（`service.py` の transfer_notes。チェックは `from_user[\"org_id\"] != admin[\"org_id\"]` だけ）。再現スクリプトの出力は `transfer to other org: 1` と `{'org_id': 10, 'owner_id': 9}` / 提案: `if from_user[\"org_id\"] != admin[\"org_id\"] or to_user[\"org_id\"] != admin[\"org_id\"]: raise Forbidden(...)` を加える\n- [重大2] 区分: テスト / 対象: AC5, K6 / 対応区分: 証拠不足 / 内容: 移す先が他の組織のときに Forbidden になり、何も変わらないことを確かめるテストがない。移す元が他の組織のときと、管理者が他の組織のときのテストもない / 根拠: K6（「組織の外にメモが渡る」）は重要なリスクで、R5 で明記された拒否条件である。テストがないため、[重大1] が gate を通ってしまった / 提案: to_user・from_user・admin のどれか1つが別の組織のときに Forbidden になり、owner_id と監査ログが変わらないことを確かめるテストを加える\n- [重大3] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: `list_notes` に文字列でない sort（list・dict など、ハッシュできない値）を渡すと、ValidationError ではなく TypeError が送られる / 成立条件: `list_notes(conn, user, sort=[\"title\"])` を呼ぶ。`sort={\"a\":1}` でも同じ / 影響: 仕様 R3 では「sort は updated か title だけ。範囲外は ValidationError」だが、呼び出し側には業務エラー（NotesError）ではない例外が届く。データの漏えいや破損はなく、影響は小さい。ただし仕様に反している / 確認した保証: 上流に型の検査はない。page と per_page は bool・int を検査しているのに、sort だけ型を検査していない / 根拠: notes/service.py:239（`sort not in SORT_COLUMNS` でハッシュできない値は TypeError になる）。再現スクリプトの出力は `sort ['title'] TypeError` / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS:` にし、test_invalid_paging_and_sort に `sort=[\"title\"]` を加える\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id と期限の前に 0 を付けても有効になる（例: `\"00\"+正しいリンク` が note_id 5 として通る）。署名は数値に直してから比べるので、偽造にはならない。ただし1つのリンクに別の書き方ができてしまう / 提案: 先頭の 0 を禁じる（`0|[1-9][0-9]*`）か、元の文字列で署名を比べる\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグの境界、重複タグの数え方、文字列の tags の拒否、途中の失敗（create:tags）の後に何も残らないこと、監査ログが同じトランザクションで記録されることを確かめており妥当\n- AC2: NotFound になる4種類（他の組織・他の組織の管理者・他人の非公開・存在しない）、判定の後に非公開になった場合、NotFound で閲覧数を数えないこと、4スレッドが別々の接続で同時に閲覧して40回になることを確かめており妥当\n- AC3: 範囲（他の組織・他人の非公開）、並び順、ページ、巨大な page、% と _ と \\ を普通の文字として扱うこと、タグの OR、SQL を値として扱うこと、不正な q とタグを確かめており、おおむね妥当。ただし文字列でない sort の拒否は確かめておらず、[重大3] を見逃している\n- AC4: 作成者と同じ組織の管理者の可否、Forbidden と NotFound の区別、非公開を作成者だけが扱えること、古い version の Conflict、読み出しと書き込みの間に入った他の更新、トランザクション内での認可の再判定、更新時の R1 検証、削除の途中の失敗のロールバックと例外の伝わり方を確かめており妥当\n- AC5: 同じ組織への全件移管、管理者以外の拒否、途中の失敗で元のまま残ること、version が増えることは確かめている。組織をまたぐ移管の拒否は確かめておらず不十分（[重大2]）\n- AC6: 管理者だけ・自分の組織だけ、末尾4文字だけ見せること、8文字未満は全部伏せることを確かめており妥当（実装の 8 文字ちょうどの扱いも仕様どおり）\n- AC7: 偽の時計で枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドが Barrier で同時に呼んで上限5を超えないこと、hook で判定の途中に割り込むと直列化されることを確かめており妥当\n- AC8: 往復、期限の境界、改ざん、形の崩れを確かめており妥当（先頭の 0 は[軽微1]）\n- AC9: ログ・例外のメッセージ・監査ログの detail に本文・署名・api_key が出ないことを確かめており妥当\n- AC10: 失敗の種類ごとに接続を使い続けられること、DB エラーのロールバック、ROLLBACK もできないときに元の例外を隠さないことを確かめており妥当\n- K1: 閲覧・一覧・検索・更新・削除は確かめている。移管で組織の外に出る経路は確かめておらず不十分（[重大1]・[重大2]）\n- K2: 検索語・タグ・sort のどれも、SQL の文字列に直接埋め込まれていない。sort は辞書の決まった値、IN 句はプレースホルダーの数だけを組み立てている。ESCAPE '\\' と \\ そのもののエスケープも、題名と本文の両方の条件に同じパターンを渡しており妥当\n- K3: 閲覧数・楽観的ロック・RateLimiter の競合は、hook とスレッドで決まった順序で再現しており妥当\n- K4: 作成・更新・削除・移管の途中の失敗を、hooks.before_write で再現しており妥当\n- K5 / K7: AC6・AC9 と同じで妥当\n- K8: AC8 と同じで妥当\n- エンジンが検出したテストの兆候: なし（skip や assert のないテストも見つからなかった）\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、仕様でも対象外。単体テストで実際の SQLite（メモリとファイル）と実際のスレッドを使っており、リスクに見合っている）\n### 不足しているリスク\n- K6: 組織をまたぐ移管（移す先・移す元・管理者の組織が一致しない場合）を拒否することの検証がない（[重大2]）\n### 確認したこと\n- spec.md・design.md・notes/*.py をすべて読み、tests/ の主なファイル（base・ac2・ac3・ac4・ac5・ac7）を読んだ\n- `$AQ trace`: 全部の要求について V が unit テストで合格している（反証テストは無効）\n- `$AQ history --since 0`: 検証条件を弱めた記録（verify の変更・削除）はない。git は初期コミットだけで、notes/ と tests/ はまだ追跡されていないため、git diff で改ざんを比べる対象はない\n- gate のログ 20261111-085601-check-unit.log: 62件すべて合格、exit=0\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . -q`: 62件すべて合格。実行の後も `git status` は変わっていない\n- scratchpad の再現スクリプト（/tmp/claude-0/-tmp-claude-0-td-after-work-aqdlc-test-n7tkqk4--app/4dfa1213-2bee-4f68-99cb-cceb3cf5d972/scratchpad/repro.py）の結果:\n  - 他の組織への移管が成功する（[重大1]）\n  - `sort=[\"title\"]` と `sort={\"a\":1}` が TypeError になる（[重大3]）\n  - 先頭に 0 を付けたリンクが有効になる（[軽微1]）\n- コードの経路で確かめたこと:\n  - get_note はトランザクションの中で可視性を判定し直し、views を原子的に +1 している\n  - update_note は BEGIN IMMEDIATE の中で認可と検証をやり直し、`WHERE version=?` と rowcount で Conflict を判定している\n  - delete_note はトランザクションの中で認可し、例外を伝えている\n  - transaction() は BaseException でロールバックし、ROLLBACK の失敗で元の例外を隠さない\n  - RateLimiter はロックの中で時刻の取得・判定・更新をしており、`>= window` で新しい枠になる\n  - verify_link は fullmatch・期限 `>=`・compare_digest を使っている\n  - export_audit は管理者と組織で絞り込み、伏せ方の境界（8文字）も仕様どおり",
+ "files_changed": [],
+ "valid": true
+}

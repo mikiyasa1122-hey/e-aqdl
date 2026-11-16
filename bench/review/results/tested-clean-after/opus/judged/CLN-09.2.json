@@ -1,0 +1,33 @@
+{
+ "case": "CLN-09",
+ "rep": 2,
+ "judge_cost_usd": 0.2740636,
+ "judge_raw": "## 判定結果（CLN-09、欠陥を埋め込んでいないケース）\n\nこのケースには欠陥を埋め込んでいないので、matches_defect に当たる指摘はありません。defect_detected は \"n/a\" です。重大2件は、作り手が見落とした実在の欠陥でした。軽微2件は欠陥の主張ではなく改善提案です。\n\n**[重大1] sort に list・dict を渡すと TypeError（real_other）**\n- 成立する入力: `sort=[\"title\"]` や `sort={\"x\": 1}`。\n- 原因: 18行の `SORT_COLUMNS` は dict です。135行の `sort not in SORT_COLUMNS` は、ハッシュできない値を受けると `TypeError: unhashable type` を出します。\n- 仕様との食い違い: R3 は「sort は updated か title だけ。範囲外は ValidationError」と決めています。list は範囲外の値なので、ValidationError であるべきです。\n- 影響: SELECT の前に落ちるので、データへの影響はありません。重大度は低めですが、仕様違反として実在します。\n\n**[重大2] version を文字列で渡すと、コミットの後に例外が出る（real_other）**\n- 成立する入力: `update_note(conn, owner, nid, \"1\", body=\"x\")`。\n- SQLite の動き: `version` 列は INTEGER の型を持ちます。プレースホルダーで渡した値は型を持たないので、比べるときに `'1'` が 1 に変換されます。そのため `WHERE version = ?` が一致して、UPDATE・タグ・監査ログがコミットされます。\n- 失敗する箇所: コミットの後、197行の `return version + 1`（`\"1\" + 1`）で TypeError になります。\n- 影響: 呼び出し側には失敗と伝わるのに、DB は更新済みです。R10・K4 の「例外ならロールバックする」という保証と食い違います。\n\n**[軽微1] 先頭に 0 を付けた `007.<期限>.<署名>` が有効になる（style）**\n- 仕様は「10進の数字だけ」としか決めておらず、`007` もこれを満たします。\n- 署名は int にしてから照合するので、改ざんにも権限の拡大にもなりません。レビュー担当も改善提案としています。\n\n**[軽微2] `ValueError(link)` が `__context__` にリンクを残す（style）**\n- `from None` を付けているので、例外のメッセージにもトレースバックにも署名は出ません。R9 の文言（ログ・例外のメッセージ・出力）には反していません。\n- 残るのは呼び出し側が渡した入力そのものです。改善提案の範囲にとどまります。\n\n補足: 報告の行番号（239行、281〜301行、348行など）は、提示したコードの行番号と合いません。指摘の中身はコードと一致しています。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"sort に list・dict などハッシュできない値を渡すと、135行の `sort not in SORT_COLUMNS`（dict を引く）が TypeError を出し、R3 の「範囲外は ValidationError」に反する。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"version=\\\"1\\\" を渡すと、INTEGER 列との比較で '1' が 1 に変換されて WHERE version = ? が一致し、更新・監査ログがコミットされた後、197行の `version + 1` で TypeError になり、例外なのに DB が更新済みになる（R10・K4 と食い違う）。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"`007` も仕様の「10進の数字だけ」を満たし、署名は int の note_id で照合するので権限は広がらず、正規形だけを受け付けるという改善提案にとどまる。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"`from None` で例外のメッセージにもトレースバックにも署名は出ず R9 には反しないため、`__context__` にリンクが残る点の改善提案にとどまる。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、重大1（sort の型）と重大2（version の型でコミット後に例外）は作り手が見落とした実在の欠陥で、報告の行番号は提示コードと合わない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "sort に list・dict などハッシュできない値を渡すと、135行の `sort not in SORT_COLUMNS`（dict を引く）が TypeError を出し、R3 の「範囲外は ValidationError」に反する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "version=\"1\" を渡すと、INTEGER 列との比較で '1' が 1 に変換されて WHERE version = ? が一致し、更新・監査ログがコミットされた後、197行の `version + 1` で TypeError になり、例外なのに DB が更新済みになる（R10・K4 と食い違う）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "`007` も仕様の「10進の数字だけ」を満たし、署名は int の note_id で照合するので権限は広がらず、正規形だけを受け付けるという改善提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "`from None` で例外のメッセージにもトレースバックにも署名は出ず R9 には反しないため、`__context__` にリンクが残る点の改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、重大1（sort の型）と重大2（version の型でコミット後に例外）は作り手が見落とした実在の欠陥で、報告の行番号は提示コードと合わない。"
+ }
+}

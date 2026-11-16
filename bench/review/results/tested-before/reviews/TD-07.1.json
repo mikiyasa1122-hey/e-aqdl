@@ -1,0 +1,49 @@
+{
+ "case": "TD-07",
+ "rep": 1,
+ "sec": 21.6,
+ "exit": 0,
+ "cost_usd": 0.1133566,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18906,
+  "cache_read_input_tokens": 117266,
+  "output_tokens": 2599,
+  "output_tokens_details": {
+   "thinking_tokens": 322
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18906,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1750,
+    "cache_read_input_tokens": 38017,
+    "cache_creation_input_tokens": 1240,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1240
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7dd26fa8\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: `notes/share.py` の `verify_link` で、期限の時刻ちょうどのリンクが有効と判定される。仕様 R8 は「期限の時刻ちょうど以降は無効」としている。 / 成立条件: `now == expires` のとき。判定が `int(now) > expires` で、`>=` になっていない。 / 影響: 期限切れのリンクが期限の瞬間にもう1秒分通る（K8「期限切れを通す」の境界違反）。 / 根拠: `verify_link` の `if int(now ...) > expires`。再現は `make_link('s',1,ttl_sec=10,now=100)` で作ったリンクを `verify_link('s',l,now=110)` に渡す。Forbidden にならず note_id=1 が返ることを実行して確認した。docstring には「期限の時刻ちょうどを含む（＝無効）」と書かれており、コードと食い違っている。上流の検証や既存テストでは防がれていない。 / 提案: `>` を `>=` に直す。\n- [重大2] 区分: テスト / 対象: AC8, K8 / 対応区分: 証拠不足 / 内容: `tests/test_ac8_share.py` に、期限の境界（`now == expires`、`expires-1`、`expires+1`）を確かめるテストがない。有効側は `now=1059`、改ざんの検査は `now=1001` だけで、期限切れの `Forbidden` を確かめるテストもない。 / 根拠: AC8 に「期限の境界を含む」と明記されている。このテストがないために重大1の欠陥が 62 件の全テスト通過のまま見逃された。 / 提案: `now=1059` は有効、`now=1060` と `now=1061` は Forbidden となるテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_ac1_create.py` と `hooks.before_write` による途中失敗の再現で、失敗時に何も残らないことを確かめている。実装を読んだ限りトランザクションの範囲は妥当。\n- AC2: `test_ac2_view.py` で、NotFound に統一されることと、閲覧数の同時加算を確かめている。実装は `BEGIN IMMEDIATE` 内の加算と再判定で妥当。\n- AC3: 範囲外の入力、LIKE のエスケープ、タグの OR、プレースホルダーの使用を確かめている。SQL は `ESCAPE` 句付きで、題名・本文の両方に同じエスケープ済みの値を渡している。`sort` は許可リストで固定している。妥当。\n- AC4: 認可、Conflict、再検証、削除の失敗時の巻き戻しを確かめており、妥当と判断した。\n- AC5: 管理者だけ、同じ組織だけ、途中失敗で元のままになることを確かめている。実装も妥当。\n- AC6: マスクの規則（末尾4文字を残す、8文字未満は全部伏せる）を確かめている。実装と整合している。\n- AC7: 枠の境界（`>=`）と、`hook` を使った決定論的な並行テストがある。妥当。\n- AC8: **不十分**。期限の境界の欠陥を検出できないテストになっている（重大1・重大2）。形式の崩れと改ざんは十分に確かめている。\n- AC9: `test_ac9_secrets.py` で本文・署名・api_key がログや例外に出ないことを確かめており、妥当。\n- AC10: `test_ac10_recovery.py` で、例外の後に接続を使い続けられることを確かめている。\n- エンジンが検出したテストの兆候はなし（skip・`.only`・アサーションなしは見つからなかった）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実 DB に対する単体・統合テストで足りる。\n### 不足しているリスク\n- K8: 共有リンクの期限の境界（重大1・重大2）。それ以外のリスクの検証は妥当と判断した。\n### 確認したこと\n- `python3 -m unittest discover -s . -t .`: 62 件すべて成功（`PYTHONDONTWRITEBYTECODE=1`）。\n- `notes/` の全ソースを読み、認可・SQL・トランザクション・ロックを追った。\n- 上記の再現コードを実行し、期限ちょうどのリンクが有効と判定されることを確認した。\n- `$AQ trace` / `$AQ history` / `gate` は実行していない。確認したのは仕様・設計・コード・テストの内容だけ。",
+ "files_changed": [],
+ "valid": true
+}

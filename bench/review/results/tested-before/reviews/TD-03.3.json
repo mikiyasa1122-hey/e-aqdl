@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 3,
+ "sec": 39.1,
+ "exit": 0,
+ "cost_usd": 0.13956049999999998,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20626,
+  "cache_read_input_tokens": 122605,
+  "output_tokens": 4478,
+  "output_tokens_details": {
+   "thinking_tokens": 1912
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20626,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2234,
+    "cache_read_input_tokens": 37340,
+    "cache_creation_input_tokens": 10198,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 10198
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, notes/share.py:`verify_link` / 対応区分: 改善提案 / 内容: 先頭ゼロ付きの note_id・期限（例 `007.<期限>.<署名>`）が、署名の対象を `int` に変換した値で作るため、`7.<期限>.<署名>` と同じ署名で通る。仕様の形（10進の数字だけ）は満たしていて、権限の拡大にはならない（同じ note_id・同じ期限を指す別表記が通るだけ）/ 提案: 変換した値を文字列に戻して元のリンクと一致するか確かめるか、先頭ゼロを拒否する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。題名・本文・タグの境界値と不正値の拒否を確かめており、`create:tags` の途中失敗で何も残らない（K4）ことも `fail_at` で確かめている。\n- AC2・K1: 妥当。他の組織・他人の非公開・存在しないメモがすべて NotFound になること、NotFound のとき閲覧数が増えないこと、確認の後に非公開へ変えられた場合を確かめている。閲覧数は、割り込み（hook）と、別々の接続・スレッド（4スレッド×10回で 40 になる）の両方で確かめており、決定論的で妥当。\n- AC3・K2: 妥当。範囲外の page・per_page・sort の拒否、`%` と `_` の扱い、タグの OR 絞り込みを確かめている。実装は ESCAPE 句つきの LIKE で、題名と本文の両方に同じエスケープ済みの値を渡し、タグも検査して `?` で渡している。\n- AC4・K3・K4: 妥当。次を確かめている。\n  - 作成者・同じ組織の管理者・他者・他の組織・非公開メモの扱い。\n  - 古い version による Conflict。\n  - 読み出しと書き込みの間の割り込みによる Conflict。\n  - 判定後の移管を、トランザクション内の再判定で拒否すること。\n  - 更新時の入力検証。\n  - 削除の途中失敗でロールバックされ、例外が伝わること。\n- AC5・K6: 妥当。管理者・同じ組織の条件と、途中失敗で元のままになることを確かめている。実装は 1 つのトランザクション内で、組織を条件に絞って移している。\n- AC6・K7: 妥当。8文字未満は全て伏せ、8文字以上は末尾4文字を残す。実装を読んで確認した。\n- AC7: 妥当。`window` 秒ちょうどで新しい枠になる境界、拒否された呼び出しが枠を延ばさないこと、20スレッド同時で上限を超えないこと、ロック内の割り込みを確かめている。同時実行のテストは Barrier と Event で順序を作っており、sleep には頼っていない。\n- AC8・K8: 実装は、形の崩れたリンク・期限切れ・改ざんを Forbidden にし、期限ちょうど以降を無効にし、署名を `hmac.compare_digest` で比べている。`tests/test_ac8_share.py` は読んでおらず、検証の妥当性を個別には評価していない（gate は通っている）。\n- AC9・K5: ログと例外には ID だけを出している。コードで確認した。`tests/test_ac9_secrets.py` は読んでおらず、検証の妥当性を個別には評価していない（gate は通っている）。\n- AC10: `transaction()` が例外のときに ROLLBACK して例外を伝える。ROLLBACK 自体が失敗しても元の例外を隠さない。`tests/test_ac10_recovery.py` は読んでおらず、検証の妥当性を個別には評価していない（gate は通っている）。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのテストは見つかっていない。\n- 検証条件の弱体化: `history` は #74 以降の末尾 20 件だけを読んだ。内容は `bind`（検証の紐づけ）と `impl-map` で、弱める変更は見当たらない。#73 以前は読んでいないため、全体を確認したとは言えない。\n- 反証テストは無効で、gate の合格は「欠陥を検出できる証明」ではない。ただし、条件を外したら失敗する性質を、コードの経路を追って確かめた。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実 DB（ファイル DB と別スレッド）を使うテストで同時実行を確かめている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `unittest discover -s tests -t .` を実行した。62 件が OK だった。\n- `$AQ history --since 0` の末尾 20 件と `$AQ trace` を確認した。全 AC・K が unit で紐づいていて、gate は合格だった。\n- notes/ の全ソースを読んだ。見た点は次のとおり。\n  - 認可（`_visible`、`_can_modify`、トランザクション内の再判定）\n  - SQL（プレースホルダーと ESCAPE）\n  - 楽観的ロック（UPDATE の `WHERE version` と rowcount）\n  - `update_note` が最初に読んだ行の title・body を既定値に使う点。version の判定があるため、古い値で上書きされる経路は成立しない。\n- テストは `tests/base.py`、`test_ac2_view.py`、`test_ac4_update_delete.py`、`test_ac7_ratelimit.py` だけを読んだ。",
+ "files_changed": [],
+ "valid": true
+}

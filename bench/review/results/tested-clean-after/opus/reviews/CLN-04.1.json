@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 1,
+ "sec": 99.3,
+ "exit": 0,
+ "cost_usd": 0.6341246,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 48262,
+  "cache_read_input_tokens": 289263,
+  "output_tokens": 9506,
+  "output_tokens_details": {
+   "thinking_tokens": 4360
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 48262,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4486,
+    "cache_read_input_tokens": 65650,
+    "cache_creation_input_tokens": 3192,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3192
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, R10, AC4, AC10, K4 / 対応区分: 修正必須 / 内容: `update_note` は `version` の型を検査しません。そのため、整数以外の version（例: 文字列 `\"1\"`）を渡すと、更新はコミットされたうえで呼び出し側に例外が返ります。「例外が起きたらトランザクションをロールバックする」（R10）に反し、呼び出し側から見ると、失敗したはずの更新が DB に残ります / 成立条件: `update_note(conn, owner, note_id, \"1\", body=\"y\")` のように、version を文字列で渡したとき（HTTP の JSON やフォームから来た値をそのまま渡す、といった経路で起こりえます）。SQLite は INTEGER 型の列 `version` と文字列 `'1'` を比べるときに文字列を数値に変換するので、`WHERE version = ?` に一致し、UPDATE と COMMIT が通ります。そのあと `notes/service.py:202` の `return version + 1` が TypeError を投げます / 影響: 呼び出し側は「失敗した」と受け取りますが、本文・題名・タグ・version の更新と監査ログはコミット済みです。再試行すると Conflict になり、データと呼び出し側の認識が食い違います（データ整合性・R10 違反）。`True` を渡したときも version 1 に一致して更新されます（戻り値が `True + 1` = 2 なので気づきにくい）。`1.0` を渡すと戻り値が float になります / 確認した保証: 上流に version の型検査はありません（`update_note` の冒頭は `_tag_list` と `_check_modify` だけ）。DB の型制約もありません（SQLite の型親和性で一致します）。既存のテストは整数の version しか使っていません。なお、`list_notes` は `_int_in` で page の bool や文字列を拒否しており、コードの中で方針が揃っていません / 根拠: `notes/service.py:182-202`。再現: メモリ上の DB で作成 → `update_note(c, a, n, '1', body='y')` → `TypeError: can only concatenate str (not \"int\") to str`。その直後の `get_note(...)['version']` は 2（コミット済み）でした / 提案: トランザクションの前に `_int_in(version, 1, None, \"version\")` で version を検査し、ValidationError にします。これで bool・文字列・float を拒否できます。あわせて、不正な型の version で ValidationError になり、DB の version・本文・監査ログが変わらないことを確かめるテストを追加します。\n\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `verify_link` は先頭に 0 を付けた note_id・期限（例: `007.1060.<署名>`）も、正規のリンクと同じ署名で有効にします（`notes/share.py:11,33`）。署名は正規化した値で計算しているので、別のメモや別の期限への改ざんにはなりません。ただ、同じリンクがいくつもの表記で通ります / 提案: 正規表現を `(0|[1-9][0-9]{0,17})` にして、正規の表記だけを受け付けます。\n\n- [軽微2] 区分: 仕様 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: SQLite の LIKE は ASCII の大文字と小文字を区別しないので、検索 `hello` が題名 `Hello` に一致します（実行して確認）。仕様は「部分一致」とだけ書いており、大文字と小文字の扱いを決めていません。今の挙動は仕様違反ではありません / 提案: 大文字と小文字を区別するかどうかを仕様に書き、その挙動をテストで固定します。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は次を確かめており妥当です。題名の境界（0・空白だけ・100・101文字・型違い）、本文の境界（10000・10001文字・型違い）、タグの規則（大文字・改行・21文字・非 ASCII・型違い）、重複を数えて保存では除くこと、文字列 tags の拒否。途中の失敗（hooks `create:tags`）で notes・note_tags・audit のどれも残らないことも確かめています。\n- AC2: 他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しないメモが、すべて NotFound になることを確かめています。NotFound のときに閲覧数が増えないこと、判定の後に非公開へ変わった場合も確かめています。閲覧数は、割り込み（hook）と、4スレッド×10回を別々の接続・ファイル DB で行う実際の並行実行で、40 になることを確かめています。妥当です。\n- AC3: 一覧は範囲・並び順・ページング・巨大な page・不正な page/per_page/sort（bool・文字列・float を含む）を確かめています。検索は `%`・`_`・`\\` が普通の文字として扱われること、範囲、タグの OR、不正な q と tags を確かめています。妥当です。\n- AC4: 次を確かめており、おおむね妥当です。作成者・管理者による更新と削除、他人の Forbidden・他の組織の NotFound、非公開は作成者だけ、古い version で Conflict、読み出しから書き込みの間に入った更新で Conflict、判定の後の移管を書き込みの中で再判定すること、更新での入力検証、削除の途中の失敗でロールバックし例外を伝えること。ただし、version の型の異常系がありません（[重大1]）。\n- AC5: 全件の移管（非公開を含む）、管理者以外の拒否、組織をまたぐ4通りの拒否、途中の失敗で元のままであること、version が増えることを確かめています。妥当です。\n- AC6: 末尾4文字以外を伏せること、7文字・8文字（境界）・空の鍵、管理者だけ・自分の組織だけであることを確かめています。妥当です。\n- AC7: 固定の時計で枠の境界（159.999 と 160.0）を確かめています。並行実行は Barrier で20スレッドを同時に呼び、上限ちょうどになることを確かめています。判定の途中の割り込みも hook で直列化されることを確かめています。妥当です（`b_done.wait(0.5)` は時間に頼っていますが、ロックがあれば B は待たされるので、ロックを外すと失敗する形になっています）。\n- AC8: 期限ちょうどが無効になること、改ざん3通り・別の鍵、形の崩れ（大文字の16進・改行・符号・桁の過不足・全角や他の文字体系の数字・型違い）を確かめています。妥当です。\n- AC9: ログ・例外のメッセージ・監査ログの出力に、本文・署名・鍵が出ないことを、実際にログを捕まえて確かめています。妥当です。\n- AC10: Conflict・ValidationError・注入した失敗・IntegrityError・ROLLBACK 済みの状態のそれぞれの後に、トランザクションが閉じていて接続が使えることを確かめています。ただし、コミットの後に例外が出る経路（[重大1]）は確かめていません。\n- K1: AC2・AC3・AC4・AC5 のテストで、他の組織・他人の非公開を広く確かめています。妥当です。\n- K2: すべての値がプレースホルダーで渡っています（sort はホワイトリスト、tags は `?` の個数だけを組み立て）。テストは SQL の文字列そのものを渡しても、ただの値として扱われることを確かめています。妥当です。\n- K3: 閲覧数は実際のスレッドで、更新の競合は hook による割り込みで、決定論的に確かめています。更新を実際のスレッドで競わせるテストはありませんが、`WHERE version = ?` と rowcount の判定が BEGIN IMMEDIATE の中にあるので、割り込みで再現すれば十分と判断します。\n- K4・K6: 途中の失敗を hook で起こし、何も残らないことを確かめています。妥当です。\n- K5・K7・K8: AC6・AC8・AC9 と同じ。妥当です。\n- （エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは私の確認でも見つかりませんでした）\n\n### E2E の要否\n- 不要です。HTTP の API や UI は対象外で、ライブラリだけの仕様です。並行実行はファイル DB と複数の接続を使った統合的な単体テストで確かめています。\n\n### 不足しているリスク\n- R4/R10: 型の違う version で、コミットの後に例外が出ます（[重大1]）。テストはありません。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）→ 63件すべて合格。gate のログ（20261111-085247-check-unit.log）も exit=0、63件合格で一致しています。\n- `$AQ trace`: R1〜R10・AC1〜AC10・K1〜K8 は、すべて unit チェックに結び付いていて合格です（反証テストは無効）。\n- `$AQ history --since 0`: 検証条件は追加と bind だけで、弱めた変更・削除はありません。git はまだ初期コミットだけで、実装とテストは未追跡です（差分による改ざんの確認は該当なし）。\n- `notes/` の全ファイルと `tests/` の全ファイルを読み、仕様の R1〜R10 と1行ずつ突き合わせました。認可（`_visible`/`_can_modify` を、トランザクションの中で読み直した行にも適用していること）、SQL のプレースホルダー、LIKE の ESCAPE（`\\` 自体のエスケープを含む）、BEGIN IMMEDIATE、ロールバックの経路、マスクの境界、RateLimiter のロックの範囲、HMAC の compare_digest を確かめました。\n- 手で再現（一時プロセス、ファイルの変更なし）: (1) 検索 `hello` が `Hello` に一致する（大文字と小文字を区別しない）。(2) `007.<期限>.<署名>` が note_id 7 として通る。(3) `update_note(..., \"1\", body=\"y\")` で TypeError が出たあと、version が 2 になっている（コミット済み）。",
+ "files_changed": [],
+ "valid": true
+}

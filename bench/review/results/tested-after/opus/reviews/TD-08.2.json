@@ -1,0 +1,49 @@
+{
+ "case": "TD-08",
+ "rep": 2,
+ "sec": 56.8,
+ "exit": 0,
+ "cost_usd": 0.3441436,
+ "num_turns": 6,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 23874,
+  "cache_read_input_tokens": 218818,
+  "output_tokens": 5467,
+  "output_tokens_details": {
+   "thinking_tokens": 1318
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23874,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2846,
+    "cache_read_input_tokens": 47228,
+    "cache_creation_input_tokens": 4062,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4062
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c3a94d21\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3（notes/service.py:get_note 216-230） / 対応区分: 修正必須 / 内容: 閲覧数をトランザクションの外で読み（`views = row[\"views\"]` 220行）、トランザクションの中で `UPDATE notes SET views = ?`（223行）と、読んだ値に1を足した値で上書きしている。読み出しから書き込みまでの間に他の閲覧が入ると、その分が消える（更新の消失）。仕様 R2「同時に閲覧されても数え漏れがないこと」に反する / 成立条件: 別々の接続・スレッドから同じメモを同時に閲覧し、片方が 220行の読み出しを終えてから 222行の BEGIN IMMEDIATE に入るまでの間に、もう片方の閲覧がコミットされる / 影響: 閲覧数が実際の回数より少なくなる（データの不整合）。閲覧のたびに起きる可能性がある / 確認した保証: BEGIN IMMEDIATE は読み出しの後に始まるので、この消失を防がない。225行の再確認は見え方だけを確かめ、views は確かめない。DB の制約もない。既存のテスト（ViewCountTest.test_each_view_counts_once）は1つの接続で順に閲覧するだけなので、この経路を通らない（threading・tempfile を import しているが使っていない） / 根拠: スクラッチパッドの repro.py で再現した。一時ファイルの DB に接続を2つ（c1・c2）作り、hooks.before_write(\"view\") の中で c2 から get_note を1回呼んでから、c1 の get_note を最後まで進めた。2回閲覧した後の views は **1**（期待は 2） / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` にして、DB の中で原子的に足す（220行の読んだ値を使わない）。あわせて、上の再現と同じように hook で割り込ませ、2回の閲覧で views が 2 になることを確かめる決定論的なテストを追加する\n- [軽微1] 区分: 実装 / 対象: R9, K5（notes/share.py:372-373） / 対応区分: 改善提案 / 内容: `raise ValueError(link)` から `from None` で Forbidden にしているが、`__context__` には署名を含むリンクの全文を持つ ValueError が残る。通常のトレースバックには出ないので仕様違反ではない / 提案: ValueError を使わず、マッチしなかったら直接 `raise Forbidden(\"不正なリンク\")` にする\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名・本文・タグの境界、重複を含むタグの数、文字列の tags の拒否、途中の失敗（create:tags）の後に何も残らないこと、監査ログが同じ操作で記録されることを確かめており妥当\n- AC2: V2 は見え方（他の組織・他人の非公開・存在しない → NotFound、確かめた後に非公開になった場合を含む）は妥当。ただし「同時の閲覧でも数え漏れがない」は、1つの接続で順に閲覧するテストしかなく、確かめていない。実装に [重大1] の欠陥がある\n- AC3: V3 は範囲（他の組織・他人の非公開）、ソート、ページの境界と巨大な page、% と _ と \\ をそのままの文字として探すこと、タグの OR、SQL の文字列を値として扱うこと、不正な入力の拒否を確かめており妥当\n- AC4: V4 は作成者と管理者の権限、他の組織の利用者、非公開のメモ（管理者は NotFound）、古い version、読み出しと書き込みの間の他の更新（hook）による Conflict、トランザクションの中での認可の再確認、更新での入力検証、削除の途中の失敗のロールバックと例外の伝達を確かめており妥当\n- AC5: V5 は管理者だけであること、同じ組織であること、途中の失敗で何も移らないことを確かめており妥当\n- AC6: V6 は末尾4文字以外を伏せること、8文字未満の鍵をすべて伏せること、管理者・自分の組織だけであることを確かめており妥当\n- AC7: V7 は枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドを Barrier でそろえた同時呼び出し、判定の中への割り込みが直列になることを確かめており妥当\n- AC8: V8 は期限の時刻ちょうどが無効になること、改ざん（id・期限・署名・鍵）、形の崩れ（改行・大文字・全角の数字・型の違い）を確かめており妥当\n- AC9: V9 はログと例外のメッセージ、監査ログの detail に本文・署名・鍵が出ないことを確かめており妥当\n- AC10: V10 は失敗の種類ごとの後に接続を使えること、DB のエラー、ROLLBACK できないときに元の例外を隠さないことを確かめており妥当\n- K1: 一覧・検索・閲覧・更新・削除・移管で、他の組織・他人の非公開が見えないことを確かめており妥当\n- K2: プレースホルダーと ESCAPE '\\\\' を、題名と本文の両方に実際に適用している（service.py:259-262）。タグは IN (?, …) で渡している。ORDER BY は SORT_COLUMNS の固定値だけを使う。テストも妥当\n- K3: 更新（version の条件付き UPDATE と rowcount）とレート制限は妥当。閲覧数は検証がなく、実装も欠陥あり（[重大1]）\n- K4・K6・K7・K8・K5: 上の AC1・4・5・6・8・9・10 のとおり妥当\n- （エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは見つからなかった）\n### E2E の要否\n- 不要（ライブラリで HTTP・UI がなく、単体テストで公開関数を実際の SQLite に対して呼んでいる）\n### 不足しているリスク\n- K3: 閲覧数を同時に増やす場合の検証がない（[重大1] の修正とあわせてテストを追加する）\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）→ 61件すべて OK。gate のログ 20261111-085755-check-unit.log と一致\n- 再現スクリプト `/tmp/claude-0/-tmp-claude-0-td-after-work-aqdlc-test-tsfawy35-app/048049f4-bcb2-4d59-af4f-397a291b6da3/scratchpad/repro.py`（接続2つ、DB は一時フォルダ）→ 2回閲覧して views=1。閲覧数が消えることを確認した\n- `$AQ history --since 0` → 検証条件・チェックは追加（before: null）だけで、削除・弱体化はなかった。git はコミットが初期状態だけで、実装はすべて未追跡のファイル\n- コードを読んで確かめたこと: update_note の Conflict と、トランザクションの中での認可の再確認。delete_note・transfer_notes のトランザクションの範囲。transaction() の ROLLBACK と例外の再送出。list_notes の bool・巨大な page・per_page の境界。search_notes の LIKE のエスケープ（\\ → % → _ の順で、ESCAPE 句を題名・本文の両方に適用）。export_audit の伏せ方と org_id での絞り込み。RateLimiter のロックの範囲と `>=` の枠の境界。verify_link の fullmatch、`>=` の期限、compare_digest。ログに出しているのが ID だけであること",
+ "files_changed": [],
+ "valid": true
+}

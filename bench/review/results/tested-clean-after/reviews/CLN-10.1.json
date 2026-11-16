@@ -1,0 +1,49 @@
+{
+ "case": "CLN-10",
+ "rep": 1,
+ "sec": 36.0,
+ "exit": 0,
+ "cost_usd": 0.158364,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 25844,
+  "cache_read_input_tokens": 120120,
+  "output_tokens": 4296,
+  "output_tokens_details": {
+   "thinking_tokens": 1834
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 25844,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1991,
+    "cache_read_input_tokens": 39485,
+    "cache_creation_input_tokens": 6988,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6988
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c8b1a97a\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R5, AC5 / 対応区分: 改善提案 / 内容: `transfer_notes` は移す先の利用者が実在するかを事前に確かめていない。実在しない ID を渡すと、メモが1件以上ある場合は外部キー違反（IntegrityError）で全体がロールバックされ、元のまま残る。移すメモが0件のときは監査ログだけが書かれる。仕様の「何も移さない」は守られており、利用者の dict は呼び出し側が確かめて渡す前提（対象外）なので、仕様違反ではない。 / 提案: 移す先の存在確認を足して、NotFound か ValidationError を返す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 / VK4 は妥当。題名・本文・タグの境界、タグが文字列そのもの、重複を数えること、末尾の改行を通さないこと、`create:tags` の途中失敗で何も残らないことを確かめている。\n- AC2: V2 / VK1 は妥当。他の組織・他人の非公開・存在しないメモがどれも NotFound になることを確かめている。閲覧数は `views = views + 1` をトランザクション内で更新しており、数え漏れは起きない。同時閲覧は別スレッド・別接続のテストで確かめている（テストの中身は未確認。`views` の更新式とトランザクションはコードで確認した）。\n- AC3: V3 / VK2 は妥当。範囲外の page・per_page・sort（bool・文字列・SQL 断片を含む）を拒否している。`%`・`_`・`\\` をそのまま探すこと、他組織と他人の非公開メモを含めないこと、タグの OR、SQL 文字列が値として扱われることを確かめている。巨大な page も検証している。\n- AC4: V4 / VK3 は妥当。更新・削除の認可、非公開メモが管理者にも NotFound になること、version の競合、判定後に他の更新が入る競合（`before_write` で再現）、削除の途中失敗が伝わり巻き戻ることを確かめている。実装は BEGIN IMMEDIATE と `UPDATE ... WHERE version = ?`、`rowcount` の判定で、設計どおり。\n- AC5: V5 / VK6 は妥当。管理者以外、組織をまたぐ移管の拒否、途中失敗（`transfer:i` フック）で全部元に戻ることを確かめている。\n- AC6: V6 / VK7 は妥当。8文字未満は全部伏せ、8文字以上は末尾4文字だけ残す。\n- AC7: V7 は妥当。時刻はクロックを注入しており、sleep に頼っていない。枠のちょうど window 秒の境界と、`hook` を使った同時呼び出しを確かめている。実装は `hit` 全体をロックで囲んでいる。\n- AC8: V8 / VK8 は妥当。期限ちょうど・期限切れ・改ざん・形の崩れ・改行・型違いのリンクが Forbidden になることを確かめている。実装は `fullmatch` と `compare_digest` を使っている。\n- AC9 / VK5: 妥当。ログ・例外・出力に本文・署名・api_key が出ないことを確かめている。コードでも、ログと例外のメッセージには ID と型だけが入っていることを確認した。\n- AC10: V10 は妥当。例外の後も接続を使い続けられること、`_rollback` が ROLLBACK の失敗で元の例外を隠さないことを確かめている。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションなしのテストは見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のない標準ライブラリだけの Python パッケージで、SQLite の実 DB を使う単体テストが全受け入れ条件を直接確かめている。\n\n### 不足しているリスク\n- なし。\n\n### 確認したこと\n- 仕様・設計と、notes の全ソース（db / service / ratelimit / share / errors）を読んだ。次の点をコードの経路で確かめた。\n  - LIKE は `\\` → `%` → `_` の順でエスケープし、`ESCAPE '\\'` を題名と本文の両方に適用している。値はすべてプレースホルダーで渡している。ORDER BY は固定の辞書から選んでおり、利用者の入力は入らない。\n  - 更新・削除の認可は、BEGIN IMMEDIATE の中で読み直した行で行っている。\n  - 閲覧数の更新は、書き込み後に `_visible` を再確認している。\n  - 移管の WHERE は `owner_id` と `org_id` で絞っている。\n  - タグの検査は、作成・更新・検索のどれにも適用されている。\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて OK（`PYTHONDONTWRITEBYTECODE=1`）。\n- `aqdlc history --since 0` を見た。検証条件への変更は実装担当による bind の追加だけで、検証条件・テストを弱めた形跡はない。\n- `aqdlc trace` を見た。全 AC・リスクにテストが対応している。反証テストは無効で、証拠の状態は passed_but_unchallenged。\n- リポジトリは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

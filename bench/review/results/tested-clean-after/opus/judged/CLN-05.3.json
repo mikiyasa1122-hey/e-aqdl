@@ -1,0 +1,28 @@
+{
+ "case": "CLN-05",
+ "rep": 3,
+ "judge_cost_usd": 0.26707559999999997,
+ "judge_raw": "## 判定\n\n埋め込んだ欠陥はない（振る舞いを変えない変更のみの）ケースなので、matches_defect は使っていません。重大の2件はどちらもコードに実在する欠陥です。軽微の1件は欠陥の主張ではなく改善提案です。\n\n### [重大1] version に文字列を渡すと、例外が出るのに更新が確定する → real_other\n- **起きること**: メモの version が 1 のときに `update_note(..., version=\"1\", ...)` を呼ぶと、更新は確定し、そのあと例外が出ます。\n- **理由**:\n  1. `version` 列は INTEGER として宣言されています。比べる相手のプレースホルダーには型の指定がないので、SQLite が `\"1\"` を数値に変えて比べます。そのため `WHERE version = ?` が一致し、UPDATE と監査ログが COMMIT されます。\n  2. そのあと、トランザクションの外にある `return version + 1` で TypeError になります。\n- **仕様との関係**: 呼び出し側には例外が届くのに書き込みは残ります。「例外が起きたらロールバックする」という R10 の考え方と食い違います。\n- **確かめたこと**: 上流に version の型検査はありません。テストも int の version しか使っていません。報告の根拠とコードは一致しています。\n\n### [重大2] sort にハッシュできない値を渡すと TypeError になる → real_other\n- **起きること**: `sort=[\"updated\"]` や `sort={}` を渡すと、`sort not in SORT_COLUMNS`（dict に対する `in`）が TypeError を投げます。\n- **仕様との関係**: R3 は、sort の範囲外の値を ValidationError にすると決めています。例外の型が違うので、仕様に反しています。\n- **補足**: 影響は小さいですが、欠陥は実在します。\n\n### [軽微1] 共有リンクの先頭の 0 と、桁の上限 → style\n- **(a) 先頭の 0**: `007.期限.署名` は R8 の「10進の数字だけ」という規則に合っています。署名は int にした値で正しく検証されるので、改ざんしたリンクが通るわけではありません。\n- **(b) 18桁の上限**: 問題になるのは、ttl がありえないほど大きいときだけです。\n- **扱い**: どちらも仕様に反しておらず、表現を統一するための保守性の提案です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"現在の version が 1 のメモに version=\\\"1\\\"（文字列）を渡すと、INTEGER 列との比較で SQLite が数値に変えて WHERE version = ? が一致し、UPDATE と監査ログが COMMIT されたあと、トランザクションの外の return version + 1 で TypeError になる（例外が出るのに書き込みが残る）。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"list_notes に sort=[\\\"updated\\\"] や sort={} を渡すと、dict に対する in がハッシュできない値で TypeError を投げ、R3 が定める ValidationError にならない。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭に 0 を付けた note_id は R8 の「10進の数字だけ」に合っており、署名も正しく検証されるので通るのは正規のリンクだけ、桁の上限もありえない ttl でしか問題にならないため、仕様違反ではない改善提案。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、作り手の見落としとして、version の型を検査していないこと（例外が出るのに COMMIT される）と、sort の型を検査していないこと（TypeError になる）の2件が実在する。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "現在の version が 1 のメモに version=\"1\"（文字列）を渡すと、INTEGER 列との比較で SQLite が数値に変えて WHERE version = ? が一致し、UPDATE と監査ログが COMMIT されたあと、トランザクションの外の return version + 1 で TypeError になる（例外が出るのに書き込みが残る）。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "list_notes に sort=[\"updated\"] や sort={} を渡すと、dict に対する in がハッシュできない値で TypeError を投げ、R3 が定める ValidationError にならない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭に 0 を付けた note_id は R8 の「10進の数字だけ」に合っており、署名も正しく検証されるので通るのは正規のリンクだけ、桁の上限もありえない ttl でしか問題にならないため、仕様違反ではない改善提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、作り手の見落としとして、version の型を検査していないこと（例外が出るのに COMMIT される）と、sort の型を検査していないこと（TypeError になる）の2件が実在する。"
+ }
+}

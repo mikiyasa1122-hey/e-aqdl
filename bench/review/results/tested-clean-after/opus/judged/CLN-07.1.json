@@ -1,0 +1,33 @@
+{
+ "case": "CLN-07",
+ "rep": 1,
+ "judge_cost_usd": 0.2853756,
+ "judge_raw": "## 判定結果（CLN-07: 埋め込んだ欠陥なし）\n\nこのケースは欠陥なしの題材なので、`matches_defect` はどの指摘にも使いません。ただ、コードを読んでたどると、重大の2件はどちらも実在する欠陥でした。正解データ（欠陥なし）の作り手が見落としたものと判断します。\n\n### [重大1] version の型を確かめていない → real_other\n- **成立する入力:** `update_note(conn, owner, nid, \"1\", body=\"x\")`。\n- **たどった経路:**\n  1. `notes` の `version` 列は INTEGER のアフィニティを持つので、文字列 `'1'` は比較のときに整数 1 に変換され、`WHERE id = ? AND version = ?` が一致します。\n  2. UPDATE・監査ログの記録・`with transaction(conn)` を抜けたところの COMMIT まで、正常に終わります。\n  3. そのあと `return version + 1`（コード上は service.py:197）で、`\"1\" + 1` が TypeError になります。\n- **結果:** 呼び出し側には例外が返りますが、変更はすでに確定しています。R10 の「例外ならロールバック」に反する、実在の不整合です。\n- 補足として、報告の行番号（281-301）は提示されたコードと合いません。`True` が version 1 として通る点は、例外が出ないので不整合までは起きません。\n\n### [重大2] ハッシュできない sort で TypeError → real_other\n- **成立する入力:** `list_notes(conn, user, sort=[])` や `sort={}`。\n- **たどった経路:** `sort not in SORT_COLUMNS` で、dict の `in` が list や dict をハッシュしようとして TypeError になります。\n- **結果:** R3 は「範囲外は ValidationError」と定めているので、仕様に反します。インジェクションにはつながりませんが、仕様に反する実在の欠陥です。\n\n### [軽微1] LINK_RE が18桁まで・先頭の0を通す → style\n- 19桁の note_id のリンクが拒否されるのは本当です。ただし自動採番では 10**18 に届かず、拒否する方向（安全側）に倒れています。\n- 先頭の0を付けたリンク（`07.…`）が通るのは、仕様（10進の数字だけ）に反しません。改ざんでもありません。\n- 報告者自身も「改善提案」として扱っています。\n\n### [軽微2] RateLimiter の記録が増え続ける → style\n- R7 は記録の掃除やメモリの上限を求めていません。保守性の提案です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"INTEGER アフィニティにより文字列 version \\\"1\\\" で WHERE version = '1' が一致して UPDATE・COMMIT まで完了し、その後 return version + 1 が TypeError になるので、例外なのに書き込みが確定し R10 に反する（update_note(conn, owner, nid, \\\"1\\\", body=\\\"x\\\") で成立）。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"sort=[] や sort={} では dict の in がハッシュできずに TypeError となり、R3 の『範囲外は ValidationError』に反する（list_notes(conn, user, sort=[]) で成立）。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"18桁の上限は自動採番では到達しない安全側の拒否で、先頭0のリンクを通すことも仕様（10進の数字だけ）に反せず改ざんでもないため、改善提案にとどまる。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"_counts の掃除は R7 の要件になく、メモリ使用の保守性の提案である。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、重大1（コミットしてから TypeError）と重大2（unhashable な sort で TypeError）はコード上で成立する実在の欠陥で、正解データの見落としと判断した。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "INTEGER アフィニティにより文字列 version \"1\" で WHERE version = '1' が一致して UPDATE・COMMIT まで完了し、その後 return version + 1 が TypeError になるので、例外なのに書き込みが確定し R10 に反する（update_note(conn, owner, nid, \"1\", body=\"x\") で成立）。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "sort=[] や sort={} では dict の in がハッシュできずに TypeError となり、R3 の『範囲外は ValidationError』に反する（list_notes(conn, user, sort=[]) で成立）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "18桁の上限は自動採番では到達しない安全側の拒否で、先頭0のリンクを通すことも仕様（10進の数字だけ）に反せず改ざんでもないため、改善提案にとどまる。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "_counts の掃除は R7 の要件になく、メモリ使用の保守性の提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、重大1（コミットしてから TypeError）と重大2（unhashable な sort で TypeError）はコード上で成立する実在の欠陥で、正解データの見落としと判断した。"
+ }
+}

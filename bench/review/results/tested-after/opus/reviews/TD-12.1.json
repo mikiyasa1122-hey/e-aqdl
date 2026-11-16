@@ -1,0 +1,49 @@
+{
+ "case": "TD-12",
+ "rep": 1,
+ "sec": 52.5,
+ "exit": 0,
+ "cost_usd": 0.35818580000000005,
+ "num_turns": 5,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 27841,
+  "cache_read_input_tokens": 162089,
+  "output_tokens": 5150,
+  "output_tokens_details": {
+   "thinking_tokens": 1739
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27841,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2412,
+    "cache_read_input_tokens": 42363,
+    "cache_creation_input_tokens": 6058,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6058
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d21222bf\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4（notes/service.py `_validate`・`create_note`・`update_note`） / 対応区分: 修正必須 / 内容: メモを作るときと更新するときに、タグの個数の上限（5個まで。重複も数える）を確かめていない。`_validate`（service.py:171-178）はタグの形しか見ておらず、`TAGS_MAX` を使っているのは `search_notes`（service.py:261）だけ。 / 成立条件: `create_note` に6個以上のタグを渡したとき（重複を含む `['a']*6` も含む）、または `update_note` に6個以上のタグを渡したとき。権限は普通の利用者で足りる。 / 影響: 仕様 R1 の「タグは5個まで（重複も数える）」と、R4 の「更新でも R1 の入力検証を行う（タグを含む）」に反している。上限を超えるタグが保存され、AC1 と AC4 を満たさない。 / 確認した保証: 上流に個数の検査はない（呼び出し元はライブラリの利用者）。DB の制約もない（note_tags は主キーだけ）。既存のテストも防いでいない（test_ac1_create.py の bad_tags は形の違反だけで、個数の超過がない）。 / 根拠: `create_note(c,u,'t','b',tags=['a','b','c','d','e','f'])` が通り、タグが6個保存された。`tags=['a']*6` も通った。`update_note(..., tags=list('abcdefg'))` も通り、タグが7個保存された（下の確認コマンドで再現）。 / 提案: `_validate` に `if len(tags) > TAGS_MAX: raise ValidationError(...)` を入れる。重複を除く前の列の長さで数える。あわせて、作成・更新のどちらでも、6個のタグ（重複を含む場合も）で ValidationError になり何も残らないことを確かめるテストを足す。\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py `update_note` の version） / 対応区分: 改善提案 / 内容: `version` の型を確かめていない。文字列 `\"1\"` を渡すと、SQLite の型の変換で WHERE が一致し、更新は確定する。その後 `version + 1` で TypeError になる。仕様に型の規定はない。 / 提案: `version` が bool ではない int であることを、トランザクションの前に確かめる（ValidationError にする）。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 次の点を確かめていて妥当。題名と本文の境界、タグの形（改行・大文字・非 str）、文字列の tags の拒否、途中の失敗（create:tags）で何も残らないこと。ただし、タグの個数の上限（重複を含む）のテストがなく、[重大1] の欠陥を見逃している。\n- AC2: 次の点を確かめていて妥当。他の組織・他人の非公開・管理者からの非公開・存在しないメモがすべて NotFound になること。判定の後に非公開へ変わる場合。閲覧の割り込み。4スレッド×10回が別々の接続で 40 になること。\n- AC3: 一覧の page・per_page・sort の拒否、LIKE の % と _ と \\ のエスケープ、タグの OR、組織と非公開での絞り込みを、テストで確かめている。実装ではプレースホルダーと ESCAPE '\\' が、題名と本文の両方の条件に同じ pattern として渡っていることを、コードで確かめた。\n- AC4: 次の点を確かめていて妥当。作成者と管理者の更新、他の利用者の Forbidden、version の不一致と割り込みの Conflict、削除の途中の失敗で巻き戻ること。ただし、更新でのタグの個数の検証がない（[重大1] に含める）。\n- AC5: 管理者以外・組織の違いの Forbidden と、途中の失敗（transfer:i）で元のままになることを確かめていて妥当。\n- AC6: 末尾4文字と、8文字未満のすべてを伏せることを確かめていて妥当。\n- AC7: 次の点を確かめていて妥当。注入した時計による 59.999 秒と 60 秒の境界。Barrier を使った20スレッドで 5 件だけ通ること。hook による割り込みの直列化。sleep には頼っていない。\n- AC8: 期限ちょうど・改ざん・形の崩れたリンク（改行・大文字の16進など）が Forbidden になることを確かめていて妥当。\n- AC9: ログと例外のメッセージに、本文・署名・api_key が出ないことを確かめていて妥当。\n- AC10: 例外の後に in_transaction が False になり、続けて操作できることを確かめていて妥当。\n- K1〜K8: 上の AC のテストで扱われている。K4 は AC1・AC4・AC5 の fail_at で決定論的に再現している。\n- エンジンが検出したテストの兆候: なし（skip・.only は見当たらない）。\n\n### E2E の要否\n- 不要。HTTP の層を持たないライブラリで、別々の接続・スレッドを使う結合テスト（ファイルの DB）がすでにある。\n\n### 不足しているリスク\n- R1/R4: タグの個数の上限（重複を含む）の検証がない（[重大1]）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 61件すべて合格。\n- 再現のスクリプト（メモリ上の DB）: タグ6個・重複したタグ6個で作成でき、更新でタグ7個を保存できた。仕様違反であることを確かめた。\n- `$AQ history --since 0`: 検証の紐付け（bind）だけで、検証が弱められた履歴はない。`$AQ trace`: すべて合格（反証テストは無効）。\n- コードを読んで確かめた範囲:\n  - 認可（_visible と _can_modify を、トランザクションの中で読み直した行に適用していること）\n  - 楽観的ロック（BEGIN IMMEDIATE ＋ WHERE version ＋ rowcount）\n  - 閲覧数の原子的な加算\n  - 移管の組織の絞り込みと、全部か何もしないか\n  - LIKE の ESCAPE とプレースホルダー\n  - 共有リンクの fullmatch・期限の境界・compare_digest\n  - api_key の伏せ方\n  - ROLLBACK の失敗で元の例外を隠さないこと",
+ "files_changed": [],
+ "valid": true
+}

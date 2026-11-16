@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 1,
+ "sec": 139.4,
+ "exit": 0,
+ "cost_usd": 0.8431582,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 70357,
+  "cache_read_input_tokens": 265131,
+  "output_tokens": 11361,
+  "output_tokens_details": {
+   "thinking_tokens": 5830
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 70357,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3864,
+    "cache_read_input_tokens": 63714,
+    "cache_creation_input_tokens": 6643,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6643
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3（notes/service.py `update_note` 283〜293行） / 対応区分: 修正必須 / 内容: `update_note` は、トランザクションの外で読んだ行（283行の `row`）の title と body を、そのまま書き込みに使っています（289〜290行）。288行で同じトランザクションの中で行を読み直していますが、その行は認可の判定に使われるだけで捨てられます。そのため、読み出しから BEGIN IMMEDIATE までの間に入った他の更新を、古い値で上書きして消してしまう経路が残っています。 / 成立条件: 呼び出し側の渡した version が、呼び出した時点の最新ではない場合に起きます（仕様では Conflict になるべき入力）。たとえば、DB が v1 の時点で version=2 を渡し、title を省いて body だけを更新したとします。外の読み出し（v1、title=\"orig\"）の後に、別の更新で title が \"ALICE-NEW\" に変わり、v2 になります。すると `WHERE version = 2` が一致して rowcount=1 となり、成功扱いになります。 / 影響: R4 の「読み出しから書き込みの間に他の更新が入った場合も Conflict（後から書いた側が先の更新を消さない）」に反しています。先に書いた側の title が、黙って元の値に戻ります（失われた更新が起き、データ整合性が崩れます）。認可は読み直した行で判定しているため、権限の突破はありません。 / 確認した保証: UPDATE の version 条件は、呼び出し側の version と書き込み時点の行を比べるだけです。外で読んだ行の version とは比べていないので、上の経路を防げません。既存の `test_concurrent_update_between_read_and_write_conflicts` は version=1（最新）を渡すケースだけを見ており、この経路は通っていません。`test_permission_is_checked_again_inside_the_write` は、まさに「未来の version=2」を渡しています。ただし Forbidden で止まるケースなので、上書きは検出しません。 / 根拠: 再現スクリプト（scratchpad の repro.py）で確かめました。管理者が `update_note(nid, version=2, body=\"x\")` を呼び、hook \"update\" の中で作成者が title を \"ALICE-NEW\" に更新したところ、戻り値は 3 で、結果の行は title='orig'、body='x'、version=3 でした。\"ALICE-NEW\" が消えています。 / 提案: トランザクションの中で読み直した行を変数に保持し、それを `_check_modify` と new_title・new_body の既定値の両方に使ってください（たとえば `cur_row = _row(conn, note_id)` とします）。加えて、title を省いた更新の間に別の title 更新が入ったとき、Conflict になるか、先の更新が残ることを確かめるテストを追加してください。\n- [軽微1] 区分: 設計 / 対象: R4, K3（notes/db.py 12行 `notes.id INTEGER PRIMARY KEY`） / 対応区分: 改善提案 / 内容: AUTOINCREMENT がないので、最大 id のメモを削除すると、次に作ったメモが同じ id を使います。その新しいメモの version は 1 から始まります。このため、古いメモの version=1 を持った呼び出し側の更新が、楽観的ロックをすり抜けて新しい別のメモに適用されます。再現スクリプトで確かめたところ、更新は成功して戻り値は 2 でした。さらに重大1の古い行の使用と重なって、削除済みのメモの title \"old\" が新しいメモに書き込まれました。ただし、これは「更新」の競合ではなく「削除と作成」との競合です。仕様に明記された規則への違反とまでは言えないため、軽微にしました。 / 提案: `INTEGER PRIMARY KEY AUTOINCREMENT` にして id を再利用しないようにするか、設計書に制約として明記してください。\n- [軽微2] 区分: 実装 / 対象: R8, K8（notes/share.py 348・370行） / 対応区分: 改善提案 / 内容: 署名する前に note_id と期限を int に変換しているため、先頭にゼロを付けたリンク（例: \"07.1060.<署名>\"）も有効と判定されます（再現で戻り値 7 を確認）。指すメモも期限も同じなので、権限が広がることはありません。ただ、リンクの正規の表記が1つに決まりません。また、18桁という上限は仕様に書かれていません。 / 提案: 正規表現を `(0|[1-9][0-9]*)` のように先頭ゼロを許さない形にし、桁数の上限は仕様か設計に明記してください。\n- [軽微3] 区分: 実装 / 対象: R9, K5（notes/share.py 369・372行） / 対応区分: 改善提案 / 内容: `raise ValueError(link)` で、署名を含むリンク全体を例外に入れています。`from None` で表示は止まりますが、`Forbidden.__context__` には署名を含む ValueError が残ります。 / 提案: ValueError の引数からリンクを外すか、ValueError を使わずに直接 Forbidden を送出してください。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグの境界値（100/101文字、10000/10001文字、20/21文字、改行、Unicode、型）を確かめています。重複を数える規則、文字列の拒否、hook による途中の失敗で3つの表に何も残らないことも見ており、妥当です。\n- AC2: 他の組織・他の組織の管理者・他人の非公開（管理者を含む）・存在しないメモが、どれも NotFound になることを確かめています。判定の後に非公開へ変わった場合の再判定、NotFound のときに閲覧数が増えないことも見ています。閲覧数の数え漏れは、別々の接続を使う4スレッド×10回で 40 になることで確かめています。妥当です。\n- AC3: 範囲（他の組織・他人の非公開）、並び順、ページング、巨大な page、不正な page・per_page・sort（bool・float・文字列）を確かめています。% と _ とバックスラッシュを普通の文字として扱うこと、タグの OR、検索語とタグの検査も見ており、妥当です。\n- AC4: 権限（作成者・管理者・他人・他の組織・非公開）、古い version、書き込み内での再認可、更新の入力検証、削除の巻き戻しと例外の伝達は確かめています。一方、「読み出しと書き込みの間の更新で先の更新が消えない」は、最新の version を渡す1経路しか見ていません。title や body を省いた部分更新で上書きが起きる経路（重大1）を検出できないため、不十分です。\n- AC5: 管理者のみであること、組織の組み合わせ4通りが Forbidden になること、途中の失敗で何も移らないこと（hook で2件目に失敗させる）、非公開も移ること、監査ログ、version の増加を確かめており、妥当です。\n- AC6: 末尾4文字以外を伏せること、7文字・8文字・0文字の境界、管理者のみであること、自分の組織に限ることを確かめており、妥当です。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドで上限 5 を超えないこと、hook によって判定の途中に割り込めないこと（ロックを外すと失敗する構成）を確かめており、妥当です。\n- AC8: 期限の時刻ちょうどで無効になること、note_id・期限・署名・秘密鍵の改ざん、形の崩れ（大文字、改行、負数、指数表記、Unicode 数字、型）を確かめており、妥当です。先頭ゼロの扱いは未検証です（軽微2）。\n- AC9: ログに本文・署名・api_key・秘密鍵が出ないこと、各例外のメッセージ、監査の detail を確かめており、妥当です。\n- AC10: Conflict・ValidationError・注入した例外・IntegrityError・ROLLBACK が既に済んだ状態のそれぞれについて、in_transaction が False に戻り、接続を続けて使えることを確かめており、妥当です。\n- K1: AC2・AC3・AC4・AC5 で網羅されており、妥当です。\n- K2: sort はホワイトリストで、値はすべてプレースホルダーで渡しています。LIKE は ESCAPE '\\' を使い、バックスラッシュ・%・_ をエスケープしています。条件ごとに確認したところ、題名と本文には同じエスケープ済みのパターンが渡り、タグは IN のプレースホルダーで渡っています。テストもあり、妥当です。\n- K3: 閲覧数と回数制限については妥当です。更新については重大1の経路が未検証で、不十分です。\n- K4〜K8: 上記の AC5・AC6・AC8・AC9・AC10 で確かめられており、妥当です。\n- エンジンが検出したテストの兆候: なし。skip や .only は見つからず、アサーションも確認しました。\n### E2E の要否\n- 不要です。HTTP や UI は対象外のライブラリで、単体テストが本物の SQLite（並行性はファイル DB）と実際のスレッドで動いているためです。\n### 不足しているリスク\n- K3: version を省いたフィールドを古い行から補うときの、失われた更新（重大1）。\n- K3: id の再利用によって楽観的ロックがすり抜けられること（軽微1）。\n### 確認したこと\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . -v` → 62件すべて合格。\n- 再現スクリプト（`/tmp/claude-0/-tmp-claude-0-td-before-work-aqdlc-test-lfw1nana-app/b732dc45-5027-4aae-8473-b10cfe966347/scratchpad/repro.py`、`python3 -I` で実行）→ 3件とも再現。未来の version を渡すと先の title 更新が消える（戻り値 3、title='orig'）。id の再利用で別のメモが更新される（戻り値 2、title='old'）。先頭ゼロのリンクが通る（戻り値 7）。\n- `$AQ trace` → R1〜R10 はすべて unit で合格。反証テストは無効です。\n- `$AQ history --since 0` → 検証条件とチェックの追加だけで、削除や弱体化はありませんでした。\n- gate のログ（20261111-091545-check-unit.log）→ 62件合格で、今回の実行結果と一致しました。\n- `git status` → リポジトリへの変更はありません（レビュー前後で同じ）。",
+ "files_changed": [],
+ "valid": true
+}

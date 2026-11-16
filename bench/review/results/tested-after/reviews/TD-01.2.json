@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 2,
+ "sec": 41.4,
+ "exit": 0,
+ "cost_usd": 0.13772800000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 17439,
+  "cache_read_input_tokens": 170120,
+  "output_tokens": 5094,
+  "output_tokens_details": {
+   "thinking_tokens": 2017
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17439,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1926,
+    "cache_read_input_tokens": 44372,
+    "cache_creation_input_tokens": 550,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 550
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1, K3, notes/service.py の update_note（約154〜160行） / 対応区分: 修正必須 / 内容: update_note は、認可（_check_modify）をトランザクションの前でしか行っていない。トランザクション内で行を読み直すが、そこでは認可を再判定しない。コメントは「トランザクション内で認可と入力の検証を行う」と書いているが、実際には検証しかしていない。delete_note は認可をトランザクション内で行っており、update_note とは不整合。読み直した行が None（削除済み）のときも検査がなく、NotFound や Conflict ではなく TypeError になる。 / 成立条件: (a) 判定の後、BEGIN IMMEDIATE の前に、管理者が transfer_notes でメモを別の利用者に移す。更新者は、移管後の version（移管で +1 される）を渡す。(b) 判定の後に、メモが削除される。 / 影響: (a) 作成者でなくなった元の所有者が、移管後のメモを更新できる。仕様 R4「できるのは作成者と同じ組織の管理者だけ（それ以外は Forbidden）」に反する（K1）。(b) 仕様の「読み出しから書き込みの間に他の更新が入った場合も Conflict」と、設計の「例外は ValidationError・NotFound…」に反し、内部エラーの TypeError が漏れる。 / 確認した保証: 移管は version を +1 するので、更新者が古い version を渡せば Conflict になる。しかし version は呼び出し側が渡す値で、推測できるため、保証にならない。既存テストは update の認可の再判定を確かめていない（delete にだけテストがある）。 / 根拠: 再現した。(a) 判定後に移管フックで transfer を差し込み、version=2 で update_note を呼ぶと、3 が返り、メモの owner_id=2 のまま body が \"hijack\" に書き換わった。(b) 判定後に削除を差し込むと TypeError: 'NoneType' object is not subscriptable になった。 / 提案: トランザクション内で row = _row(...) の直後に _check_modify(user, row, note_id, \"更新\") を呼ぶ。この呼び出しは row が None のときも NotFound にする。あわせて、フックで移管・削除を差し込むテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py の verify_link / 対応区分: 改善提案 / 内容: 先頭ゼロ付きの \"007.期限.署名\" が int 化により note_id=7 の有効なリンクとして通る。仕様は桁数に制限を置いていないため仕様違反とはいえない。ただし同じリンクの表記が複数あるのは望ましくない。 / 提案: 署名の対象を文字列のまま使うか、先頭ゼロを拒否する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1 が、境界値・タグの不正・途中失敗時のロールバックを確認しており妥当。\n- AC2: test_ac2 が、非公開・他組織・存在しないメモの NotFound と、スレッドによる閲覧数の加算を確認しており妥当。\n- AC3: LIKE のワイルドカード（% と _）、ESCAPE、プレースホルダー、ページングの範囲外と型の違う値の拒否を、コードで確認した。ESCAPE '\\' は題名・本文の両方に適用され、パターンは _like_escape を通っていた。テストも妥当。\n- AC4: 不十分。更新の競合は検証されているが、判定の後の移管・削除に対する認可の再判定がテストされていない（[重大1]）。\n- AC5: 組織をまたぐ移管の拒否と、途中失敗時のロールバックを確認しており妥当。\n- AC6: 8文字未満と末尾4文字の伏せ字を確認しており妥当。\n- AC7: 枠の境界とスレッドの同時呼び出しを、clock の差し替えと hook で決定的に再現しており妥当。\n- AC8: 期限ちょうど・改ざん・形の崩れたリンクを確認しており妥当。\n- AC9: ログ・例外メッセージに本文・署名・鍵が出ていないことを、コードで確認した。テストも妥当。\n- AC10: 例外の後に接続を使い続けられることを確認しており妥当。\n- エンジンが検出したテストの兆候: なし。history は bind のみで、検証条件の弱体化は見当たらなかった。\n### E2E の要否\n- 不要。HTTP や UI がないライブラリで、ユニットテストが実物の SQLite（:memory:）を使っている。\n### 不足しているリスク\n- K1/K3: update_note の「判定の後に移管・削除が入る」順序は未検証で、実際に欠陥がある（[重大1]）。\n### 確認したこと\n- spec.md、design.md、notes/*.py の全ソースを読んだ。\n- `python3 -B -m unittest discover` を実行し、62 件が合格した。\n- 再現スクリプトを実行した。update_note は、判定後の移管で他人のメモを書き換え、判定後の削除で TypeError を起こした。\n- `aqdlc.py history --since 0` で履歴を確認した。",
+ "files_changed": [],
+ "valid": true
+}

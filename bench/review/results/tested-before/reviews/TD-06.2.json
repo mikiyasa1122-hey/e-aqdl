@@ -1,0 +1,49 @@
+{
+ "case": "TD-06",
+ "rep": 2,
+ "sec": 22.5,
+ "exit": 0,
+ "cost_usd": 0.1041684,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15939,
+  "cache_read_input_tokens": 127664,
+  "output_tokens": 2763,
+  "output_tokens_details": {
+   "thinking_tokens": 399
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15939,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1780,
+    "cache_read_input_tokens": 40313,
+    "cache_creation_input_tokens": 2552,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2552
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3d2001d9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1 / 対応区分: 修正必須 / 内容: `get_note` が、見られないメモに対して NotFound ではなく Forbidden を返している。仕様 R2 は「他の組織・他人の非公開・存在しない」をすべて NotFound にして、存在を明かさないことを求めている。 / 成立条件: 別の組織の利用者、または作成者以外の利用者が、実在する非公開メモの ID で `get_note` を呼ぶ。 / 影響: 存在しない ID は NotFound、存在するが見られない ID は Forbidden になり、呼び出し側が ID の存在を判別できる。K1（存在の漏えい）が防げていない。 / 確認した保証: 呼び出し元や上流で例外を変換している箇所はない。`update_note` と `delete_note` は `_check_modify` 経由で NotFound にしており、`get_note` だけが不整合。テストにもこの経路を確かめるものがない。`tests/test_ac2_view.py` の NotFound テストは、確認後に非公開へ変わる競合の1ケースだけ。 / 根拠: `notes/service.py:116-117` の `if not _visible(user, row): raise Forbidden(...)`。`tests/test_ac2_view.py` に、他組織・他人の非公開・存在しない ID の3ケースはない。 / 提案: 117行目を `raise NotFound(f\"note {note_id}\")` にする。あわせて、他組織・他人の非公開・存在しない ID の3ケースがすべて NotFound になるテストと、非公開の閲覧数が増えないことの確認を `test_ac2_view.py` に足す。\n- [軽微1] 区分: 実装 / 対象: R3, `search_notes` / 対応区分: 改善提案 / 内容: `search_notes` のタグ検査は `_validate` の検査と重複して手書きされている。 / 提案: 共通のタグ検査関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1・VK4 は、検証規則とトランザクションの巻き戻しを `before_write(\"create:tags\")` の差し込み口で確かめており妥当。\n- AC2: 不十分。閲覧数の加算は、直列・割り込み・4スレッドの別接続で確かめており妥当。一方、他組織・他人の非公開・存在しないメモが NotFound になること（K1）を確かめるテストがなく、実装に欠陥がある（重大1）。\n- AC3: `search_notes` の LIKE の ESCAPE 句、プレースホルダー、`_like_escape` による `%` `_` `\\` の扱いをコード上で確認した。テストは通っている。個別の網羅度までは精査していない。\n- AC4: 楽観的ロック（UPDATE の WHERE に version）と、トランザクション内での認可の読み直しをコードで確認した。テストは通っている。\n- AC5: 管理者・同一組織の検査と、全件か何もしないかの動作を、コードと通過したテストで確認した。\n- AC6: 8文字未満の鍵をすべて伏せ、8文字以上は末尾4文字だけを残す動作を、コードで確認した。\n- AC7: RateLimiter は枠の境界（`>=`）を満たし、ロック内で判定している。\n- AC8: 正規表現の `fullmatch`、`compare_digest`、期限ちょうどを無効とする判定を、コードで確認した。\n- AC9: ログと例外メッセージに本文・署名・api_key が出ていないことを、コードで確認した。\n- AC10: `_rollback` が元の例外を隠さず、接続を使い続けられる作りになっている。\n- エンジンが検出したテストの兆候: なし。`history` でも検証条件を弱めた変更は見当たらない。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unit で足りる）。\n### 不足しているリスク\n- K1: R2 の「見られないメモはすべて NotFound」を確かめる検証がない（重大1）。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、61件が OK だった。\n- `notes/*.py` を全て読み、spec.md と design.md と突き合わせた。\n- `$AQ trace` と `$AQ history --since 0` を確認した。",
+ "files_changed": [],
+ "valid": true
+}

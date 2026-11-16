@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 1,
+ "sec": 27.9,
+ "exit": 0,
+ "cost_usd": 0.1259129,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19843,
+  "cache_read_input_tokens": 119749,
+  "output_tokens": 3455,
+  "output_tokens_details": {
+   "thinking_tokens": 316
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19843,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2548,
+    "cache_read_input_tokens": 39228,
+    "cache_creation_input_tokens": 1244,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1244
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6, notes/service.py:209-223 transfer_notes / 対応区分: 修正必須 / 内容: 移管がメモ1件ごとに別のトランザクション（217-220行の for ループ内の `with transaction(conn)`）で行われ、「全部移すか、何も移さないか」を満たしていない。 / 成立条件: 2件目以降の UPDATE で失敗する（`hooks.before_write(\"transfer:<id>\")` が例外を出す、ロック待ちが5秒を超える、プロセスが落ちるなど）。または、対象 ID の取得（215行）の後、移管の完了前に別の接続が from_user のメモを作成する。 / 影響: 一部のメモだけ to_user に移り、残りは元のまま、さらに監査ログも無いという中途半端な状態がコミット済みで残る。仕様 R5 と AC5「失敗時に元のまま」に違反し、K4 と K6（一部だけ移る）が未対策になっている。後者の並行作成の場合は、メモが移管漏れになる。 / 根拠: service.py:217-220 で1件ごとに BEGIN IMMEDIATE→COMMIT している。221-222行の監査の記録も別のトランザクションなので、移管の後で監査の記録だけ失敗しても移管は戻らない。ID の SELECT（215行）もトランザクションの外にある。`hooks.before_write(f\"transfer:{i}\")` は2件目で例外を出せば1件目のコミット済みの状態を再現できるが、これを使うテストが無い。上流の検証や DB の制約でも防げない（各 UPDATE は独立にコミットされる）。 / 提案: `with transaction(conn):` の中に、ID の取得・全件の UPDATE・監査の記録をすべて入れる。for ループは with の内側に置く。\n\n- [重大2] 区分: テスト / 対象: AC5, K4, K6 / 対応区分: 証拠不足 / 内容: tests/test_ac5_transfer.py に、移管の途中で失敗したときに元のまま（所有者・version・監査ログが変わらない）であることを確かめるテストが無い。 / 根拠: AC5 は「失敗時に元のまま」を明示しており、設計書のテスト方針も `service.hooks.before_write` で途中の失敗を再現するとしている。R1・R4 の途中失敗には同様のテストがあるが、R5 には無い。その結果、重大1の欠陥を全62件のテスト（実行して全て OK）が見逃している。 / 提案: `hooks.before_write` を2件目で例外を出すよう差し替えて `transfer_notes` を呼び、例外が伝わること、全メモの owner_id・version が元のままであること、audit に transfer が増えていないことを確かめる。あわせて、移管の途中で呼び出し元の接続が次の操作に使えることも確かめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証あり（tests/test_ac1_create.py）。コードも R1 の検証（題名・本文・タグの個数と形式・tags の型）と1つのトランザクションの記録を満たしており、妥当と判断した。\n- AC2: 検証あり。コードも、非公開・他の組織・存在しないメモは同じ NotFound になる。閲覧数の加算は `views = views + 1` の1文で、BEGIN IMMEDIATE の中で行われるため数え漏れは起きない。妥当。\n- AC3: 検証あり。LIKE は ESCAPE を使い、`\\`・`%`・`_` をエスケープしている。値はすべてプレースホルダーで渡している。ORDER BY は固定の辞書から選ぶ。タグも検査している。妥当。\n- AC4: 検証あり。更新は version を UPDATE の条件に含め、トランザクションの中で認可を再判定している。削除は1つのトランザクションで行われる。妥当。\n- AC5: 不十分。正常系・管理者以外・別の組織は確かめているが、「失敗時に元のまま」を確かめるテストが無く、実装もその要件を満たしていない（重大1・重大2）。\n- AC6: 検証あり。api_key は 8文字未満ならすべて伏せ、8文字以上なら末尾4文字以外を伏せている。妥当。\n- AC7: 検証あり。ロックの内側で判定と更新を行い、`now - start >= window` の比較で枠の境界はちょうど window 秒で新しい枠になる。テストは hook を使っており、sleep に頼っていない。妥当。\n- AC8: 検証あり。fullmatch、`>=` による期限の境界、`compare_digest` を使っており、形の崩れや改ざんはすべて Forbidden になる。妥当。\n- AC9: 検証あり。ログと例外のメッセージには ID だけを出しており、本文・署名・api_key は出ていない。妥当。\n- AC10: 検証あり。`_rollback` で ROLLBACK し、元の例外を隠さない。妥当。\n- エンジンが検出したテストの兆候は無し。skip・`.only`・アサーションなしのテストも見つからなかった。\n\n### E2E の要否\n- 不要（HTTP や UI を持たない Python ライブラリで、単体・結合のテストが公開関数を直接呼んでいる。ただし AC5 の途中失敗のテストは必須で、重大2に書いた）。\n\n### 不足しているリスク\n- K4・K6: 移管の途中失敗と、並行して作成されたメモの移管漏れ（重大1・2）。\n- 上記以外は、R1〜R10 とリスク K1〜K3、K5、K7、K8 について、コードの経路で重大な欠陥を見つけなかった。\n\n### 確認したこと\n- spec.md、design.md、notes/ の全ソース（db.py、service.py、ratelimit.py、share.py、errors.py）を通読し、仕様・設計と突き合わせた。\n- 実行コマンド: `python3 -m unittest discover -s tests -t .` で 62 件が全て OK。\n- 実行コマンド: `git status` で、ソースとテストが未追跡（初期コミットのみ）であることを確認した。履歴上の検証の弱体化は無い。\n- SQL は、LIKE のエスケープ（`\\`・`%`・`_`）と ESCAPE 句、タグの IN のプレースホルダー、LIMIT/OFFSET の整数検証、ORDER BY の固定の辞書を確認した。\n- 並行処理は、get_note の加算がトランザクション内であること、update_note が認可と version を同じトランザクション内で再確認することを、コードの経路で確認した。\n- 移管の失敗の再現は、コードの経路から（217-220行の1件ごとのコミット）判断した。再現のスクリプトは実行していない。",
+ "files_changed": [],
+ "valid": true
+}

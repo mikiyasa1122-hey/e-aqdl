@@ -1,0 +1,49 @@
+{
+ "case": "TD-12",
+ "rep": 3,
+ "sec": 20.8,
+ "exit": 0,
+ "cost_usd": 0.0807835,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 10984,
+  "cache_read_input_tokens": 122615,
+  "output_tokens": 2457,
+  "output_tokens_details": {
+   "thinking_tokens": 260
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 10984,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1692,
+    "cache_read_input_tokens": 37299,
+    "cache_creation_input_tokens": 609,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 609
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d21222bf\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1（R4 の更新時の入力検証も同じ原因）/ 対応区分: 修正必須 / 内容: 作成・更新でタグの個数（5個まで。重複も数える）を検査していない。`_validate`（notes/service.py:67-73）は各タグの形式だけを見る。`TAGS_MAX` を使うのは `search_notes`（service.py:157）だけ。/ 成立条件: `create_note` または `update_note` に、形式が正しいタグを6個以上（重複を含む）渡す。/ 影響: 仕様は ValidationError で拒否すると定めているが、そのまま保存される。AC1 と、更新にも R1 の検証を課す R4 に違反する。/ 根拠: 実際に実行した。`create_note(c,u,'t','b',['a','b','c','d','e','f','g'])` はノート ID 1 を返した。`create_note(..., ['a']*9)` はノート ID 2 を返した。どちらも例外にならない。呼び出し元・DB の制約・既存テストに、個数を防ぐものはない。tests/test_ac1_create.py にも6個以上のタグを拒否するテストがない。/ 提案: `_validate` に `len(tags) > TAGS_MAX` なら ValidationError を足す。タグを渡した更新でも同じ検査が通るようにする。あわせて、作成と更新それぞれで「5個は成功、6個は拒否、重複を含めた6個も拒否」を確かめるテストを足す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。題名・本文・タグの形式、失敗時に何も残らないこと（`hooks.before_write(\"create:tags\")` で途中失敗を再現）は確かめている。しかしタグ個数の上限（5個、重複も数える）の境界を確かめるテストがなく、実装にも欠陥がある（重大1）。\n- AC2: 妥当。他の組織・他人の非公開メモ・存在しないメモが NotFound になることと、閲覧数の加算を確かめている。並行閲覧は `BEGIN IMMEDIATE` と `UPDATE views = views + 1` で守られており、コードを読んで確認した。\n- AC3: 妥当。ページング、sort、`%` と `_` のエスケープ（ESCAPE 句つき）、プレースホルダー、タグの OR 絞り込みを確認した。題名と本文の両方に同じ LIKE パターンを渡している。\n- AC4: 妥当。version を条件に入れた UPDATE の rowcount で競合を判定している。更新・削除の認可はトランザクション内で読み直した行に対して行い、権限は `_visible` と `_can_modify` にまとめている。ただし更新時のタグ個数の検証は重大1のとおり欠けている。\n- AC5: 妥当。管理者と同じ組織の検査があり、同一トランザクションで全部移すか何も移さないかが決まる。途中失敗の再現テストもある。\n- AC6: 妥当。8文字未満は全部伏せ、8文字以上は末尾4文字だけを残す。\n- AC7: 妥当。Lock の中で判定し、枠の境界は `>= window`、並行は `hook` で決定的に再現している。\n- AC8: 妥当。fullmatch の正規表現、`compare_digest`、期限ちょうどを無効とする判定を確認した。\n- AC9: 妥当。ログには ID だけを出しており、署名・本文・api_key をログや例外メッセージに出していない。コードを読んで確認した。\n- AC10: 妥当。`_rollback` が元の例外を隠さず、例外後も接続を使い続けられる。\n- エンジンが検出したテストの兆候はなかった（skip・`.only`・アサーションなし）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest が実際の SQLite を使って各規則を確かめているため。\n### 不足しているリスク\n- R1: タグ個数の上限の検証がない。重大1のとおり、実装とテストの両方が欠けている。\n### 確認したこと\n- 仕様書・設計書と notes/*.py をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、61件すべて成功した。\n- インラインのスクリプトで、6個以上のタグと重複のタグを渡した作成が拒否されないことを再現した。\n- `git status` で、コードを変更していないことを確認した。",
+ "files_changed": [],
+ "valid": true
+}

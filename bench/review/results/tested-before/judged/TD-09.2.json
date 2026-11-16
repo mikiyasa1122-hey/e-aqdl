@@ -1,0 +1,18 @@
+{
+ "case": "TD-09",
+ "rep": 2,
+ "judge_cost_usd": 0.1113702,
+ "judge_raw": "重大1は、埋め込まれた欠陥そのものを指摘しています。対象は `transfer_notes` で、メモごとに別トランザクションにしている点（原因）と、途中で失敗すると一部だけ移る点（影響）が、正解データと一致します。コードの実際の記述（`for i in ids: with transaction(conn):`）とも合っています。テストが不足しているという指摘も付いていますが、実装の欠陥の原因と影響を述べているので、test_gap ではなく matches_defect とします。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transfer_notes がメモごとに別トランザクションで UPDATE しており、途中失敗で一部だけ移るという、埋め込んだ欠陥の原因と影響をそのまま指摘している。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"指摘は1件のみで、埋め込んだ欠陥と箇所・原因・影響が一致する。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transfer_notes がメモごとに別トランザクションで UPDATE しており、途中失敗で一部だけ移るという、埋め込んだ欠陥の原因と影響をそのまま指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "指摘は1件のみで、埋め込んだ欠陥と箇所・原因・影響が一致する。"
+ }
+}

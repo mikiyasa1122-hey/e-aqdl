@@ -1,0 +1,49 @@
+{
+ "case": "CLN-02",
+ "rep": 3,
+ "sec": 33.9,
+ "exit": 0,
+ "cost_usd": 0.16280640000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 26999,
+  "cache_read_input_tokens": 119944,
+  "output_tokens": 4280,
+  "output_tokens_details": {
+   "thinking_tokens": 1507
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 26999,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2137,
+    "cache_read_input_tokens": 39305,
+    "cache_creation_input_tokens": 8323,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 8323
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8d27e925\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `share.py` の `LINK_RE` は先頭ゼロ付きの数字（例: `007.…`）も通す。署名は `int` に変換した値から計算するため、`make_link` が作った `7.期限.署名` を `007.期限.署名` に書き換えても検証は通り、同じ note_id が返る。仕様の「10進の数字だけ」には反しない。また、通るリンクが指す note_id と期限は元のリンクと同じで、権限は広がらない。 / 提案: 正規化した文字列と元の文字列が一致するかを確かめる（`str(int)` との比較）。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名・本文・タグの境界値と、tags が文字列のときの拒否を確かめている。`hooks.before_write(\"create:tags\")` で途中失敗を起こし、メモ・タグ・監査ログに何も残らないことも確かめている。妥当。\n- AC2: V2 と VK1 は、他の組織・他人の非公開・存在しないメモがすべて NotFound になることと、閲覧数の加算を確かめている。コードでは、`UPDATE views = views+1` が `BEGIN IMMEDIATE` の中で行われ、数え漏れは起きない。確認後の削除・変更も、トランザクション内の再確認で検出される。妥当。\n- AC3: V3 と VK2 は、page・per_page・sort の範囲外、`%` と `_` のエスケープ、タグの OR 絞り込み、タグの検査を確かめている。コードでは、値はすべてプレースホルダーで渡され、`ESCAPE '\\'` と、`\\` 自体のエスケープがある。題名と本文の両方に同じパターンが適用されている。妥当。\n- AC4: V4・VK3・VK4 は次を確かめている。\n  - 作成者・管理者・他組織・非公開の各場合\n  - 古い version による Conflict\n  - 読み出しと書き込みの間に他の更新が入る場合の Conflict\n  - 判定後に移管された場合の Forbidden\n  - 更新時の入力検証\n  - 削除の途中失敗時のロールバック\n  - 例外の伝播\n\n  認可の再確認と最新行の読み直しはトランザクション内で行われている。妥当。\n- AC5: V5 と VK6 は、管理者以外・他組織・途中失敗時の元のまま、を確かめている。コードでは、元・先・管理者の組織が同じであることを事前に確かめ、更新は1つのトランザクションで行われている。妥当。\n- AC6: V6 と VK7 は伏せ字を確かめている。コードは 8 文字未満をすべて伏せ、8 文字以上は末尾4文字を残す。妥当。\n- AC7: V7 は枠の境界（159.999 で拒否、160.0 で許可）、拒否が枠を延ばさないこと、20 スレッドの同時呼び出しで 5 回だけ許されること、ロック内の差し込み口でのインターリーブを確かめている。決定論的な再現（Barrier・Event）を使っており、sleep には頼っていない。妥当。\n- AC8: V8 と VK8 は期限の境界、改ざん、形の崩れを確かめている。コードは `fullmatch`、`compare_digest`、`now >= expires` で判定している。形式・期限・署名の失敗はすべて Forbidden になる。妥当。軽微1の点だけが残る。\n- AC9: V9 と VK5 は、ログ・例外・出力に本文・署名・api_key が出ないことを確かめている。コードの `log.info` は ID だけを出している。妥当。\n- AC10: V10 は、例外の後も接続を使い続けられることを確かめている。`transaction()` は ROLLBACK し、ROLLBACK 自体の失敗で元の例外を隠さない。妥当。\n- エンジンが検出したテストの兆候はなし（skip・`.only`・アサーションなしのテストファイルはない）。テストの改ざんや弱体化は、`history` の確認では見つからなかった。履歴は bind の登録だけだった。\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、リスクはすべて、実際の SQLite と複数スレッドを使う単体テストで確かめられている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` で 63 件が OK。\n- `service.py`・`db.py`・`ratelimit.py`・`share.py` を全文読み、仕様 R1〜R10 と突き合わせた。\n- 認可（`_visible`・`_can_modify`）が、閲覧・一覧・検索・更新・削除・移管のすべての経路で適用されていることを確かめた。\n- LIKE のワイルドカードとエスケープ、`ESCAPE` 句、プレースホルダーを、題名と本文の両方で確かめた。f-string で SQL に埋め込まれるのは、固定の `SORT_COLUMNS` と `?` の列だけだった。\n- `$AQ history --since 0` と `$AQ trace` を確認した。全受け入れ条件・リスクに検証が紐づいている（反証テストは無効）。\n- 並行テスト（AC7・AC4）が、sleep に頼らない決定論的な再現であることを確かめた。",
+ "files_changed": [],
+ "valid": true
+}

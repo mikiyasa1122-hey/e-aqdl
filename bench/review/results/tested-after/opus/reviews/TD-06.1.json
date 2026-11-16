@@ -1,0 +1,49 @@
+{
+ "case": "TD-06",
+ "rep": 1,
+ "sec": 68.4,
+ "exit": 0,
+ "cost_usd": 0.536282,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 43258,
+  "cache_read_input_tokens": 303810,
+  "output_tokens": 6470,
+  "output_tokens_details": {
+   "thinking_tokens": 2000
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 43258,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3133,
+    "cache_read_input_tokens": 63476,
+    "cache_creation_input_tokens": 362,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 362
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3d2001d9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1（notes/service.py `get_note` 220–221行）/ 対応区分: 修正必須 / 内容: 見られないメモを閲覧しようとすると、NotFound ではなく `Forbidden(\"note {id} を見る権限がない\")` が出る。存在しない ID のときだけ NotFound なので、例外の種類から「そのメモがある」ことが分かってしまう / 成立条件: 次の3つで起きる。(1) 他の組織の利用者が公開メモの ID を指定する。(2) 同じ組織の他人が非公開メモの ID を指定する。(3) 同じ組織の管理者が他人の非公開メモの ID を指定する / 影響: R2「見られないメモは、どれも NotFound にする（存在を明かさない）」に反する。他の組織の利用者が ID を順に試すと、他の組織のメモや非公開メモがあるかどうかを調べられる（K1 の存在の漏えい）/ 確認した保証: 上流に NotFound へ変える層はない（HTTP は対象外。ライブラリの例外がそのまま呼び出し側に届く）。update と delete は `_check_modify` で NotFound にしているので、閲覧だけが仕様とずれている。トランザクションの中で読み直す 226行は NotFound を出すが、最初の判定（220行）で先に Forbidden になる。テストは通るが、これを防いでいない。test_ac2 で見られない場合を扱うのは「判定の後に非公開になる」ケース（hook 経由）だけ。test_ac9 の `get_note(bob, 非公開)` は NotesError で受けるだけで、例外の種類を確かめていない / 根拠: notes/service.py:218-221。再現: `python3 -B -c` で bob→alice の非公開、admin→alice の非公開、eve（組織99）→alice の公開を閲覧すると、3つとも `Forbidden note N を見る権限がない` になった。存在しない ID 999 は `NotFound` / 提案: 220–221行の `raise Forbidden(...)` を `raise NotFound(f\"note {note_id}\")` に変える（または 218–221行を `if not _visible(user, row): raise NotFound(...)` の1つにまとめる）。あわせて test_ac2 に、上の3つのケースと存在しない ID のケースで `assertRaises(NotFound)` を確かめ、閲覧数が増えないことも確かめるテストを足す\n- [軽微1] 区分: 実装 / 対象: R4, AC4（notes/service.py `update_note` 283行・303行）/ 対応区分: 改善提案 / 内容: `version` の型を確かめていない。文字列の `\"1\"` を渡すと、SQLite の型の変換で UPDATE が成功してコミットされた後に、`return version + 1` で TypeError になる（再現済み: body が \"x\"、version が 2 に変わった状態で TypeError）。仕様には version の型の規定がないので改善提案にとどめる / 提案: 最初に `isinstance(version, int) and not isinstance(version, bool)` を確かめ、違えば ValidationError にする\n- [軽微2] 区分: 実装 / 対象: R9, AC9（notes/share.py `verify_link` 371行）/ 対応区分: 改善提案 / 内容: `raise ValueError(link)` の引数にリンク全体（署名を含む）を入れている。`from None` で表示は抑えているが、Forbidden の `__context__` には ValueError(link) が残る / 提案: `ValueError()` のように引数なしにするか、`if not m: raise Forbidden(\"不正なリンク\")` と直接書く\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界値（空白だけ、101文字、型の違い、改行、重複の数え方、文字列の拒否）、途中の失敗（hook）で3つのテーブルが0件のまま、監査の記録まで確かめており妥当\n- AC2: 閲覧数（連続・割り込み・4スレッド×10回で40）は妥当。見え方は、他の組織・他人の非公開・管理者から非公開を閲覧した場合に NotFound になることを確かめておらず不十分。そのため [重大1] を見逃している\n- AC3: 一覧の範囲（他の組織・他人の非公開・管理者）、並べ替え、ページの境界、巨大な page、不正な値（bool・float・文字列）、検索の `%`・`_`・`\\` を普通の文字として扱うこと、タグの OR、不正なタグを確かめており妥当\n- AC4: 作成者と管理者の更新・削除、他人は Forbidden、他の組織と非公開は NotFound、古い version、読み出しから書き込みの間の更新、判定の後の移管、更新の入力検証、削除の途中の失敗のロールバックを確かめており妥当\n- AC5: 管理者だけ、組織の4通りの組み合わせ、途中の失敗で元のまま、非公開も移ること、version が増えることを確かめており妥当\n- AC6: 末尾4文字だけ残すこと、7文字・8文字・空文字の境界、組織の範囲、管理者だけを確かめており妥当\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドが同時に呼んで5回だけ通ること、hook による割り込みの直列化を確かめており妥当（割り込みのテストは Event で待ち合わせており、sleep に頼っていない）\n- AC8: 期限ちょうど・期限後、note_id・期限・署名の改ざん、別の鍵、形の崩れ（大文字、改行、アラビア数字、指数表記、型の違い）を確かめており妥当\n- AC9: ログに本文・署名・鍵・secret が出ないこと、例外のメッセージ、監査の detail を確かめており妥当（ただし例外の種類は確かめていない）\n- AC10: Conflict・ValidationError・RuntimeError・IntegrityError の後に、トランザクションが閉じていて接続を使い続けられること、自動ロールバックの後も元の例外が伝わることを確かめており妥当\n- K1: 一覧・検索・更新・削除・移管は妥当。閲覧（get_note）だけ確かめておらず、実装にも欠陥がある（[重大1]）\n- K2: プレースホルダーだけを使っている（sort は許可リストの辞書で引き、IN 句は `?` の数だけ）。ESCAPE '\\' と `\\` 自体のエスケープも確かめた。SQL の文字列を渡すテストもあり妥当\n- K3: BEGIN IMMEDIATE、`views = views + 1`、version の条件、RateLimiter のロックで守られており、テストも妥当\n- K4・K6・K7・K8・K5: 上の AC と同じ評価で妥当\n### E2E の要否\n- 不要（HTTP と UI は対象外のライブラリで、外から使う入口は関数の呼び出しだけ。並行実行はファイルの DB と複数スレッドの単体テストで確かめている）\n### 不足しているリスク\n- K1: get_note で見られないメモが Forbidden になり、メモがあることが分かる（[重大1]）。これを確かめるテストもない\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py を全部読んだ。`$AQ trace` で全 AC と K が V に対応していることを確かめた。`$AQ history --since 0` を見て、検証を弱める変更はなかった（V と VK は追加だけ）。`git diff --stat` は差分なし（すべて未追跡のファイル）\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .` → 61件すべて合格。gate のログ（20261111-085657-check-unit.log）も 61件 OK\n- `python3 -B -c` で get_note を4つのケースで再現した（上の3ケースは Forbidden、存在しない ID は NotFound）。update_note に文字列の version を渡すと、コミットの後に TypeError になることも再現した（どちらもメモリ上の DB で、ファイルは変更していない）\n- コードをたどって確かめたこと: transaction() の BEGIN IMMEDIATE、ROLLBACK と元の例外の伝わり方、update の中で認可と検証をやり直すこと、delete の認可がトランザクションの中にあること、transfer の WHERE（owner_id・org_id）、LIKE の ESCAPE とプレースホルダー、list の ORDER BY が許可リストであること、export_audit の組織での絞り込みと伏せ方、share の fullmatch と compare_digest、RateLimiter の判定がロックの中にあること",
+ "files_changed": [],
+ "valid": true
+}

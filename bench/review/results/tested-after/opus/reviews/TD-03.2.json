@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 2,
+ "sec": 131.2,
+ "exit": 0,
+ "cost_usd": 0.6873206000000001,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 16,
+  "cache_creation_input_tokens": 45430,
+  "cache_read_input_tokens": 367883,
+  "output_tokens": 12512,
+  "output_tokens_details": {
+   "thinking_tokens": 6572
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 45430,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4212,
+    "cache_read_input_tokens": 69986,
+    "cache_creation_input_tokens": 2868,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2868
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:135 `list_notes` / 対応区分: 修正必須 / 内容: sort にハッシュできない値（list・dict など）を渡すと、ValidationError ではなく TypeError（unhashable type）になる。`sort not in SORT_COLUMNS` で、dict のキーを探すときに例外が出る / 成立条件: `list_notes(conn, user, sort=[\"updated\"])` や `sort={}` のように、型の違う sort を渡したとき / 影響: 仕様 R3 は「sort は updated か title だけ。範囲外は ValidationError」と決めている。これに反して、業務エラー（NotesError）でない例外が出る。呼び出し側が ValidationError を前提に入力エラーを処理していると、想定外の例外として扱われる（データの破損はない） / 確認した保証: これより前に sort の型を確かめている箇所はない。対象外の項目にも、型を呼び出し側が保証するとは書かれていない。既存のテスト（test_invalid_paging_and_sort）は文字列の sort しか試していない / 根拠: 再現スクリプトで `sort=['updated']`・`sort={}` のどちらも TypeError になることを確認した（`sort=None` は ValidationError） / 提案: 先頭に `if not isinstance(sort, str) or sort not in SORT_COLUMNS: raise ValidationError(...)` を入れ、list の sort を拒否するテストを足す\n- [重大2] 区分: 実装 / 対象: R4, R10, AC4, AC10, K4, notes/service.py:177-197 `update_note` / 対応区分: 修正必須 / 内容: version の型を確かめていない。文字列の `\"1\"` を渡すと、SQLite の型の変換（INTEGER の列との比較）で `version = '1'` が一致し、UPDATE と監査ログの記録がコミットされる。その後、トランザクションの外の `return version + 1` で TypeError になる / 成立条件: version に数字の文字列（例 `\"1\"`）を渡して update_note を呼んだとき / 影響: 呼び出し側には例外が返るのに、更新と監査ログは残る。R10（例外が起きたらロールバックする）に反する。呼び出し側は失敗したと考えて再試行し、Conflict になる・二重に更新するなど、データの状態を誤って判断する / 確認した保証: version の型は上流でも検証していない。DB の列の型の変換が、むしろ一致を成立させている。テストは整数の version しか使っていない / 根拠: 再現スクリプトで `update_note(c, a, nid, \"1\", body=\"z\")` を呼ぶと TypeError になり、そのあと DB は `(version=2, body='z')` になっていた / 提案: トランザクションの前に、version が bool 以外の int であることを確かめて ValidationError にする（list_notes の page と同じ書き方）。文字列・bool の version を渡したら、例外が出て何も変わらないことを確かめるテストを足す\n- [軽微1] 区分: 実装 / 対象: R4, K3, notes/service.py:179,185-186 / 対応区分: 改善提案 / 内容: 省略された title・body を、トランザクションの外で読んだ行（`row`）から取っている。トランザクションの中で読み直した行は、認可の判定にしか使っていない。呼び出しの後に他の更新が入り、渡した version がその更新の後の値と一致すると、他の更新の本文が古い値に戻る。hooks で再現した（version=2 を渡すと、他の更新で書かれた body \"other\" が \"b\" に戻った）。ただし、この状態にするには、まだ存在しない version を呼び出し側が先に渡す必要があり、通常の使い方では起きない / 提案: トランザクションの中で読み直した行を変数に入れ、その行から new_title・new_body を作る\n- [軽微2] 区分: 実装 / 対象: R8, notes/share.py:11 / 対応区分: 改善提案 / 内容: note_id と期限を 1〜18 桁に制限している。そのため、19 桁の note_id（SQLite の整数の範囲内）では、make_link で作ったリンクが verify_link で Forbidden になる。また、先頭に 0 を付けた形（`007.…`）も同じ署名で通る（同じメモ・同じ期限なので、安全上の影響はない） / 提案: 桁数の上限を SQLite の範囲に合わせる。先頭の 0 を拒否するかどうかを決めて、テストに入れる\n- [軽微3] 区分: 設計 / 対象: R1〜R10（trace の impl-map） / 対応区分: 改善提案 / 内容: trace では、すべての要求の実装ファイルが空の `notes/__init__.py` になっている。実際の実装は service.py・ratelimit.py・share.py にある / 提案: impl-map を実際のファイルに合わせて登録し直す\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は、題名・本文・タグの境界（100/101 文字、10000/10001 文字、20/21 文字、改行・大文字・型の違い・文字列の tags）、重複の数え方、途中の失敗（hook で create:tags のときに例外）で3つのテーブルが空になることを確かめており、妥当\n- AC2: 他の組織・他の組織の管理者・他人の非公開・管理者・存在しない ID がすべて NotFound になること、判定の後に非公開に変わる場合、閲覧数の割り込み、別スレッド・別接続の 4×10 回の閲覧で 40 になることを確かめており、妥当\n- AC3: 範囲・ソート・ページング・巨大な page・% と _ と \\ の扱い・タグの OR・SQL の文字列を確かめている。ただし、型の違う sort（ハッシュできない値）を試していないため、重大1 を見逃している。検索の LIKE は、題名と本文の両方にエスケープした値が渡り、ESCAPE '\\' があることをコードで確かめた\n- AC4: 作成者と管理者による更新、Forbidden・NotFound の区別、非公開は作成者だけ、古い version の Conflict、読み出しと書き込みの間の更新、判定の後の移管、更新時の入力検証、削除の途中の失敗のロールバックを確かめており、おおむね妥当。ただし、version の型を試していないため、重大2 を見逃している\n- AC5: 管理者だけであること、組織をまたぐ4通りの組み合わせ、2件目での失敗で全件が元のままになること、非公開のメモも移ること、監査ログを確かめており、妥当\n- AC6: 末尾4文字の表示、7 文字と 8 文字の境界、空の鍵、管理者だけで自分の組織だけであることを確かめており、妥当\n- AC7: 偽の時計で枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier で 20 スレッドが同時に呼んで 5 回だけ通ること、hook でチェックの中に割り込んでも直列になることを確かめており、妥当（hook の待ち 0.5 秒は、ロックがある前提での安全側の待ちで、競合の再現をこの時間に頼っていない）\n- AC8: 期限ちょうど（1060）、改ざん（ID・期限・署名・鍵の違い）、形の崩れた 16 種類（大文字・改行・Unicode の数字・bytes など）を確かめており、妥当\n- AC9: ログに本文・署名・api_key・秘密鍵が出ないこと、例外のメッセージに本文と鍵が出ないこと、監査ログに本文が出ないことを確かめており、妥当\n- AC10: Conflict・ValidationError・注入した例外・IntegrityError・自動でロールバックされた後のそれぞれで、接続が使い続けられることを確かめている。ただし、コミットの後に例外が出る経路（重大2）は試していない\n- K1・K2・K3・K4・K5・K6・K7・K8: 上の各テストが確かめている。K2 は、ソートの列が辞書で固定されていて、値はすべてプレースホルダーで渡されることもコードで確かめた\n- （エンジンが検出したテストの兆候: なし）\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、別スレッド・別接続のファイル DB を使う単体テストが、結合に近い範囲まで確かめているため）\n### 不足しているリスク\n- R3: 型の違う sort の拒否（重大1）\n- R4・R10: 型の違う version と、コミットの後の例外（重大2）\n### 確認したこと\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .` を実行した → 62 件すべて合格（gate のログ 20261111-085527-check-unit.log も合格）\n- 一時フォルダの再現スクリプト（/tmp/claude-0/-tmp-claude-0-td-after-work-aqdlc-test-mfvbn53a-app/63940b4a-4065-43c6-8305-01b5712c0d39/scratchpad/probe.py）で次を確かめた\n  - sort に list や dict を渡すと TypeError になる\n  - version に `\"1\"` を渡すとコミットされた後に TypeError になる\n  - 古い行を使うことで、他の更新の本文が上書きされる\n  - 先頭に 0 を付けたリンクが通る\n  - 19 桁の ID のリンクが Forbidden になる\n  - tags に None や 5 を渡すと ValidationError になる\n- `$AQ trace` と `$AQ history --since 0` を確認した。検証条件の削除・弱体化はなかった。チェック unit は design の段階で追加されてから変更されていない\n- `git status` を確認した。レビュー中に、作業ツリー（コード・テスト）を変更していない\n- コードの経路をたどって確かめたこと\n  - 認可は _visible と _can_modify で行い、更新と削除ではトランザクションの中で読み直した行で判定し直している\n  - LIKE のエスケープ（\\・%・_）と ESCAPE 句が、題名と本文の両方に使われている\n  - BEGIN IMMEDIATE と `views = views + 1` で、閲覧数を原子的に増やしている\n  - 楽観的ロックは、UPDATE の WHERE に version を入れ、rowcount で判定している\n  - 移管は1つのトランザクションで行い、送り先の利用者がいなければ外部キーの違反でロールバックされる\n  - ROLLBACK に失敗しても、元の例外は隠されない",
+ "files_changed": [],
+ "valid": true
+}

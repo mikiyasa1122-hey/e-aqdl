@@ -1,0 +1,49 @@
+{
+ "case": "TD-10",
+ "rep": 3,
+ "sec": 32.2,
+ "exit": 0,
+ "cost_usd": 0.1609226,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 26069,
+  "cache_read_input_tokens": 181966,
+  "output_tokens": 3843,
+  "output_tokens_details": {
+   "thinking_tokens": 1068
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 26069,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2066,
+    "cache_read_input_tokens": 49016,
+    "cache_creation_input_tokens": 3977,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3977
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 68583c30\n### 指摘\n- [軽微1] 区分: テスト / 対象: R3, AC3, K2 / 対応区分: 改善提案 / 内容: 検索の LIKE エスケープで、バックスラッシュそのものを含む検索語（例: `a\\b`、`\\%`）を確かめるテストがない。`_like_escape` は `\\` を先にエスケープしており（notes/service.py:131）、実装は正しい。 / 提案: `\\` を含む題名・本文を作り、部分一致で見つかることを確かめるテストを1件足す。\n- [軽微2] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `verify_link` は先頭の 0 を許す（例: `007.<期限>.<署名>`）。`int()` で正規化してから署名を確かめるため、note 7 の署名が `007` の形でも通る。仕様の形（10進の数字だけ）には合っており、権限を広げることもない。 / 提案: 正規形（`str(int(x)) == x`）だけを受け付けると、リンクの一意性が保てる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1・VK4 は妥当。題名・本文・タグの境界値、tags が文字列のとき、タグの末尾が改行のとき、`fail_at(\"create:tags\")` による途中失敗の巻き戻しを確かめている。\n- AC2: V2・VK1・VK3 は妥当。同じ組織の公開メモ、他の組織・他人の非公開・存在しないメモがすべて NotFound になること、NotFound では閲覧数が増えないこと、閲覧の間に割り込む閲覧、実ファイルの DB を使った4スレッド×10回の閲覧で数え漏れがないこと（40）を確かめている。\n- AC3: V3・VK2 は妥当。範囲外の page・per_page・sort（bool、文字列、巨大な page を含む）、並び順、ページング、%・_ のリテラル扱い、組織・非公開の範囲、タグの OR、SQL 文字列を値として扱うこと、不正なタグを確かめている。バックスラッシュだけは未確認（軽微1）。\n- AC4: V4・VK3 は妥当。作成者・管理者・別組織・非公開の組み合わせ、古い version、読み出しと書き込みの間の割り込み（Conflict、先の更新を消さない）、判定の後の移管による Forbidden、更新時の入力検証、削除途中の失敗の巻き戻しと例外の伝播を確かめている。\n- AC5: V5・VK6 は実装を読んで確認し、テストファイルがあり合格している。ただしテストの中身は精読していない。コードでは管理者権限、3者が同じ組織であること、1つのトランザクションでの移管を確かめられた。\n- AC6: V6・VK7 は妥当。実装は8文字未満を全部伏せ、それ以上は末尾4文字だけを残す。テストファイルの内容は精読していない。\n- AC7: V7 は妥当。偽の clock で枠の境界（159.999 と 160.0）を確かめ、拒否された呼び出しが枠を延ばさないこと、20スレッドを Barrier で揃えた同時呼び出しで許可が 5 件になること、hook で判定の途中に割り込ませる場合を確かめている。sleep には頼っていない。\n- AC8: V8・VK8 は妥当。期限ちょうどの境界、改ざん、別の secret、形の崩れ（大文字、改行、全角数字、型違い）を確かめている。\n- AC9: V9・VK5 は妥当。ログ、例外メッセージ、監査の detail に本文・署名・api_key・secret が出ないことを確かめている。\n- AC10: V10 は、テストファイルがあり合格している。実装では `transaction()` が例外時に ROLLBACK して再送出する。テストの中身は精読していない。\n- エンジンが検出したテストの兆候（skip、.only、アサーションなし）: なし。\n- 検証条件の弱体化: `history` の冒頭を確認し、V1〜V10 と VK1〜VK8 は最初から level=unit で追加されていて、弱められた形跡はなかった。ただし `history` の出力は途中で切れており、後半（#41 以降）は確認していない。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、並行実行と途中失敗の再現は単体テストと hook で足りる。\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様・設計と、`notes/*.py` の全ソース、AC2・AC3・AC4・AC7・AC8・AC9 のテストを読んだ。AC1・AC5・AC6・AC10 のテストは精読していない。\n- `python3 -m unittest discover -s tests -t .` を実行した。62 件がすべて OK。\n- `$AQ trace` と `$AQ history --since 0` を実行した。trace は全要求が「合格（反証未実施）」。history は先頭だけ読めた。\n- 認可（`_visible` / `_can_modify`）は、get・update・delete・list・search で利用者の入力ではなくサーバー側の行の状態に適用されていることを、コードの経路で確認した。\n- SQL はすべてプレースホルダーで、LIKE には ESCAPE 句がある。ORDER BY は固定の辞書から選ぶ。\n- 楽観的ロックは UPDATE の WHERE 句に version を入れ、rowcount で判定している。\n- レビュー中、コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

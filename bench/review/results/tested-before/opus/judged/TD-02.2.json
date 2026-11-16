@@ -1,0 +1,33 @@
+{
+ "case": "TD-02",
+ "rep": 2,
+ "judge_cost_usd": 0.2644676,
+ "judge_raw": "## 判定結果（TD-02）\n\n**[重大1] matches_defect（埋め込んだ欠陥そのもの）**\n- 箇所が正解データと同じです（notes/service.py の `list_notes`、140〜143行）。\n- 原因も同じです。`offset` が SQLite の整数の範囲を超えるかを確かめずに、SQL に渡しています。`MAX_OFFSET` は定義されていますが、どこからも使われていません。\n- 影響も同じです。正しい入力である大きな page を渡すと、ValidationError でも空の結果でもなく OverflowError になり、R3 と AC3 に反します。\n- 再現の値（page=2**62 は OverflowError、page=10**17 は空の結果）も正確です。\n\n**[軽微1] real_other（埋め込んだ欠陥とは別の、実在する欠陥）**\n- version に `\"1\"` を渡すと、SQLite の型変換で `WHERE version = ?` が一致し、更新がコミットされます。その後の `return version + 1` で TypeError になります。\n- 呼び出し側は失敗と受け取るのに、更新は保存されています。例外が起きたのに変更が残る点は R10（例外ならロールバック）の趣旨に反し、再現の手順も示されています。\n- ただし、仕様は version の型を決めていません。このため、境界に近い判断です。\n\n**[軽微2] test_gap（テストの不足）**\n- 仕様の「同時」は、別々の接続・別々のスレッドからの操作のことです。\n- 更新の競合のテストは、1つの接続の上で hooks を使って割り込ませたものだけで、スレッドを使ったテストは実際にありません。\n\n**[軽微3] style（保守性の提案）**\n- trace の impl-map に登録した実装ファイルが実際と違う、という管理上の指摘です。コードの欠陥の主張ではありません。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で OFFSET が SQLite の整数の範囲を超えるかを確かめずに SQL に渡し、大きな page で OverflowError になるという、埋め込んだ欠陥の箇所・原因・影響を、再現付きで正しく指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"version に文字列を渡すと、SQLite の型変換で更新がコミットされた後に TypeError になる、という実在する不整合を再現付きで示している（仕様は version の型を決めていないので境界に近い）。\"}, {\"label\": \"軽微2\", \"class\": \"test_gap\", \"reason\": \"更新の競合は1つの接続で hooks を使って割り込ませるテストだけで、仕様の「同時」（別々の接続・別々のスレッド）での更新のテストが実際にない、というテストだけの指摘。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"trace の impl-map の登録先が実際の実装ファイルと違うという、管理と保守性の指摘で、コードの欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 は MAX_OFFSET が使われていないことを根拠に、埋め込んだ欠陥の原因と影響（R3・AC3）を正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で OFFSET が SQLite の整数の範囲を超えるかを確かめずに SQL に渡し、大きな page で OverflowError になるという、埋め込んだ欠陥の箇所・原因・影響を、再現付きで正しく指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "version に文字列を渡すと、SQLite の型変換で更新がコミットされた後に TypeError になる、という実在する不整合を再現付きで示している（仕様は version の型を決めていないので境界に近い）。"
+   },
+   {
+    "label": "軽微2",
+    "class": "test_gap",
+    "reason": "更新の競合は1つの接続で hooks を使って割り込ませるテストだけで、仕様の「同時」（別々の接続・別々のスレッド）での更新のテストが実際にない、というテストだけの指摘。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "trace の impl-map の登録先が実際の実装ファイルと違うという、管理と保守性の指摘で、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 は MAX_OFFSET が使われていないことを根拠に、埋め込んだ欠陥の原因と影響（R3・AC3）を正確に捉えている。"
+ }
+}

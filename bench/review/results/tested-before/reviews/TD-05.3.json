@@ -1,0 +1,49 @@
+{
+ "case": "TD-05",
+ "rep": 3,
+ "sec": 22.2,
+ "exit": 0,
+ "cost_usd": 0.0900087,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 12295,
+  "cache_read_input_tokens": 160787,
+  "output_tokens": 2473,
+  "output_tokens_details": {
+   "thinking_tokens": 293
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12295,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1545,
+    "cache_read_input_tokens": 38152,
+    "cache_creation_input_tokens": 1066,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1066
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "The search tests never check that private notes are excluded, so the leak is not covered.\n\n## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 78281336\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1, R2 / 対応区分: 修正必須 / 内容: `search_notes`（notes/service.py の search_notes、SQL の WHERE 句）が `org_id = ?` だけで絞っており、`private = 0 OR owner_id = ?` の条件がない。同じ組織の他人の非公開メモが、題名・本文の一致で検索結果に出る。 / 成立条件: 同じ組織の利用者 B が、同じ組織の利用者 A の非公開メモの題名または本文に含まれる語で検索する。管理者でも成立する。 / 影響: 仕様 R3「他人の非公開メモは含めない」と R2「存在を明かさない」に違反し、非公開メモの id と題名が漏れる（リスク K1）。 / 確認した保証: 呼び出し元や上流にフィルタはなく、`list_notes` は `where` に非公開の条件を持つが `search_notes` は使っていない。再現した。A が private=True で「秘密題名」を作成し、B が `search_notes(conn, B, \"秘密\")` を呼ぶと `[{'id': 1, 'title': '秘密題名'}]` が返った。 / 根拠: notes/service.py の search_notes 内の sql 文字列。tests/test_ac3_list_search.py の SearchTest は setUp で bob の非公開メモを作るが、検索結果に含まれないことを確認しておらず、検証が空洞になっている。 / 提案: WHERE に `AND (private = 0 OR owner_id = ?)` を加えて `user[\"id\"]` を args に渡す。あわせて、他人の非公開メモが検索に出ないこと（本人には出ること）を確かめるテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 入力検証・タグ・ロールバック（hook で途中失敗を再現）を確かめており、おおむね妥当。\n- AC2: 閲覧数・NotFound の統一・同時の閲覧を確かめている。コードも妥当と判断した（並行の再現は test_ac2_view.py の内容を細かくは読んでいない）。\n- AC3: 不十分。一覧の非公開の除外は確かめているが、検索の非公開の除外は未検証で、実装にも欠陥がある（[重大1]）。% と _ のエスケープ、OR のタグ、プレースホルダー、ESCAPE 句は妥当で、title・body の両方に同じパターンを渡している。\n- AC4: 楽観的ロックは UPDATE の `version` 条件と `rowcount` で判定し、更新時の検証もトランザクション内で行っており、コードは妥当。テストの詳細は精査していない。\n- AC5: 同じ組織の確認、管理者の確認、1つのトランザクション内の更新を実装で確認した。テストは存在し、通っている。\n- AC6: 伏せ字の実装は妥当。8文字未満はすべて伏せ、それ以外は末尾4文字を残す。\n- AC7: ロックの下で枠を判定している。`now - start >= window` で枠の境界も正しい。\n- AC8: 形式を fullmatch で確かめ、期限は `>=` で判定し、`compare_digest` で署名を比較している。\n- AC9: ログと例外に本文・署名・鍵を出していない。\n- AC10: `transaction()` が例外時にロールバックする。\n- 機械検出のテスト兆候はなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest が実 SQLite（:memory: と複数接続）を使っている。\n### 不足しているリスク\n- K1: 検索経路の非公開メモの漏えいを確かめる検証がない（[重大1]）。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、61件が OK。\n- `search_notes` の再現スクリプトで、他人の非公開メモが返ることを確認した。\n- notes/*.py をすべて通読した。\n- `$AQ trace` と `$AQ history` は実行していない（履歴による改ざんの確認は未実施）。",
+ "files_changed": [],
+ "valid": true
+}

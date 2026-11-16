@@ -1,0 +1,49 @@
+{
+ "case": "CLN-09",
+ "rep": 1,
+ "sec": 31.6,
+ "exit": 0,
+ "cost_usd": 0.165517,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 28548,
+  "cache_read_input_tokens": 119890,
+  "output_tokens": 3932,
+  "output_tokens_details": {
+   "thinking_tokens": 1263
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 28548,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1988,
+    "cache_read_input_tokens": 39287,
+    "cache_creation_input_tokens": 9890,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9890
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 542df200\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R6, AC6 / 対応区分: 改善提案 / 内容: `export_audit` は `audit` と `users` を `actor_id` で INNER JOIN している。実行者が `users` に存在しなければ、その監査行は出力から黙って落ちる。通常の経路（`_audit` は存在する利用者から呼ばれる）では起きないので、仕様違反ではない。 / 提案: 監査行の欠落を避けたいなら LEFT JOIN にして、実行者名と鍵が NULL のときの扱いを決める。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。コードを読んで、検証（題名・本文・タグの型・個数・文字種、`fullmatch` による末尾改行の拒否）と、作成・タグ・監査の1トランザクションを確認した。`hooks.before_write(\"create:tags\")` で途中の失敗を起こし、何も残らないことを確かめる検証もある（V1・VK4）。\n- AC2: 妥当。見られないメモ（他組織・他人の非公開・存在しない）は、すべて NotFound になる。可視性の判定後に非公開へ変わるケースと、割り込み閲覧で数え漏れがないことを、フックで決定論的に再現している。別接続・別スレッドの並行閲覧（4スレッド×10回で40）も確かめている。閲覧数は `BEGIN IMMEDIATE` の中で更新するため、数え漏れは起きない。\n- AC3: 妥当。page・per_page・sort の範囲外と bool、LIKE の `%`・`_`・`\\` のエスケープ（ESCAPE 句つき、題名と本文の両方に同じパターンを渡す）を確認した。タグは OR で絞り込み、プレースホルダーを使い、タグも R1 の規則で検査する。他組織・他人の非公開メモを含めない条件は SQL に入っている（V3・VK2）。\n- AC4: 妥当。更新では、認可と検証と UPDATE を同じトランザクション内で読み直した行に対して行う。UPDATE の条件に version を入れ、rowcount で Conflict を判定する。読み出しと書き込みの間の割り込み更新・移管、削除途中の失敗とロールバックのテストもある。\n- AC5: 妥当。管理者の役割、3者が同じ組織であること、全件移管、途中失敗でのロールバックを確認した。\n- AC6: 妥当。8文字未満は全部伏せ、8文字以上は末尾4文字を残す。この境界のテストがあり、監査の `detail` には ID だけを入れている。\n- AC7: 妥当。`threading.Lock` の中で判定と加算を行う。枠の境界は `>=` で、ちょうど window 秒で新しい枠になる。拒否された呼び出しが枠を延ばさないことも確かめている。20スレッドが同時に呼ぶテストと、判定の途中に割り込むフックのテストで、sleep に頼らず決定論的に再現している。\n- AC8: 妥当。`LINK_RE.fullmatch` で形を絞り（改行・非 ASCII の数字を通さない）、期限は `now >= expires` で無効にする。署名は `hmac.compare_digest` で比較し、すべて Forbidden になる。\n- AC9: 妥当。ログには ID だけを出しており、署名・本文・api_key を出していないことをコードで確認した。例外メッセージにもこれらは含まれない。\n- AC10: 妥当。`transaction()` は BaseException で ROLLBACK して再送出する。ROLLBACK 自体の失敗でも元の例外を隠さない。例外の後に接続を使い続けられることをテストしている。\n- 機械的に検出したテストの兆候はなし。`history` を確認したところ、検証条件の弱体化はなかった（実装担当による bind と impl-map のみ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実 DB（メモリ上とファイル）に対する単体・結合テストで、リスクに見合う検証ができている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63件すべて OK。\n- `notes/*.py` の全ファイルを読んだ。\n- 並行実行・競合の経路を確認した。\n  - 更新: UPDATE の条件に version を入れ、rowcount で判定する。\n  - 閲覧: 数え漏れは起きない。\n  - 移管・削除: 認可はトランザクション内で読み直した行で判定している。\n- 仕様に反する挙動は見つからなかった。\n- `$AQ trace` と `$AQ history --since 0` を確認した。\n- `gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

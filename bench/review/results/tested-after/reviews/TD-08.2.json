@@ -1,0 +1,49 @@
+{
+ "case": "TD-08",
+ "rep": 2,
+ "sec": 30.9,
+ "exit": 0,
+ "cost_usd": 0.1182812,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 15931,
+  "cache_read_input_tokens": 169472,
+  "output_tokens": 3759,
+  "output_tokens_details": {
+   "thinking_tokens": 730
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15931,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1879,
+    "cache_read_input_tokens": 42893,
+    "cache_creation_input_tokens": 505,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 505
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c3a94d21\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3（notes/service.py:112-126 get_note） / 対応区分: 修正必須 / 内容: 閲覧数の更新が「トランザクションの外で読んだ views に 1 を足して書く」方式になっている。 / 成立条件: 別々の接続またはスレッドから、同じメモを同時に閲覧する。一方が views を読んだ後、もう一方が閲覧を完了してから、前者が書き込む。 / 影響: 閲覧数の数え漏れが起きる。R2 の「同時に閲覧されても数え漏れがないこと」に違反する。 / 根拠: service.py:116 で views を読み、119 で `SET views = views + 1` ではなく `SET views = ?`（views+1）と書いている。この間にトランザクションはない。before_write(\"view\") の差し込み口で別接続の閲覧を挟んで再現した。2 回閲覧したのに views=1 になった（スクラッチの一時 DB で実行）。上流の保証や DB の制約はなく、BEGIN IMMEDIATE は書き込みの直列化だけで、古い値の上書きは防げない。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` に変え、トランザクション内で原子的に加算する。\n- [重大2] 区分: テスト / 対象: AC2, K3 / 対応区分: 証拠不足 / 内容: 閲覧数の同時加算を確かめるテストがない。 / 根拠: tests/test_ac2_view.py は threading・tempfile・os・db を import しているが使っておらず、ViewCountTest は直列に 3 回閲覧するだけ。AC2 は「同時でも数え漏れがない」ことを明示しており、K3 の対象でもある。そのため重大 1 の欠陥をテストが検出できていない。 / 提案: 2 つの接続（ファイル DB）を使い、service.hooks.before_write(\"view\") で別接続の get_note を割り込ませる決定論的なテストを追加する。views が 2 になることを確かめる。sleep には頼らない。\n- [軽微1] 区分: 実装 / 対象: R8（notes/share.py:36-40） / 対応区分: 改善提案 / 内容: 先頭ゼロ付きの note_id（例 `007.…`）でも int 化した値で署名が一致するため有効になる。仕様の形式（10 進の数字のみ）には反しない。 / 提案: 必要なら正規形（先頭ゼロなし）だけを受け付ける。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1 は検証・タグの重複・途中失敗時の巻き戻し（hooks）を確かめている。コードの経路とも一致し、妥当。\n- AC2: 可視性・NotFound の統一・確認後の変更は確かめている。同時閲覧は確かめておらず、実際に欠陥がある。不十分（重大 1・2）。\n- AC3: 一覧の範囲外・検索の LIKE エスケープ・タグ OR・プレースホルダーをコードで確認した。ESCAPE 句は title と body の両方に適用され、`\\` も二重化されている。妥当（テスト本体は通読していない）。\n- AC4: 更新は書き込みと同じトランザクション内で行を読み直して認可と検証をし、version 条件の UPDATE と rowcount で Conflict を判定している。削除も同じトランザクション内。コード上は妥当で、テストは通過した。\n- AC5: 同一組織の確認とトランザクション内の全件移管で、途中失敗時は元のままになる。コード上は妥当。\n- AC6: 8 文字未満は全伏せ、それ以外は末尾 4 文字を残す。コード上は妥当。\n- AC7: ロック内の判定と境界（now-start >= window）はコード上妥当。hook による決定論的なテストの有無は通読していない（未確認）。\n- AC8: fullmatch・期限は `>=` で拒否・compare_digest を確認した。妥当。\n- AC9: ログは ID のみで、署名・本文・api_key は出ていない。\n- AC10: transaction() は例外時に ROLLBACK して再送出する。妥当。\n- エンジンが検出したテストの兆候: なし。テストの改ざん・弱体化の履歴も見つからなかった（history は bind のみ）。\n\n### E2E の要否\n- 不要（HTTP・UI を持たないライブラリで、単体テストで足りる）。\n\n### 不足しているリスク\n- K3: 閲覧数の同時加算を確かめる検証がない（重大 2）。\n\n### 確認したこと\n- spec.md・design.md と notes/*.py を全読した。\n- `python3 -m unittest discover -s tests -t .`: 61 件すべて OK。\n- `aqdlc history --since 0`: 実行して確認した。検証条件の弱体化は見つからなかった。\n- スクラッチの一時 DB で、before_write(\"view\") に別接続の閲覧を挟む再現を行った。2 回閲覧して views=1 となり、数え漏れを確認した（プロジェクトのファイルは変更していない）。",
+ "files_changed": [],
+ "valid": true
+}

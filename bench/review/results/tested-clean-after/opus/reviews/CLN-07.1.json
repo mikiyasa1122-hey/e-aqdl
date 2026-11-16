@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 1,
+ "sec": 111.2,
+ "exit": 0,
+ "cost_usd": 0.6418688,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 45989,
+  "cache_read_input_tokens": 290804,
+  "output_tokens": 10787,
+  "output_tokens_details": {
+   "thinking_tokens": 5572
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 45989,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4623,
+    "cache_read_input_tokens": 65686,
+    "cache_creation_input_tokens": 883,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 883
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, R10, AC4, AC10, K4 / 対応区分: 修正必須 / 内容: `update_note` は `version` の型を確かめていません。文字列の `\"1\"` を渡すと、SQLite の型変換で `WHERE version = '1'` が一致し、更新が COMMIT されます。そのあと `return version + 1`（notes/service.py:301）で TypeError が起きます。呼び出し側には例外が返りますが、変更は DB に残ります / 成立条件: 最新の version を文字列で渡したとき（`update_note(conn, owner, nid, \"1\", body=\"x\")`）。真偽値の `True` も version 1 として通ります / 影響: 例外で失敗したと思った呼び出し側が再試行すると Conflict になり、更新済みの状態と食い違います。R10（例外のときはロールバック）に反し、「例外なのに書き込み済み」という不整合が起きます / 確認した保証: 上流に version の型を確かめる処理はなく、DB の型制約（INTEGER のアフィニティ）は逆に文字列を一致させてしまいます。既存のテストは整数の version しか使っていません / 根拠: notes/service.py:281-301 の経路。プローブを実行すると `ver str TypeError` となり、そのとき DB の version は 2 になっていました / 提案: 関数の先頭（トランザクションの前）で `isinstance(version, int) and not isinstance(version, bool)` を確かめ、満たさなければ ValidationError にする。または戻り値を DB から読み直した値にする。あわせて、文字列と bool の version を拒否し、DB が変わらないことを確かめるテストを追加する\n- [重大2] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: `list_notes` の `sort` にハッシュできない値（list・dict）を渡すと、`sort not in SORT_COLUMNS`（notes/service.py:239）が TypeError になり、ValidationError になりません / 成立条件: `list_notes(conn, user, sort=[])` や `sort={}` のとき / 影響: 仕様 R3 は「sort は updated か title だけ。範囲外は ValidationError」と定めています。この呼び出しは業務の例外（NotesError）として扱えず、R3 の入力拒否の規則に合いません。page と per_page は型の違う値を ValidationError にしているので、同じ関数の中で扱いがそろっていません。SQL への埋め込み（f-string の ORDER BY）は辞書の値だけを使っているので、インジェクションにはなりません / 確認した保証: 上流の検証はなく、テストは文字列の sort しか試していません（tests/test_ac3_list_search.py:271-272） / 根拠: プローブの結果は `sort [] TypeError`、`sort {} TypeError` でした / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS:` に直し、list と dict の sort が ValidationError になるテストを追加する\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `LINK_RE` が note_id と期限を18桁までに絞っています（notes/share.py:11）。そのため `make_link` で作った19桁の note_id（10**18 以上）のリンクは、正しいものでも Forbidden になります（プローブで確認済み）。安全側の拒否で、自動採番の ID では実際には起きないので、軽微にしました。また、先頭に0を付けたリンク（`07.…`）も同じ署名で通ります。これは改ざんではありませんが、表記が一意になりません / 提案: 桁数の上限を SQLite の整数の範囲（19桁）にそろえる。先頭の0を拒否するかどうかを決めて、仕様に書く\n- [軽微2] 区分: 実装 / 対象: R7 / 対応区分: 改善提案 / 内容: `RateLimiter._counts` は、枠が終わった利用者の記録を消さないので、利用者の数だけ増え続けます / 提案: `hit` のときに枠が終わった記録を消すか、定期的に掃除する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1（test_ac1_create）は、題名・本文・タグの境界値（0・1・100・101文字、空白だけ、改行、型の違う値）、重複タグの数え方、文字列の tags の拒否、途中の失敗と検証エラーのあとに3つの表がすべて0件になることを確かめています。妥当です\n- AC2: V2 は、他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しないメモがすべて NotFound になること、NotFound のときに閲覧数が増えないこと、確認したあとに非公開にされた場合、hook による割り込み、4スレッド×10回の閲覧で数が40になることを、別の接続とファイル DB で確かめています。妥当です\n- AC3: V3 は、範囲（他の組織・他人の非公開）、並び順、ページ送り、巨大な page、範囲外の page・per_page・sort（文字列と bool）、% と _ と \\ を文字として扱うこと、タグの OR、SQL を含む文字列を確かめています。ただし、ハッシュできない sort の拒否は確かめていません（[重大2]）\n- AC4: V4 は、作成者と管理者の更新、他人の Forbidden、他の組織と非公開の NotFound、古い version の Conflict、読み出しと書き込みの間の割り込みで Conflict になること、判定のあとに移管された場合、入力検証、失敗時のロールバック、削除の巻き戻しを確かめています。テストは強いです。ただし、型の違う version は確かめていません（[重大1]）\n- AC5: V5 は、非公開を含めて全部移ること、管理者以外の拒否、組織の組み合わせ4通り、途中の失敗で何も移らないこと、監査の記録を確かめています。妥当です\n- AC6: V6 は、末尾4文字だけを出すこと、7・8・0文字の境界、管理者だけであること、他の組織を除くことを確かめています。妥当です\n- AC7: V7 は、上限、ちょうど window 秒で新しい枠になる境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier を使った20スレッドの同時呼び出し、hook による判定中の割り込みを確かめています。最後のテストは Event と wait(0.5) を使っています。ロックを外すと失敗する構造なので、妥当です\n- AC8: V8 は、期限の時刻ちょうど、改ざん3通り、別の秘密鍵、形の崩れたリンク16通り（改行、全角などの数字、大文字の16進、型の違う値）を確かめています。妥当です\n- AC9: V9 は、ログ・例外のメッセージ・監査ログの出力に、本文・署名・api_key・秘密鍵が出ないことを、実際のハンドラーで捕まえて確かめています。妥当です\n- AC10: V10 は、Conflict・ValidationError・RuntimeError・IntegrityError のあとに `in_transaction` が False になり、接続を続けて使えること、ロールバックできない状態でも元の例外が伝わることを確かめています。ただし、コミットしたあとに例外が出る経路（[重大1]）は確かめていません\n- K1: AC2・AC3・AC4・AC5 のテストで、組織と非公開の境界をすべての操作について確かめています。妥当です\n- K2: プレースホルダー、ESCAPE '\\'、`\\` そのもののエスケープ、タグの IN 句のプレースホルダーをコードでたどって確かめました。ORDER BY は許可した辞書の値だけを使っています。妥当です\n- K3: 閲覧数・楽観的ロック・RateLimiter について、決定論的な hook による割り込みと、実際のスレッドで確かめています。妥当です\n- K4・K6・K5・K7・K8: それぞれ、上に書いたテストで確かめています。妥当です\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは見つかりませんでした\n### E2E の要否\n- 不要です。HTTP や UI のないライブラリで、仕様は HTTP を対象外としています。公開している関数を、実際の SQLite（メモリ上とファイル）に対して直接テストしているので、リスクに見合っています。\n### 不足しているリスク\n- R4・R10: 型の違う version で「コミットしたあとに例外」になる経路（[重大1]）\n- R3: 型の違う sort の拒否（[重大2]）\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）: 63件がすべて合格。gate のログ（20261111-085408-check-unit.log）と同じ結果でした\n- `$AQ trace`: R1〜R10、AC1〜AC10、K1〜K8 のすべてが unit の検証に結び付いていて、合格しています\n- `$AQ history --since 0`: 検証条件は追加だけで、削除・弱体化はありませんでした。git はまだ初期コミットだけで、差分の比較はできませんでした\n- スクラッチパッドで作ったプローブ（`python3 -I -B`）: sort が []・{} のとき TypeError、None のとき ValidationError。version が \"1\" のとき TypeError で、DB の version は 2 になっていました。search の tags が None・set・イテレーターのときは ValidationError。19桁の note_id のリンクは Forbidden。先頭に0を付けたリンクは通りました\n- コードを読んで確かめたこと: notes/service.py・share.py・ratelimit.py・db.py を全部読みました。認可（`_visible` と `_can_modify`）がすべての操作で、トランザクションの中で読み直した行に使われていることをたどりました（delete_note・update_note・get_note）。transfer は組織と所有者で WHERE を絞り、外部キーで存在しない移す先を拒否していました。`transaction()` は BaseException でロールバックし、COMMIT の失敗でもロールバックしていました。LIKE は title と body の両方に、エスケープ済みのパターンと ESCAPE 句を渡していました。HMAC は compare_digest で比べ、期限は `>=` で判定していました",
+ "files_changed": [],
+ "valid": true
+}

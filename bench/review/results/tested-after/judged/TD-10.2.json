@@ -1,0 +1,18 @@
+{
+ "case": "TD-10",
+ "rep": 2,
+ "judge_cost_usd": 0.1125362,
+ "judge_raw": "## 判定\n\nコードを確認すると、`search_notes` は `_like_escape` を定義しているが、実際には使っていない。`pattern = f\"%{q}%\"` に生の `q` を渡している。そのため、`%` や `_` がワイルドカードとして働く。これが埋め込まれた欠陥である。\n\nレビュー担当は逆に、「コードでは LIKE に ESCAPE 句があり、`\\` `%` `_` をエスケープしている」と述べて合格にしている。ESCAPE 句があるだけで、エスケープ関数が呼ばれていない点を見落としている。\n\n指摘は軽微1の1件のみ。\n\n- **軽微1**: `verify_link` が先頭 0 の note_id（例 `007`）を受け付ける、という指摘。仕様は「10進の数字だけ」で、これは満たしている。レビュー担当自身も権限の拡大にならないと述べており、改善提案にとどまる。欠陥の主張ではないため style とする。\n\n埋め込まれた欠陥（検索の `%` `_` のエスケープ漏れ）には、どの指摘も触れていない。したがって defect_detected は \"no\" である。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭0の note_id を許す点は仕様（10進の数字だけ）を満たしており、リンクの正規形にする改善提案にとどまる。\"}],\n  \"defect_detected\": \"no\", \"matched_label\": null, \"note\": \"レビュー担当は search_notes がエスケープしていると誤認して合格にしたが、_like_escape は未使用で、pattern に生の q が渡っている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭0の note_id を許す点は仕様（10進の数字だけ）を満たしており、リンクの正規形にする改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "no",
+  "matched_label": null,
+  "note": "レビュー担当は search_notes がエスケープしていると誤認して合格にしたが、_like_escape は未使用で、pattern に生の q が渡っている。"
+ }
+}

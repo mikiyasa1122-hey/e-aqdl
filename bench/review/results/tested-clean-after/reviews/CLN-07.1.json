@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 1,
+ "sec": 33.3,
+ "exit": 0,
+ "cost_usd": 0.1677076,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 27947,
+  "cache_read_input_tokens": 174796,
+  "output_tokens": 3842,
+  "output_tokens_details": {
+   "thinking_tokens": 1247
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27947,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1839,
+    "cache_read_input_tokens": 46735,
+    "cache_creation_input_tokens": 1841,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1841
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, notes/share.py:11 / 対応区分: 改善提案 / 内容: LINK_RE が先頭ゼロ付きの数字（例 `007.1060.<署名>`）を受け付ける。署名は int 化した値で計算するため、同じメモ・同じ期限の正規リンクを別の文字列で通せる。偽造や期限の延長はできないので、仕様違反とは判断しなかった。 / 提案: 正規形（先頭ゼロなし）だけを通すか、`f\"{note_id}.{expires}.{sig}\" == link` を確かめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。題名・本文・タグの境界値と、タグ挿入の途中で失敗させたときに何も残らないことを、`hooks` の差し込み口で確かめている。実装の `transaction()` も ROLLBACK している。\n- AC2: 妥当。他の組織・他人の非公開・存在しないメモがすべて NotFound になる。確認後に見えなくなったケースは、UPDATE 後の再確認とロールバックで防ぎ、テストもある。同時閲覧は、スレッドと割り込みの両方で再現している。UPDATE が `views = views + 1` の単一文なので数え漏れはない。\n- AC3: 妥当。範囲外の入力、`%`・`_` のリテラル扱い、OR のタグ絞り込み、SQL 文字列を値として渡すケースを確かめている。実装は ESCAPE `\\` で、題名と本文の両方に同じエスケープ済みパターンを渡している。値はすべてプレースホルダーで渡し、f 文字列に埋め込むのは固定の SORT_COLUMNS と `?` の並びだけ。\n- AC4: 妥当。権限の判定をトランザクション内で読み直した行でやり直している。UPDATE の `WHERE version = ?` と rowcount で Conflict を返す。読み出しから書き込みの間の更新、更新後のタグ検証、削除の失敗が伝わることのテストもある。\n- AC5: 妥当。管理者以外・組織をまたぐ移管の拒否、途中失敗で全件元のまま、version の加算を確かめている。実装は 1 つのトランザクションで、移す元は管理者の組織の ID に絞っている。\n- AC6: 妥当。8 文字未満は全伏せ、8 文字以上は末尾 4 文字以外を伏せる。実装（notes/service.py の `export_audit`）を読んで確認した。\n- AC7: 妥当。枠の境界（159.999 と 160.0）、拒否が枠を延ばさないこと、20 スレッドの同時呼び出し、判定の途中への割り込みを確かめている。判定はロックの内側にある。同期は Event と Barrier で、sleep には頼っていない。\n- AC8: 妥当。期限の境界（now == expires で拒否）、改ざん 3 種、別の秘密鍵、形の崩れ（大文字、改行、全角数字、型違いなど）を確かめている。\n- AC9: 妥当。ログ・例外・監査の detail に本文・署名・鍵が出ないことを確かめている。実装も ID しかログに出していない。\n- AC10: 妥当。各種の失敗の後も接続を使える。ROLLBACK 自体が失敗しても元の例外を隠さない。\n- K1〜K8: 上記のテストで足りる。K2 は実装側で LIKE のエスケープと ESCAPE 句、プレースホルダーが使われていることを確認した。K3 は更新・閲覧・RateLimiter が決定的に再現されている。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのテストは見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI のない標準ライブラリだけのライブラリで、リスクは単体テストと SQLite の実体で確かめられている。\n\n### 不足しているリスク\n- なし。ただし、複数の接続・複数のスレッドを使った BEGIN IMMEDIATE の競合は、`hooks` による割り込みの再現と、同時閲覧のスレッドテストで確かめた範囲にとどまる。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて合格し、`PYTHONDONTWRITEBYTECODE=1` でファイルは書き込んでいない。\n- notes/ の全ソース（db・service・ratelimit・share・errors）を仕様・設計と突き合わせて読んだ。\n- `aqdlc trace` で、すべての要求・受け入れ条件・リスクに検証があり、結果が「合格」であることを確認した。\n- `aqdlc history` の途中までは読めたが、出力を途中で打ち切ったため、検証条件の弱体化がないかは最後まで確認できていない。見えた範囲では、検証の追加のみで弱体化は見当たらない。\n- ゲートの再実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-11",
+ "rep": 2,
+ "sec": 22.5,
+ "exit": 0,
+ "cost_usd": 0.08706180000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12253,
+  "cache_read_input_tokens": 124838,
+  "output_tokens": 2555,
+  "output_tokens_details": {
+   "thinking_tokens": 392
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12253,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1777,
+    "cache_read_input_tokens": 37851,
+    "cache_creation_input_tokens": 1882,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1882
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0af59235\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, R9, K5 / 対応区分: 修正必須 / 内容: `export_audit` が api_key を伏せずに、そのまま `actor_key` として返している。 / 成立条件: 管理者が監査ログを出力すると、必ず起きる。監査ログに 1 件でも記録があれば、実行する組織を問わない。 / 影響: 同じ組織の利用者の api_key が全文で出力される。仕様は末尾4文字以外を * で伏せ、8文字未満は全部伏せると定めており、それに違反する。api_key が漏えいする。 / 根拠: notes/service.py の `export_audit` 末尾の `\"actor_key\": r[\"api_key\"]`。マスク処理がコード中のどこにもない。呼び出し元・DB 制約・上流にこれを防ぐ処理はない。 / 提案: `actor_key` を `\"*\" * len(k)`（len < 8 のとき）、それ以外は `\"*\" * (len(k) - 4) + k[-4:]` にする。または、api_key 自体を出力から外す。\n- [重大2] 区分: テスト / 対象: AC6, K7 / 対応区分: 証拠不足 / 内容: AC6 のテストは、権限と行の action・actor しか確かめていない。`actor_key` の中身を一切検査しておらず、マスクの有無を確かめる検証が空洞である。このため [重大1] の欠陥があっても全テストが通る（61 件 OK）。 / 根拠: tests/test_ac6_audit.py は `(action, actor)` だけを assert している。AC6 と K7 は api_key の伏字そのものを要求している。 / 提案: 次の検証を追加する。8文字以上の鍵は末尾4文字だけが見えて残りが * になる。8文字未満の鍵（境界の 7 文字と 8 文字を含む）は全部 *。出力のどこにも生の鍵が含まれない。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は、規則の検査と、`hooks.before_write` による途中失敗時のロールバックを確かめており妥当。コード上も、検証 → トランザクション → タグの重複除去を確認した。\n- AC2: V2 は妥当。見えないメモは一律 NotFound で、閲覧数の加算はトランザクション内で行う。判定後の変更も読み直して検査している。\n- AC3: V3 と VK2 は妥当。プレースホルダー、LIKE の ESCAPE、`%` `_` `\\` のエスケープ、tags の検査、page・per_page・sort の範囲検査をコードで確認した。\n- AC4: V4 と VK3 は妥当。楽観的ロックは UPDATE の `WHERE version` と rowcount で判定する。認可と検証はトランザクション内で読み直した行で行う。\n- AC5: V5 と VK6 は妥当。組織の一致を検査し、1 つのトランザクション内で移す。\n- AC6: 上記 [重大1][重大2] のとおり、実装が未達で、検証も不十分。\n- AC7: V7 は妥当。ロック内で判定しており、枠の境界は `>= window` で仕様どおり。\n- AC8: V8 と VK8 は妥当。`fullmatch`、`compare_digest`、`now >= expires` で無効にする。例外メッセージに署名は含まれない。\n- AC9: V9 は、ログ・例外に本文・署名・鍵が出ないことを妥当に確かめている。ただし監査出力の api_key は AC6 の欠陥で露出している。\n- AC10: V10 は妥当。`_rollback` と `transaction` で接続を復旧する。\n- エンジンが検出したテストの兆候はなし（skip・`.only`・アサーションなしのファイルはない）。`history` で検証条件の弱体化は確認されず、記録は `bind` のみだった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest と SQLite の実 DB で検証している。リスクに見合っている。\n### 不足しているリスク\n- K7 / K5: 監査ログの api_key のマスクを確かめる検証がない（[重大2]）。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。61 件すべて OK だった。\n- `notes/*.py` を全件読み、仕様 R1〜R10 と突き合わせた。\n- `git status` を確認した。コードはすべて未追跡で、差分比較はできなかった。\n- `$AQ history --since 0` で、検証条件の変更履歴に弱体化がないことを確認した。\n- `export_audit` にマスク処理がないことを、コードで直接確認した。",
+ "files_changed": [],
+ "valid": true
+}

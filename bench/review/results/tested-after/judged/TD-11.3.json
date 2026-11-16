@@ -1,0 +1,23 @@
+{
+ "case": "TD-11",
+ "rep": 3,
+ "judge_cost_usd": 0.1103202,
+ "judge_raw": "## 分類\n\n- **重大1**: `export_audit` が api_key を伏せずに `actor_key` として返している点を指摘しています。箇所は埋め込み欠陥と同じで、原因（そのまま返している）も影響（全利用者の鍵が管理者の出力に出る）も一致します。そのため matches_defect です。\n- **重大2**: `test_ac6_audit.py` が伏せ字をアサートしていないという指摘です。実際にそのテストには伏せ字の確認がなく、指摘は正確です。実装の原因・影響にも触れていますが、主題はテストの不足なので test_gap とします。重大1が欠陥そのものを別に扱っています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key をそのまま actor_key で返しており、箇所・原因・影響が埋め込み欠陥と一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"test_ac6_audit.py に伏せ字のアサートがないという、実在するテスト不足の指摘である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が欠陥の箇所・原因・影響を正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key をそのまま actor_key で返しており、箇所・原因・影響が埋め込み欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "test_ac6_audit.py に伏せ字のアサートがないという、実在するテスト不足の指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が欠陥の箇所・原因・影響を正しく特定している。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLN-01",
+ "rep": 2,
+ "sec": 106.9,
+ "exit": 0,
+ "cost_usd": 0.5697776,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 38203,
+  "cache_read_input_tokens": 285588,
+  "output_tokens": 10349,
+  "output_tokens_details": {
+   "thinking_tokens": 4790
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 38203,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 5212,
+    "cache_read_input_tokens": 64196,
+    "cache_creation_input_tokens": 1422,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1422
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6454e556\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, R10, AC4, AC10, K4 / 対応区分: 修正必須 / 内容: `update_note` は引数 `version` の型を確かめていない。整数以外の version を渡すと、更新がコミットされた後に例外が出る。呼び出し側には失敗に見えるのに、データは書き換わっている / 成立条件: 呼び出し側が `version=\"1\"` のような数字の文字列を渡したとき。SQLite は INTEGER 列との比較で `\"1\"` を 1 に変換するので、`WHERE version = ?` が一致して UPDATE と COMMIT が通る。その後、戻り値の計算 `return version + 1`（notes/service.py:301）で TypeError になる。float の `2.0` だと例外は出ず、`3.0` が返る / 影響: R10 は「例外が起きたらトランザクションをロールバック」と定めているが、例外が起きても更新・タグ・監査ログはコミットされたまま残る。呼び出し側は失敗と判断して再試行し、Conflict になる。version を文字列で受ける上位層（HTTP の値をそのまま渡すなど）では、このずれが実際に起こる / 確認した保証: 上流に version の型を確かめる処理はない（`_tag_list` と `_validate` は title・body・tags だけを見る）。スキーマの CHECK もない。既存のテストは整数の version しか使っていない / 根拠: notes/service.py:281-301。再現（スクラッチのスクリプト）: `update_note(c, a, n, \"1\", body=\"x\")` → TypeError。その後 DB の version は 2 で、`in_transaction=False`（コミット済み） / 提案: 関数の先頭で `isinstance(version, int) and not isinstance(version, bool)` を確かめ、満たさなければ ValidationError にする。戻り値は DB から読んだ新しい version にする。あわせて、文字列・float・bool の version で何も変わらないことを確かめるテストを追加する\n- [重大2] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: `list_notes` にハッシュできない sort（`[\"updated\"]` など）を渡すと、ValidationError ではなく TypeError になる / 成立条件: sort にリスト・dict などを渡したとき。`sort not in SORT_COLUMNS`（notes/service.py:239）が dict の検索で TypeError を出す / 影響: 仕様 R3 は「sort は updated か title だけ。範囲外は ValidationError」と定めている。page と per_page は型の違いも ValidationError に揃えているのに、sort だけ未分類の例外が漏れる。呼び出し側の業務エラー処理（NotesError で受ける）をすり抜ける / 確認した保証: 上流に検査はない。テストは文字列の不正値（\"id\"、\"title; DROP\"）だけ / 根拠: 再現: `list_notes(c, a, sort=[\"updated\"])` → `TypeError unhashable type: 'list'` / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS:` にし、型の違う sort を入れたテストを追加する\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id・期限の先頭に 0 を付けた形（`007.1060.<署名>`、`7.01060.<署名>`）も、有効として受け入れる。署名の対象は int にした値なので意味は変わらず、偽造にはならない。ただし、同じリンクに複数の表記が通る / 提案: 先頭の 0 を許さない正規表現（`0|[1-9][0-9]*`）にするか、`str(int(x)) == x` を確かめる。また `make_link` は19桁以上の note_id でも、`verify_link` が必ず拒否するリンクを作れる。作るときにも同じ形を確かめるとよい\n- [軽微2] 区分: テスト / 対象: AC4, K3 / 対応区分: 改善提案 / 内容: 更新の競合は、hook で同じ接続から割り込む形でだけ確かめている。別スレッド・別接続どうしの同時更新（BEGIN IMMEDIATE とロック待ち）は、実際には実行していない。閲覧数では別接続のテストがある / 提案: ファイルの DB と複数のスレッドで同じ version を使って同時に更新し、成功が1件、残りが Conflict になることを確かめるテストを追加する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグの境界（100/101、10000/10001、20/21 文字、改行、大文字、型の違い）、重複を数える規則、文字列の tags、途中の失敗（hook）と検証エラーの後に notes・note_tags・audit が0件であることを確かめており、妥当。\n- AC2: 他の組織・他の組織の管理者・他人の非公開・管理者から見た他人の非公開・存在しない ID がすべて NotFound になること、NotFound のときに閲覧数が増えないこと、確認の後に非公開へ変わる場合、4スレッド×10回の別接続の閲覧で 40 になることを確かめており、妥当。\n- AC3: 範囲（他の組織・他人の非公開・管理者）、並び順、ページの境界、巨大な page、% と _ と \\ の扱い、タグの OR、SQL 文字列を確かめており、おおむね妥当。ただし、型の違う sort は未検証で、実装にも欠陥がある（重大2）。\n- AC4: 作成者・管理者・他人（Forbidden）・他の組織（NotFound）・非公開（管理者は NotFound）、古い version、読み出しと書き込みの間の更新（hook）、判定の後の移管、更新時の入力検証、削除の途中の失敗を確かめており、整数の version については妥当。型の違う version は未検証で、コミットの後に例外が出る欠陥がある（重大1）。別スレッドの同時更新は未実行（軽微2）。\n- AC5: 管理者だけ、組織の組み合わせ4通り、非公開も移ること、途中の失敗で全部が元のままであること、監査ログを確かめており、妥当。\n- AC6: 末尾4文字、7文字・8文字・空の鍵の境界、管理者だけ、自組織だけを確かめており、妥当。\n- AC7: 枠の中の上限、利用者ごとの数え方、159.999 と 160.0 の境界、拒否が枠を延ばさないこと、Barrier を使った20スレッドの同時呼び出し、ロックの中での割り込み（hook）を確かめており、妥当。hook のテストは wait(0.5) を使うが、ロックを外すと失敗する構造になっている。\n- AC8: 期限ちょうど（1060）が無効、改ざん（id・期限・署名・秘密鍵）、形の崩れ（大文字・改行・空白・負の数・長さ・指数表記・アラビア数字・型の違い）を確かめており、妥当。先頭の 0 は未検証（軽微1）。\n- AC9: ログ・例外のメッセージ・監査の出力に、本文・署名・api_key・秘密鍵が出ないことを確かめており、妥当。\n- AC10: Conflict・ValidationError・注入した失敗・外部キー違反・自動でロールバックされた後のそれぞれで、`in_transaction` が False になり、次の操作ができることを確かめており、妥当。ただし、コミットの後に例外が出る経路（重大1）は対象外。\n- K1: 閲覧・一覧・検索・更新・削除・移管で、他の組織と他人の非公開を拒否することを確かめており、妥当。\n- K2: すべての SQL がプレースホルダーを使っている。動的な部分は、SORT_COLUMNS の固定値と、タグの数だけ並べる `?` だけ。LIKE は `\\` → `\\\\` の順にエスケープし、ESCAPE '\\' を題名と本文の両方の条件に使っている。テストもこれを確かめており、妥当。\n- K3: 閲覧数（スレッド）、レート制限（スレッド）、更新（hook）。更新は別スレッドでは未実行（軽微2）。\n- K4: 作成・削除・移管の途中の失敗を確かめている。更新の型の違いによるコミット後の例外は未対策（重大1）。\n- K5/K7: AC6・AC9 と同じで、妥当。\n- K6: AC5 と同じで、妥当。\n- K8: AC8 と同じで、妥当。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストも、目視では見つからなかった。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、仕様も HTTP を対象外としている。実際の SQLite を使った unittest で、組み合わせて確かめられる）\n### 不足しているリスク\n- R4: 型の違う version（文字列・float・bool）の扱い。重大1で指摘したので、ここでは追記だけ。\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py をすべて読み、仕様と突き合わせた。\n- `$AQ trace` を実行した。全項目が「合格・反証未実施」。\n- `$AQ history --since 0` を実行した。check は unit の追加1件と bind だけで、検証の弱体化・削除はなかった。`git status` では、すべて未追跡の新規ファイルで、既存のテストの改変はなかった。\n- gate のログ（20261111-085134-check-unit.log）を確認した: 63件が合格。\n- `python3 -B -m unittest discover -s tests -t . -q` を自分で実行した（バイトコードは書き出さない）: 63件が合格。\n- スクラッチのスクリプトで、メモリ上の DB を使って確かめた:\n  - `list_notes(sort=[\"updated\"])` → TypeError（重大2）\n  - `sort=None` → ValidationError\n  - `page=2**62` → 空の結果\n  - `update_note(version=\"1\")` → TypeError。ただし version は 2 になってコミット済み（重大1）\n  - `version=2.0` → 3.0 が返る\n  - 検索で入れ子のリストのタグ → ValidationError\n  - 先頭に 0 を付けた共有リンク → 受け入れられる（軽微1）\n  - 10^18 の note_id のリンク → Forbidden\n- コードの経路で確かめたこと:\n  - get_note はトランザクションの中で可視性を判定し直す。\n  - update と delete はトランザクションの中で認可を判定し直す。\n  - transfer は org_id で絞り、1つのトランザクションで行う。\n  - transaction() は COMMIT の失敗でもロールバックし、ROLLBACK の失敗で元の例外を隠さない。\n  - RateLimiter は判定と更新を1つのロックの中で行う。\n  - verify_link は fullmatch と compare_digest を使い、期限は `>=` で判定する。\n  - 例外とログのメッセージに、本文・署名・api_key は入らない。",
+ "files_changed": [],
+ "valid": true
+}

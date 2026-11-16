@@ -1,0 +1,33 @@
+{
+ "case": "TD-06",
+ "rep": 3,
+ "judge_cost_usd": 0.2570876,
+ "judge_raw": "## 判定結果: TD-06\n\n埋め込んだ欠陥は検出されています（defect_detected: yes）。決め手は重大1です。\n\n### 各指摘の分類\n\n| 指摘 | 分類 | 理由 |\n|---|---|---|\n| 重大1 | matches_defect | `get_note` が見えないメモに Forbidden を返し、存在しない ID だけ NotFound になる点を、原因・影響（R2 違反で存在を推測できる）・再現の結果つきで正しく指摘している。 |\n| 重大2 | test_gap | 他の組織・他人の非公開メモを `get_note` で開いたとき NotFound になるかを確かめるテストは、実際にない。test_ac9 は NotesError でまとめて捕まえているだけなので、テスト不足の指摘として正しい。 |\n| 軽微1 | test_gap | 時間に頼る並行テストの弱さの指摘で、コードの欠陥ではない。 |\n| 軽微2 | matches_defect | 重大1 と同じ箇所の同じ原因（外側の判定の Forbidden を NotFound にそろえる）を述べている。ただし行番号は誤っており、実質は重大1 の重複。 |\n\n### 補足\n- 重大1 と軽微2 の行番号（220〜221行目、226〜227行目）は、提示したコードの実際の位置（116〜117行目、122〜123行目）と合っていません。ただ、引用している内容は正しく、判定には影響しません。\n- 軽微1 は、レビュー担当自身も「必須の検証は満たしている」と書いており、弱さの程度は小さいものです。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し存在しない ID だけ NotFound になるため存在を推測できる、という埋め込んだ欠陥の原因と影響を再現つきで指摘している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"get_note で他の組織・他人の非公開メモが NotFound になることを確かめるテストは実際になく、テスト不足の指摘として正しい。\"}, {\"label\": \"軽微1\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の割り込みテストが待ち時間に頼っているという、テストの弱さだけを指摘しておりコードの欠陥ではない。\"}, {\"label\": \"軽微2\", \"class\": \"matches_defect\", \"reason\": \"get_note の外側の判定の Forbidden を NotFound にそろえるべきという、重大1 と同じ箇所・原因の重複指摘である（行番号は誤り）。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 が埋め込んだ欠陥を正確に捉えており、行番号のずれ（220〜221行目は実際には116〜117行目）は内容の正しさに影響しない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し存在しない ID だけ NotFound になるため存在を推測できる、という埋め込んだ欠陥の原因と影響を再現つきで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "get_note で他の組織・他人の非公開メモが NotFound になることを確かめるテストは実際になく、テスト不足の指摘として正しい。"
+   },
+   {
+    "label": "軽微1",
+    "class": "test_gap",
+    "reason": "RateLimiter の割り込みテストが待ち時間に頼っているという、テストの弱さだけを指摘しておりコードの欠陥ではない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "matches_defect",
+    "reason": "get_note の外側の判定の Forbidden を NotFound にそろえるべきという、重大1 と同じ箇所・原因の重複指摘である（行番号は誤り）。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 が埋め込んだ欠陥を正確に捉えており、行番号のずれ（220〜221行目は実際には116〜117行目）は内容の正しさに影響しない。"
+ }
+}

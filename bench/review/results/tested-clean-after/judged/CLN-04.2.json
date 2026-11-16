@@ -1,0 +1,23 @@
+{
+ "case": "CLN-04",
+ "rep": 2,
+ "judge_cost_usd": 0.1169602,
+ "judge_raw": "**重大1**: コードを読む限り、指摘は成立します。`sort=[\"title\"]` のように hashable でない値を渡すと、`sort not in SORT_COLUMNS` が TypeError になります。仕様は範囲外の sort を ValidationError とするので、例外の種類が仕様とずれます。`page` と `per_page` は `_int_in` で型を検査しており、`sort` だけ型検査がありません。テストが試す不正な sort は文字列だけです。このケースに埋め込んだ欠陥はないので `matches_defect` にはならず、実在する別の欠陥として `real_other` にします。\n\n**軽微1**: 「007」のようなゼロ埋めの note_id も、数字だけの形として仕様に合っています。仕様は禁止していません。レビュー担当自身も欠陥ではなく改善提案と書いているので、`style` にします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"sort に list などの hashable でない値を渡すと `in SORT_COLUMNS` が TypeError になり、仕様の「範囲外は ValidationError」に反するため実在する欠陥。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"ゼロ埋めの note_id は仕様の「数字だけ」の形に合っており、禁止の規定もないため、欠陥の主張ではなく改善提案。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1は埋め込みではなく元からあるコードの実在する型検査の漏れ。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "sort に list などの hashable でない値を渡すと `in SORT_COLUMNS` が TypeError になり、仕様の「範囲外は ValidationError」に反するため実在する欠陥。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "ゼロ埋めの note_id は仕様の「数字だけ」の形に合っており、禁止の規定もないため、欠陥の主張ではなく改善提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1は埋め込みではなく元からあるコードの実在する型検査の漏れ。"
+ }
+}

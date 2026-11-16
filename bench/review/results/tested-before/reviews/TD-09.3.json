@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 3,
+ "sec": 23.1,
+ "exit": 0,
+ "cost_usd": 0.0938911,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13821,
+  "cache_read_input_tokens": 122611,
+  "output_tokens": 2633,
+  "output_tokens_details": {
+   "thinking_tokens": 564
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13821,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1745,
+    "cache_read_input_tokens": 37344,
+    "cache_creation_input_tokens": 3387,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3387
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` がメモ1件ごとに別のトランザクションで移管していて、「全部移すか、何も移さないか」を満たさない。 / 成立条件: 移すメモが2件以上あり、途中のメモの更新で例外が起きたとき。例として DB のロック超過、ディスクエラー、`hooks.before_write(\"transfer:<id>\")` での失敗がある。 / 影響: 先に処理した分のメモだけ移管済みでコミットされ、残りは元の持ち主のまま残る。監査ログも記録されない。仕様の「途中で失敗したら元のまま」に反し、データの整合性が崩れる。 / 確認した保証: 上流に全体を囲うトランザクションはなく、DB の制約でも防げない。`ids` の取得もトランザクションの外にあるため、取得後に作られたメモは移管から漏れる。 / 根拠: notes/service.py:196-200 の `for i in ids:` の中で `with transaction(conn):` を開き、監査ログは notes/service.py:201 で別のトランザクションにしている。tests/test_ac5_transfer.py には途中失敗のテストがない。 / 提案: ID の取得・全件の UPDATE・監査ログの INSERT を1つの `with transaction(conn):` にまとめる。`hooks.before_write` はトランザクションの内側に置く。\n\n- [軽微1] 区分: テスト / 対象: AC5 / 対応区分: 改善提案 / 内容: 重大1の修正に合わせて、2件目の移管で失敗させ、所有者・version・監査ログが元のままであることを確かめるテストを tests/test_ac5_transfer.py に追加するとよい。`Base.fail_at` がそのまま使える。 / 提案: 追加する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成・拒否・失敗時に何も残らないことは、`fail_at(\"create:tags\")` を使うテストが想定されている。コード上の実装は仕様どおり（notes/service.py:90-100）。テストファイルは精読しておらず、実行は成功した。\n- AC2: 閲覧数の更新と可視性の判定は、トランザクション内で `views = views + 1` を実行している。コード上は妥当。\n- AC3: LIKE のエスケープ・ESCAPE 句・プレースホルダー・ORDER BY の許可リストを確認し、妥当。条件ごとに同じ `pattern` が渡っている。\n- AC4: UPDATE 文の WHERE に version を入れて rowcount で判定し、認可と検証は同じトランザクション内でやり直している。コード上は妥当。\n- AC5: 不十分。正常系・権限・組織の拒否はテストされているが、「途中で失敗したら元のまま」を確かめるテストがなく、実装も反している（重大1）。\n- AC6: マスクの実装は仕様どおり（末尾4文字以外を伏せ、8文字未満は全部伏せる）。\n- AC7: ロックの中で枠の境界（`>= window`）を判定しており妥当。\n- AC8: `fullmatch` と `compare_digest` を使い、期限は `>=` で判定している。妥当。\n- AC9・AC10: ログと例外のメッセージに機密情報はなく、`transaction()` は ROLLBACK して例外を再送出する。\n- エンジンが検出したテストの兆候: なし。history は bind のみで、検証の弱体化は見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストで足りる。\n\n### 不足しているリスク\n- K4・K6: R5 の途中失敗の巻き戻しが未検証で、実装にも欠陥がある（重大1）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 62 件すべて成功。\n- `git status` と `aqdlc.py history --since 0`: 検証条件の弱体化なし。\n- notes/*.py を全件読み、認可・SQL・トランザクション境界を確認した。tests/ は test_ac5_transfer.py と base.py だけ精読した。他のテストファイルは読んでいないので、AC1〜AC4・AC6〜AC10 のテストの強さは未確認。",
+ "files_changed": [],
+ "valid": true
+}

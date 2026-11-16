@@ -1,0 +1,28 @@
+{
+ "case": "CLN-08",
+ "rep": 1,
+ "judge_cost_usd": 0.2732556,
+ "judge_raw": "## 判定結果（CLN-08・欠陥なしのケース）\n\n**[重大1] real_other**\n指摘されたとおりのことが、コード上で実際に起きます。\n- `notes/service.py:188-189` の UPDATE では、`version` は INTEGER 型の列です。文字列の `'1'` を渡しても、SQLite は数値に変換して比べます。そのため `WHERE version = ?` が一致し、rowcount は 1 になります。\n- トランザクションを抜けた時点で、本文・version・監査ログはコミット済みです。\n- その後の `service.py:197` の `return version + 1` が `\"1\" + 1` となり、TypeError で落ちます。\n- 結果として、例外が返るのに変更は残ります。R10 と K4 が守ろうとしている「例外なら何も残らない」が崩れます。\n\n型の契約は仕様に書かれていません。ただ、`list_notes` は page・per_page の型を検査しており、ライブラリとして入力の型を確かめる方針は読み取れます。呼び出し側の文字列 `\"1\"` だけで成り立ち、レビュー担当は実際に再現もしています。以上から、実在する欠陥と判断しました。\n\n**[軽微1] real_other**\n`LINK_RE` は note_id を `[0-9]{1,18}` に絞っています。一方、`make_link` は note_id の桁数を制限していません。そのため、note_id が 10^18 以上（19桁）だと、自分で作った正しい署名のリンクを `verify_link` が Forbidden にします。R8 の形の定めは「note_id と期限は10進の数字だけ」で、桁数の上限はありません。仕様からのずれとして実在します。\n\nただし、`create_note` の自動採番でこの桁に届くことはまずありません。このずれが表に出るのは、`make_link` に大きな id を直接渡したときくらいです。重さは小さいと見ます。先頭に 0 を付けた note_id が通る件は、同じメモを指すので欠陥ではありません。\n\n**[軽微2] style**\n`test_interleaving_inside_the_check_is_serialized` は、意図どおりに働いています。\n- ロックがあれば、B はロックで待たされます。A は `b_done.wait(0.5)` が時間切れになってから先へ進み、結果は「ok」と「limited」になります。\n- ロックがなければ、A が待っている間に B が判定に入り、両方が通ってしまいます。テストはこれを検出できます。\n\nAC7 を確かめるテストは揃っていて、空洞でもありません。時間切れに頼らない形にする提案は、テストの書き方の改善提案です。\n\n**まとめ**\nこのケースには欠陥を埋め込んでいないので、`defect_detected` は \"n/a\" です。ただし、作り手の見落としとして実在する問題が2件見つかりました。version の型を検査していないためにコミットの後に例外になる件と、共有リンクの note_id の桁数の上限の件です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"update_note に version を文字列 \\\"1\\\" で渡すと、SQLite が INTEGER 列との比較で数値に変換して UPDATE と監査ログがコミットされ、その後 service.py:197 の `version + 1` が TypeError になるので、例外が返るのに変更が残る（R10・K4 に反する）。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"LINK_RE が note_id を18桁までに絞る一方で make_link は桁数を制限しないため、note_id が 10^18 以上だと正しく署名したリンクが Forbidden になり、桁数の上限を定めていない R8 とずれる（自動採番では届かない端の場合）。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"このテストはロックの有無を正しく見分けられ、AC7 の検証は揃っているので、時間切れの待ちを Event に置き換えるのはテストの書き方の改善提案にとどまる。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、version の型を検査しないためにコミット後に例外になる件と、共有リンクの note_id の桁数の上限の件が、作り手の見落としとして実在する。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "update_note に version を文字列 \"1\" で渡すと、SQLite が INTEGER 列との比較で数値に変換して UPDATE と監査ログがコミットされ、その後 service.py:197 の `version + 1` が TypeError になるので、例外が返るのに変更が残る（R10・K4 に反する）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "LINK_RE が note_id を18桁までに絞る一方で make_link は桁数を制限しないため、note_id が 10^18 以上だと正しく署名したリンクが Forbidden になり、桁数の上限を定めていない R8 とずれる（自動採番では届かない端の場合）。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "このテストはロックの有無を正しく見分けられ、AC7 の検証は揃っているので、時間切れの待ちを Event に置き換えるのはテストの書き方の改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、version の型を検査しないためにコミット後に例外になる件と、共有リンクの note_id の桁数の上限の件が、作り手の見落としとして実在する。"
+ }
+}

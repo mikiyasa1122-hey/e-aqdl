@@ -1,0 +1,49 @@
+{
+ "case": "CLN-10",
+ "rep": 3,
+ "sec": 131.0,
+ "exit": 0,
+ "cost_usd": 0.6775932,
+ "num_turns": 9,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 18,
+  "cache_creation_input_tokens": 48686,
+  "cache_read_input_tokens": 397166,
+  "output_tokens": 10430,
+  "output_tokens_details": {
+   "thinking_tokens": 5198
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 48686,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3636,
+    "cache_read_input_tokens": 66688,
+    "cache_creation_input_tokens": 2578,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2578
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c8b1a97a\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, R10, AC4, AC10, K4 / 対応区分: 修正必須 / 内容: `update_note` は `version` の型を検査しません。戻り値の `version + 1` は、コミットが終わった後（`with transaction` の外）で計算されます。そのため、型の違う version を渡すと、更新と監査ログは確定したのに、呼び出し側には例外が返ります。 / 成立条件: 最新の version を文字列で渡したとき（例: `update_note(conn, user, nid, \"1\", body=\"z\")`）。version 列は INTEGER 型なので、SQLite が `'1'` を 1 に変換して `WHERE version = ?` が一致し、COMMIT されます。そのあと `\"1\" + 1` が TypeError になります。`2.0` を渡すと例外にはならず、`3.0` が返ります。 / 影響: 呼び出し側は失敗を受け取りますが、本文・version・監査ログは書き換わっています。同じ version で再試行すると Conflict になります。これは R10「例外が起きたらトランザクションをロールバック」に反し、K4（途中の失敗による不整合）が実際に起きる状態です。 / 確認した保証: 上流で version を検査している箇所はありません（`notes/service.py:287-307` には version の型検査がなく、`list_notes` の page・per_page だけ bool・int を検査しています）。DB の制約も、SQLite の型変換のため止めません。既存のテストは int しか渡していません。 / 根拠: `notes/service.py:298-301`（version を条件にした UPDATE と rowcount の判定）、`notes/service.py:307`（`return version + 1` が transaction の外にある）。再現の実行結果: `'1' exc TypeError … row: version 2 body z1 audit 2 in_txn False`（更新済みのまま例外になった） / 提案: 関数の入口で `version` が bool ではない int であり、1以上であることを検査し、そうでなければ ValidationError にします（トランザクションの前に行う）。あわせて、戻り値は DB から読み直した値か、検査済みの int から計算します。テストに、文字列・float・bool の version で ValidationError になり、何も変わらないことの確認を足します。\n- [軽微1] 区分: 実装 / 対象: R9, K5 / 対応区分: 改善提案 / 内容: `verify_link` は `raise ValueError(link)` のあと `from None` で Forbidden に置き換えています。表示は抑えられますが、`e.__context__` には署名入りのリンク全体を持つ ValueError が残ります（実行して確認済み）。標準の traceback 表示では出ませんが、`__context__` を直接たどる監視ツールなどで漏れる余地があります。 / 提案: `ValueError(link)` をやめ、`if not m: raise Forbidden(\"不正なリンク\")` で直接返します。\n- [軽微2] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: 署名は `int` に変換した値で検証しています。そのため `007.<期限>.<署名>` のように先頭に 0 を足したリンクも有効になります（実行して確認済み）。指すメモと期限は変わらないので実害はありませんが、リンクの文字列が一意になりません。 / 提案: 先頭の 0 を拒否する（`0|[1-9][0-9]*`）か、署名の対象を受け取った文字列そのものにします。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグの境界（100/101、10000/10001、空白だけ、改行、型の違い、文字列の tags、重複を数えて保存は除く）と、途中の失敗・拒否で何も残らないことを確かめており、妥当です。\n- AC2: 他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しない ID がどれも NotFound になること、NotFound では閲覧数が増えないこと、確認の後に非公開になった場合を確かめています。閲覧数は 4 スレッド×10 回をファイル DB で数え、正確に 40 になることを確認しており、妥当です。\n- AC3: 範囲（他の組織・他人の非公開・管理者）、2 種類の並び順、ページ（境界・非常に大きい page）、不正な入力（bool・float・文字列・範囲外の sort）、% と _ と \\ を普通の文字として探すこと、タグの OR、タグの検査を確かめており、妥当です。\n- AC4: 認可（作成者・同じ組織の管理者・同じ組織の他人は Forbidden・他の組織は NotFound・非公開は管理者にも NotFound）、古い version で Conflict、読み出しと書き込みの間に他の更新が入る場合、判定の後に移管される場合、更新時の入力検査、削除の途中の失敗で巻き戻ることを確かめています。ただし、version の型が違うときにコミット後に例外になる経路（重大1）は検証されていません。\n- AC5: 管理者だけであること、組織の組み合わせ4通り、途中の失敗で元のままであること、非公開のメモも移ること、version が増えることを確かめており、妥当です。\n- AC6: 末尾4文字を残すこと、7文字・8文字の境界、空の鍵、管理者だけで自分の組織だけであることを確かめており、妥当です。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20 スレッドが Barrier で同時に呼んでも 5 回だけ通ること、検査の途中に割り込ませても直列になることを確かめており、妥当です。割り込みのテストは Event の待ち時間に頼っていますが、ロックを外せば失敗する形です。\n- AC8: 期限ちょうどで無効になること、改ざん（ID・期限・署名・鍵）、多くの形の崩れ（大文字・改行・符号・桁数・アラビア数字・型）を確かめており、妥当です。\n- AC9: ログ・例外のメッセージ・監査の出力に本文・署名・api_key・秘密の鍵が出ないことを確かめており、妥当です（`__context__` については軽微1）。\n- AC10: Conflict・ValidationError・注入した例外・DB の制約違反・ROLLBACK が使えない状態のあとで、接続を続けて使えることを確かめています。ただし、例外がコミットの後に起きる経路（重大1）は対象外になっています。\n- K1〜K8: K1・K2（プレースホルダー、ESCAPE、`' OR 1=1 --`）・K3・K4・K5・K6・K7・K8 はそれぞれ上のテストで確かめられています。K4 のうち、型の違う version の場合だけが未検証で、実際に不整合が起きます。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは、私が読んだ範囲でも見つかりませんでした。\n### E2E の要否\n- 不要です。HTTP や UI のないライブラリ（仕様で対象外）で、本物の SQLite を使う単体テストで、ファイル DB と複数スレッドを含めて確かめているためです。\n### 不足しているリスク\n- K4: 型の違う version で、コミットの後に例外になる（重大1）\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t . -q` → 63 件すべて合格（OK）\n- version に `\"1\"` / `2.0` / `True` を渡して実行 → `\"1\"` は更新が確定した後に TypeError、`2.0` は `3.0` を返す、`True` は Conflict\n- `verify_link` の例外の `__context__` → 署名入りの ValueError が残っていることを確認\n- 先頭に `00` を付けたリンク → 有効と判定されることを確認\n- `search_notes` は大文字小文字を区別しない（SQLite の LIKE の仕様。仕様に規定がないため指摘にしていません）\n- `$AQ trace`（すべての要求・リスクに検証が対応し、合格）と `$AQ history --since 0`（検証条件の削除・弱体化はなし。追加は check `unit` だけ）を確認しました。gate のログ（20261111-085543、exit=0、63 件）も確認しました。git はすべて未追跡のファイルで、既存のテストへの差分はありません。\n- コードを読んで確かめたこと: すべての SQL がプレースホルダーを使っていること。f-string で埋め込んでいるのは固定の文字列（`SORT_COLUMNS` の値、`?` の列）だけであること。LIKE は `\\` を先にエスケープし、`ESCAPE '\\'` を題名と本文の両方に付けていること。`_visible` と `_can_modify` が取得・更新・削除の各経路で使われ、更新・削除ではトランザクションの中で読み直していること。閲覧数は `views = views + 1` の1文で増やしていること。移管は1つのトランザクションの中で行い、組織で絞り込んでいること。RateLimiter は判定と記録の全体をロックの中で行っていること。`hmac.compare_digest` を使っていること。ログに出しているのが ID だけであること。",
+ "files_changed": [],
+ "valid": true
+}

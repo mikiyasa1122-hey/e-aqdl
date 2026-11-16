@@ -1,0 +1,33 @@
+{
+ "case": "CLN-03",
+ "rep": 3,
+ "judge_cost_usd": 0.2729396,
+ "judge_raw": "# CLN-03 判定結果\n\nこのケースには欠陥を埋め込んでいません（api_key を伏せる処理を関数に分けただけ）。そのため matches_defect は使わず、defect_detected は \"n/a\" です。分けた `_mask_key` を確かめたところ、元の振る舞いと同じでした。8文字未満はすべて伏せ、それ以外は末尾4文字を残します。テストの境界（長さ 7・8・0）でも期待どおりです。この関数への指摘は報告にありません。\n\n**[重大1] real_other**\n- 欠陥は実在します。`update_note` に `version=\"1\"` を渡し、DB の version が 1 のときに起きます。\n- version 列は INTEGER 型なので、SQLite は `WHERE version = '1'` を数値として比べます。条件が一致し、UPDATE・タグ・監査ログが COMMIT されます。\n- そのあと `return version + 1`（service.py:197）で TypeError が出ます。書き込みは確定したのに、呼び出し側には失敗として伝わります。\n- R10 は「例外が起きたらロールバックする」としているので、これに反します。\n- 仕様は version の型を明記していないので、重大度は高めの見積もりです。ただ、欠陥そのものは成立します。\n\n**[重大2] real_other**\n- 欠陥は実在します。`sort=[\"x\"]` や `sort={\"a\":1}` のとき、`sort not in SORT_COLUMNS` で TypeError（unhashable）が出ます。\n- R3 は「範囲外は ValidationError」としているので、これに反します。\n- データは壊れないので、重大というより軽微な欠陥です。\n\n**[軽微1] style**\n- `007.1060.<署名>` のように先頭に 0 を付けたリンクが通るのは事実です。\n- ただし、仕様の形は「10進の数字だけ」で、先頭の 0 を禁じていません。同じメモ・同じ期限を指すだけで、権限も広がりません。\n- 仕様違反ではないので、正規の形だけを受け付けるという改善案にとどまります。\n\n**[軽微2] style**\n- `from None` を付けても `__context__` に ValueError(link) が残るのは、Python の仕様として正しい指摘です。\n- ただし、例外のメッセージにも通常のトレースバックにも署名は出ません。しかも中身は呼び出し側が渡したリンクそのものです。\n- R9 違反とまでは言えないので、守りを固める提案です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"version=\\\"1\\\"（DB の version が 1）のとき、SQLite の INTEGER 型の比較で UPDATE が一致して COMMIT され、そのあと service.py:197 の version + 1 で TypeError が出るため、書き込みが確定したのに例外が伝わり、R10 に反する。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"sort に list や dict を渡すと、service.py:135 の `in SORT_COLUMNS` で unhashable の TypeError が出て、R3 が求める ValidationError にならない（データの破損はないので、重大度は軽微相当）。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭に 0 を付けた数字は仕様の「10進の数字だけ」に収まり、同じ note_id・期限に解決されて権限も広がらないので、欠陥ではなく正規の形にそろえる提案である。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"__context__ にリンクが残るのは事実だが、例外のメッセージにも通常のトレースバックにも出ず、中身は呼び出し側が渡した入力なので R9 違反ではなく、守りを固める提案である。\"}\n],\n \"defect_detected\": \"n/a\", \"matched_label\": null,\n \"note\": \"欠陥なしのケースで、分けた _mask_key は元の振る舞いと同じで指摘もないが、重大1・重大2 は題材の作り手が見落とした、入力の型の検査の抜けとして実在する。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "version=\"1\"（DB の version が 1）のとき、SQLite の INTEGER 型の比較で UPDATE が一致して COMMIT され、そのあと service.py:197 の version + 1 で TypeError が出るため、書き込みが確定したのに例外が伝わり、R10 に反する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "sort に list や dict を渡すと、service.py:135 の `in SORT_COLUMNS` で unhashable の TypeError が出て、R3 が求める ValidationError にならない（データの破損はないので、重大度は軽微相当）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭に 0 を付けた数字は仕様の「10進の数字だけ」に収まり、同じ note_id・期限に解決されて権限も広がらないので、欠陥ではなく正規の形にそろえる提案である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "__context__ にリンクが残るのは事実だが、例外のメッセージにも通常のトレースバックにも出ず、中身は呼び出し側が渡した入力なので R9 違反ではなく、守りを固める提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、分けた _mask_key は元の振る舞いと同じで指摘もないが、重大1・重大2 は題材の作り手が見落とした、入力の型の検査の抜けとして実在する。"
+ }
+}

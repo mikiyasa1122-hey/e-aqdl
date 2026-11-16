@@ -1,0 +1,33 @@
+{
+ "case": "CLN-06",
+ "rep": 3,
+ "judge_cost_usd": 0.2814196,
+ "judge_raw": "## 判定結果（CLN-06・欠陥なしのケース）\n\n**重大1 → real_other（実在する欠陥。ただし「重大」は言い過ぎ）**\n- `list_notes` の `sort not in SORT_COLUMNS` は、dict に対する `in` です。ハッシュできない値（例: `sort=[\"title\"]`、`sort={\"x\":1}`）を渡すと、ここで TypeError が出ます。\n- 仕様 R3 には「sort は updated か title だけ。範囲外は ValidationError」とあります。list は updated でも title でもないので、本来は ValidationError になるべきで、仕様に反しています。\n- page・per_page は型の違う値を ValidationError にしているのに、sort だけ型の検査がありません。\n- 既存のテストが試しているのは文字列だけで、この入力は確かめていません。\n- 正解データは「欠陥なし」ですが、作り手が見落とした実在の不備と判断しました。影響はデータの破損や漏えいではなく、出る例外の種類が違うだけなので、重大度は低いです。\n\n**軽微1 → style（頑健性の提案）**\n- SQLite の型変換で `version = '1'` が一致し、コミットされた後に `\"1\" + 1` で TypeError になる、という現象自体は本当に起きます。\n- ただし version の型は仕様で決まっておらず、整数以外を渡すのは呼び出し側の誤用です。仕様違反とは言えないので、欠陥ではなく頑健性の提案とします。レビュー担当も改善提案としています。\n\n**軽微2 → style（正規の形を一つに揃える提案）**\n- 先頭に 0 を足したリンク（`007....`）が通るのは事実です。\n- しかし R8 の「note_id と期限は10進の数字だけ」に `007` は反しません。署名される内容（note_id と期限）も変わらないので、改ざんにも権限の拡大にもなりません。仕様違反ではありません。\n\n**軽微3 → style（必須ではないテストの追加提案）**\n- 読み出しから書き込みの間に割り込まれた場合の Conflict は、hook を使ったテストで決定論的に確かめられています。\n- 更新は BEGIN IMMEDIATE の中で行を読み直してから書くので、別々の接続からの同時更新も直列になります。K3 と AC4 に実際の不足はありません。\n- レビュー担当自身も「必要な証拠はある」と認め、改善提案としています。必須と主張していないので、false_positive ではなく style とします。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"sort=[\\\"title\\\"] や sort={\\\"x\\\":1} のようなハッシュできない値を渡すと、dict に対する `in` で TypeError が出て ValidationError にならず、R3「範囲外は ValidationError」に反する（実在するが影響は低い）。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version に \\\"1\\\" を渡すとコミットの後に TypeError になる現象は実在するが、version の型は仕様で決まっておらず呼び出し側の誤用なので、欠陥ではなく頑健性の提案。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭0のリンクは R8 の「10進の数字だけ」に反さず、署名の内容も変わらないので、改ざん・権限の拡大はなく、正規の形を一つに揃える提案にとどまる。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"読み出しと書き込みの間の競合は hook のテストで確かめられ、BEGIN IMMEDIATE で直列になるのでテストに実際の不足はなく、必須でない追加の提案。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしの題材だが、sort に型の違う値を渡したときに ValidationError にならない点は作り手が見落とした実在の不備（重大度は低い）で、他の3件は仕様違反のない改善提案。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "sort=[\"title\"] や sort={\"x\":1} のようなハッシュできない値を渡すと、dict に対する `in` で TypeError が出て ValidationError にならず、R3「範囲外は ValidationError」に反する（実在するが影響は低い）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version に \"1\" を渡すとコミットの後に TypeError になる現象は実在するが、version の型は仕様で決まっておらず呼び出し側の誤用なので、欠陥ではなく頑健性の提案。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭0のリンクは R8 の「10進の数字だけ」に反さず、署名の内容も変わらないので、改ざん・権限の拡大はなく、正規の形を一つに揃える提案にとどまる。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "読み出しと書き込みの間の競合は hook のテストで確かめられ、BEGIN IMMEDIATE で直列になるのでテストに実際の不足はなく、必須でない追加の提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしの題材だが、sort に型の違う値を渡したときに ValidationError にならない点は作り手が見落とした実在の不備（重大度は低い）で、他の3件は仕様違反のない改善提案。"
+ }
+}

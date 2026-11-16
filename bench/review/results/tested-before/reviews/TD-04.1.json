@@ -1,0 +1,49 @@
+{
+ "case": "TD-04",
+ "rep": 1,
+ "sec": 23.3,
+ "exit": 0,
+ "cost_usd": 0.1138495,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18537,
+  "cache_read_input_tokens": 116055,
+  "output_tokens": 2808,
+  "output_tokens_details": {
+   "thinking_tokens": 655
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18537,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1796,
+    "cache_read_input_tokens": 37326,
+    "cache_creation_input_tokens": 1562,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1562
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3472c88d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K1, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` が移す先（to_user）の組織を検査していない。 / 成立条件: 管理者が自組織の from_user を指定し、別組織の to_user を渡す。呼び出し側は仕様どおり dict を確かめて渡すだけで、このライブラリは role・org_id を信用する。 / 影響: 組織の外にメモが渡る。非公開メモも含めて、別組織の利用者が owner になる。`_can_modify` は owner_id を先に見るので、その後は他組織の利用者が自由に更新・削除できる。仕様は「移す元・移す先・管理者がすべて同じ組織のときだけ（それ以外は Forbidden）」と定めており、K6「移管で組織の外にメモが渡る」が未対策。 / 根拠: notes/service.py の `transfer_notes` は `admin[\"role\"]` と `from_user[\"org_id\"] != admin[\"org_id\"]` しか見ていない。`to_user[\"org_id\"]` はどこにも出てこない。UPDATE の WHERE は `id = ?` だけで、org_id は絞っていない。上流の検証や DB 制約はなく、notes.owner_id は users(id) への外部キーだけで組織は拘束しない。 / 提案: トランザクションの前に `if to_user[\"org_id\"] != admin[\"org_id\"]: raise Forbidden(...)` を追加する。\n- [重大2] 区分: テスト / 対象: AC5, K6, R5 / 対応区分: 証拠不足 / 内容: 他組織の from_user・to_user を指定した移管が Forbidden になり、メモが元のまま残ることを確かめるテストがない。 / 根拠: tests/test_ac5_transfer.py には、正常系、管理者以外の拒否、途中失敗のロールバック、version の増加しかない。K6 は「組織の外に渡る」ことを重要なリスクとしており、AC5 は「R5 の規則どおりに拒否される」と定めている。この欠落のため、重大1の欠陥を 62 件すべてのテストが見逃している。 / 提案: 次の2件を追加する。(a) 別組織の to_user を渡すと Forbidden になり、owners が変わらず監査ログも増えない。(b) 別組織の from_user を渡すと Forbidden になる。組織の検査を外したら失敗することを確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系に加え、検証の拒否と tags 途中失敗時のロールバック（before_write）を確かめており妥当。\n- AC2: NotFound の統一と、view フックを使った閲覧数の並行加算を確かめている。実装も BEGIN IMMEDIATE で増やしており妥当。\n- AC3: LIKE の % と _ のエスケープ、範囲外の拒否、OR のタグ絞り込み、非公開の除外を確かめている。実装のプレースホルダー、ESCAPE、条件ごとの値の渡し方はたどって確認し、問題なし。妥当。\n- AC4: version の競合、更新・削除の認可、削除の失敗伝播を確かめている。実装は認可・検証・UPDATE を同一トランザクション内で行っており妥当。\n- AC5: 組織をまたぐ移管の拒否が未検証のため不十分（重大1・重大2）。\n- AC6: 8文字未満と末尾4文字の伏せ字を確かめており妥当。\n- AC7: 枠の境界（clock 注入）と、hook を使った並行実行を確かめており妥当。\n- AC8: 期限の境界、改ざん、形の崩れを確かめている。実装の fullmatch と compare_digest も確認し、妥当。\n- AC9: ログと例外にメッセージを出さないことを確かめており妥当。\n- AC10: 例外後の接続の復帰を確かめており妥当。\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなし）。テストや検証条件の弱体化も見つからなかった。\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリで、unittest が実 SQLite と複数スレッドで経路を通しているため）。\n### 不足しているリスク\n- K6: 移管先の組織の検査が実装・テストの両方で欠けている（重大1・重大2）。\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py をすべて読んだ。\n- `python3 -m unittest discover -s . -t .` を実行し、62 件が OK だった。\n- tests/test_ac5_transfer.py を読み、組織をまたぐケースがないことを確認した。\n- `git status` で、実装ファイルは未コミットの新規ファイルであることを確認した。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 3,
+ "sec": 102.3,
+ "exit": 0,
+ "cost_usd": 0.5627293999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 39234,
+  "cache_read_input_tokens": 289107,
+  "output_tokens": 9549,
+  "output_tokens_details": {
+   "thinking_tokens": 4838
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 39234,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3485,
+    "cache_read_input_tokens": 63605,
+    "cache_creation_input_tokens": 3053,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3053
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 4\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `notes/share.py:11` の `LINK_RE` が先頭の 0 を許します。`int()` で数値に戻してから署名と比べるため、発行した `7.1060.<sig>` を `07.1060.<sig>` や `7.01060.<sig>` に書き換えたリンクも有効になり、7 が返ります（実行して確かめました）。note_id と期限の値は変わらないので、権限は広がりません。それでも、文字列としては書き換えたリンクが通るので、正規でない表記が受け入れられることになります / 提案: `(0|[1-9][0-9]*)` のように正規の10進表記だけを受け付けるか、検証の最後に `make_link` と同じ形に組み直したものと文字列で比べます。テストに先頭0のケースを加えます\n- [軽微2] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `LINK_RE` は数字を最大18桁に限っています。一方、`make_link` は桁数を確かめません。そのため note_id が 10^18 以上（19桁）だと、`make_link` が作ったリンクを `verify_link` が Forbidden にします（`make_link(\"s\", 10**18, ...)` で確かめました）。SQLite の INTEGER PRIMARY KEY は19桁まで取れますが、自動採番では現実には届きません / 提案: 上限を19桁にそろえ、範囲外の ID は `make_link` の側で ValidationError にします\n- [軽微3] 区分: 実装 / 対象: R4, AC4 / 対応区分: 改善提案 / 内容: `notes/service.py` の `update_note` は、`version` の型を確かめていません。`version=\"1\"` を渡すと、SQLite の型変換で UPDATE が成り立ってコミットされます。そのあと `return version + 1` が TypeError を出します。つまり呼び出し側には例外が返るのに、更新は確定しています（実行すると、例外のあと version は 2 でした）。仕様は version の型を決めていないので、仕様違反とはしません / 提案: 関数の最初で `isinstance(version, int) and not isinstance(version, bool)` を確かめ、そうでなければ ValidationError にします\n- [軽微4] 区分: 設計 / 対象: R1〜R10 / 対応区分: 改善提案 / 内容: `$AQ trace` で、すべての要求の実装ファイルが空の `notes/__init__.py` になっています。実際の実装は `service.py`・`ratelimit.py`・`share.py` にあり、設計の「要求との対応」とも合いません / 提案: impl-map を実際のファイルに直します\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create で次を確かめており、妥当です。\n  - 題名・本文の境界（100/101、10000/10001、空白だけ、None・数値）\n  - タグの規則（末尾・先頭の改行、全角、`_`、型の違う要素）、重複を数えて保存は1つにすること、文字列の拒否\n  - 拒否時と途中の失敗（hook）で notes・note_tags・audit が 0 件のままであること\n- AC2: 次を確かめており、妥当です。\n  - 他の組織の利用者・他の組織の管理者・他人の非公開（同じ組織の管理者も含む）・存在しないメモが、すべて NotFound になること\n  - NotFound のときに閲覧数が増えないこと\n  - 確かめた後に非公開になった場合も NotFound になること\n  - 割り込んだ閲覧で数が漏れないこと\n  - 別々の接続を使う4スレッドで、合計40回が正確に数えられること\n- AC3: 範囲（他の組織・他人の非公開・管理者からも見えないこと）、2種類のソート、ページ（巨大な page を含む）、不正な引数（bool・float・文字列・SQL 片）、`%`・`_`・`\\` をふつうの文字として扱うこと、タグの OR、検索語とタグの検査を確かめています。題名と本文の両方の LIKE に、エスケープした同じ pattern が ESCAPE 句付きで渡ることも、コードで確かめました。妥当です。\n- AC4: 次を確かめており、妥当です。\n  - 作成者と同じ組織の管理者だけが更新・削除できること（他は Forbidden、他の組織と非公開は NotFound）\n  - 古い version で Conflict になり、読み出しから書き込みの間に別の更新が入っても Conflict で先の更新が残ること\n  - 判定の後に移管されたら Forbidden になること（トランザクションの中で読み直している）\n  - 更新でも入力を検査すること（タグを含む）\n  - 削除の途中で失敗するとタグもメモも元のままで、例外が呼び出し側に伝わること\n\n  ただし、別スレッドから同時に更新するテストはありません。代わりに hook で順序を決めて割り込みを再現しています。BEGIN IMMEDIATE と `WHERE version = ?` があるので、これで十分と判断しました。\n- AC5: 管理者だけが移せること、組織の組み合わせ4通り（どれも Forbidden）、非公開のメモも移ること、途中の失敗で元のままになること、監査ログが記録されることを確かめています。妥当です。\n- AC6: 末尾4文字だけを見せること、7文字・8文字・空の鍵の境界、管理者だけ・自分の組織だけであることを確かめています。妥当です。\n- AC7: 枠の境界（159.999 では拒否、160.0 で新しい枠）、拒否が枠を延ばさないこと、20スレッドを Barrier でそろえて5回だけ通ること、hook でチェックの最中に割り込んでも直列に処理されることを確かめています。ロックを外すと失敗するテストになっています。妥当です。\n- AC8: 期限ちょうどで無効になること、note_id・期限・署名・鍵それぞれの書き換え、多数の形の崩れ（大文字、改行、アラビア数字、型の違う値）を確かめています。おおむね妥当です。先頭0の表記は確かめていません（軽微1）。\n- AC9: ログに本文・署名・api_key・秘密の鍵が出ないこと、例外のメッセージ5種類、監査の detail を確かめています。妥当です。\n- AC10: Conflict・ValidationError・途中の失敗・外部キー違反・SQLite がすでにロールバックした後の失敗について、in_transaction が False に戻り、次の操作ができることを確かめています。妥当です。\n- K1〜K8: それぞれ上の AC のテストで確かめています。K2 は `' OR 1=1 --` を値として扱うこと、sort をホワイトリストで決めること、タグの IN 句をプレースホルダーで組み立てることを、コードとテストで確かめました。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは、私も見つけていません。\n### E2E の要否\n- 不要です。HTTP や UI のないライブラリで、仕様も HTTP の API を対象外にしています。並行実行は、ファイルの DB と実際のスレッドを使う単体テストで確かめています。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `notes/` の全ファイル（db・service・ratelimit・share・errors）と `tests/` の全ファイルを、仕様・設計と突き合わせて読みました。\n- `python3 -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）を実行し、62件すべて合格しました。gate のログ（20261111-085527、62件合格）と一致しています。\n- その場でスクリプトを書いて確かめました（ファイルは作っていません）。\n  - 先頭0のリンクが受け入れられる（軽微1）\n  - 19桁の ID のリンクが拒否される（軽微2）\n  - version に文字列を渡すと、コミット後に TypeError が出る（軽微3）\n- `$AQ trace`: 全ての AC と K に unit の検証が対応し、合格しています。実装ファイルの対応だけが誤っています（軽微4）。\n- `$AQ history --since 0`: 検証条件の削除・弱体化（check の変更・unbind）はありません。check.add と bind が1回ずつ記録されているだけです。\n- `git status`: 実装もテストもまだコミットされておらず、比べられる以前のテストはありません。\n- コードの経路で確かめたこと:\n  - **認可**: `_visible` と `_can_modify` が、get・update・delete で使われています。update と delete では、トランザクションの中で読み直した行に対して判定しています。\n  - **SQL**: すべての値がプレースホルダーで渡されています。LIKE は `\\` を先にエスケープしてから `%`・`_` をエスケープし、`ESCAPE '\\'` を付けて、題名と本文の両方に同じ pattern を使っています。ORDER BY はホワイトリストの値だけです。\n  - **トランザクション**: `transaction()` は BaseException でも ROLLBACK し、ROLLBACK 自体が失敗しても元の例外を隠しません。\n  - **楽観的ロック**: rowcount で判定しています。transfer でも version を上げています。\n  - **移管**: SELECT と UPDATE が同じ BEGIN IMMEDIATE の中にあります。\n  - **署名の比較**: `hmac.compare_digest` を使っています。\n  - **ログ**: ログに出すのは ID と期限だけです。",
+ "files_changed": [],
+ "valid": true
+}

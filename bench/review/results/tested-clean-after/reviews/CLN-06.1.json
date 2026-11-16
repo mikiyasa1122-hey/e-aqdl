@@ -1,0 +1,49 @@
+{
+ "case": "CLN-06",
+ "rep": 1,
+ "sec": 27.2,
+ "exit": 0,
+ "cost_usd": 0.1336018,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22204,
+  "cache_read_input_tokens": 118098,
+  "output_tokens": 3296,
+  "output_tokens_details": {
+   "thinking_tokens": 1218
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22204,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1633,
+    "cache_read_input_tokens": 37967,
+    "cache_creation_input_tokens": 4866,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4866
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8e643ace\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:20-31 / 対応区分: 改善提案 / 内容: リンクの note_id と期限は 10 進の数字だけ（先頭の 0 も可）で、署名は int 化した値に対して計算する。そのため「007.123.署名」と「7.123.署名」は同じ署名で通る。返る note_id は同じ値で、権限の拡大にはならない。 / 提案: 署名の対象を受け取った文字列のままにするか、先頭の 0 を拒否する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: tests/test_ac1_create.py が、題名・本文・タグの境界と tags の型（文字列そのもの）を確かめる。途中の失敗は hooks.before_write(\"create:tags\") で再現し、ロールバックされることを確かめる。妥当。\n- AC2: tests/test_ac2_view.py が、他の組織・他人の非公開・存在しないメモがすべて NotFound になることを確かめる。閲覧数は並行実行でも数え漏れがない。実装は、閲覧数を増やす UPDATE と同じトランザクションの中で可視性を読み直しており、確認後の変更にも耐える。妥当。\n- AC3: tests/test_ac3_list_search.py が、% と _ のエスケープ、タグの OR、範囲外・型違い（bool・文字列・float）の拒否、巨大な page、他の組織や他人の非公開メモが含まれないことを確かめる。SQL はプレースホルダーと ESCAPE 句で組み立てており、sort は許可リストの中からだけ選ばれる。妥当。\n- AC4: tests/test_ac4_update_delete.py が、Forbidden・NotFound・Conflict と、判定の後の変更の混入、削除の途中失敗を確かめる。実装は、トランザクション内で読み直した行で認可と検証を行い、UPDATE の WHERE に version を入れて rowcount で判定する。妥当。\n- AC5: tests/test_ac5_transfer.py が、権限と組織の確認と、途中失敗時に元のままであることを確かめる。妥当。\n- AC6: tests/test_ac6_audit.py が、8 文字未満をすべて伏せることと、末尾 4 文字だけを残すことを確かめる。実装も仕様どおり。妥当。\n- AC7: tests/test_ac7_ratelimit.py が、枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、Barrier による 20 スレッドの同時呼び出し、hook による割り込みを確かめる。sleep には頼っていない。妥当。\n- AC8: tests/test_ac8_share.py が、期限ちょうど・改ざん・形の崩れを確かめる。実装は fullmatch と hmac.compare_digest を使っている。妥当。\n- AC9: tests/test_ac9_secrets.py が、ログと例外のメッセージに本文・署名・api_key が出ないことを確かめる。実装でもログには ID だけを出している。妥当。\n- AC10: tests/test_ac10_recovery.py が、例外の後に接続を続けて使えることを確かめる。transaction() は ROLLBACK 自体の失敗で元の例外を隠さない。妥当。\n- エンジンが検出したテストの兆候: なし。history の確認では、検証の弱体化は見当たらない（bind だけで、削除や緩和はない）。\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリで、SQLite の実 DB と実スレッドを使った単体テストがリスクに見合っている）。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件がすべて通った。\n- notes/service.py・db.py・ratelimit.py・share.py を全部読み、仕様と突き合わせた。\n- 認可と LIKE のエスケープが、利用者の入力から実際に使われる箇所まで適用されていることを確かめた。\n- `$AQ history --since 0` を確認した。\n- `$AQ gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

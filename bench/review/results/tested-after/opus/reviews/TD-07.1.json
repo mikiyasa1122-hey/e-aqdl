@@ -1,0 +1,49 @@
+{
+ "case": "TD-07",
+ "rep": 1,
+ "sec": 55.1,
+ "exit": 0,
+ "cost_usd": 0.37700120000000004,
+ "num_turns": 6,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 29637,
+  "cache_read_input_tokens": 172126,
+  "output_tokens": 5272,
+  "output_tokens_details": {
+   "thinking_tokens": 1664
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 29637,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2780,
+    "cache_read_input_tokens": 47800,
+    "cache_creation_input_tokens": 2417,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2417
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7dd26fa8\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8（notes/share.py `verify_link`） / 対応区分: 修正必須 / 内容: リンクの期限を判定する比較が `>` になっています。そのため、期限の時刻ちょうどのリンクを有効として通してしまいます。仕様 R8 は「期限の時刻ちょうど以降は無効」と定めています / 成立条件: `now == expires` のとき。さらに `int(now)` で小数部を切り捨てるので、`expires <= now < expires+1` の範囲すべてで通ります / 影響: 期限切れの共有リンクで、最大1秒弱のあいだメモを読めてしまいます（K8 の期限切れリンクを通すリスクが現実になります） / 確認した保証: ほかの層では期限を確かめていません。テスト `tests/test_ac8_share.py` が確かめているのは `now=1059`（期限内）だけで、`now=1060`（期限ちょうど）を確かめていないため、検出できていません / 根拠: `notes/share.py` の `if int(now if now is not None else time.time()) > expires:`（verify_link 内）。再現: `l=share.make_link('s',7,ttl_sec=60,now=1000)` を作り、`verify_link('s',l,now=1060)` と `now=1060.9` を実行すると、どちらも Forbidden にならず 7 を返しました（実行して確認） / 提案: 比較を `now >= expires` にします（小数の now は切り捨てずに比較します）。あわせて `now=1060` と `now=1060.5` で Forbidden になることを確かめるテストを test_ac8_share.py に追加します\n- [軽微1] 区分: 実装 / 対象: R8, K8（notes/share.py `LINK_RE`） / 対応区分: 改善提案 / 内容: note_id と期限の先頭に 0 を付けたリンク（例 `07.1060.<署名>`）も、`int()` で数値にしてから署名を確かめるため有効になります。リンクの文字列が別の形でも通ってしまいます（同じ note_id・期限の範囲なので、権限が広がることはありません） / 提案: 正規表現を `(0|[1-9][0-9]{0,17})` のようにして、正規の形だけを受け付けます\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1（test_ac1_create）は、題名・本文・タグの境界値、文字列のタグの拒否、重複の数え方を確かめています。途中の失敗は hooks の差し込み口で起こして、何も残らないことを確かめています。妥当です\n- AC2: V2 は次を確かめており、妥当です。\n  - 他の組織・他人の非公開・存在しないメモがどれも NotFound になること\n  - 判定の後に削除されたときの扱い\n  - 割り込みとスレッドでの同時閲覧で閲覧数が漏れないこと（BEGIN IMMEDIATE ＋ `views = views + 1`）\n- AC3: V3 は次を確かめており、妥当です。\n  - 一覧・検索の対象範囲\n  - sort と page・per_page の範囲外の拒否（巨大な page を含む）\n  - % と _ を普通の文字として扱うこと（`_like_escape` と `ESCAPE '\\'` が、題名と本文の両方の LIKE に適用されていることをコードで確認しました）\n  - タグの OR、SQL の文字列を入れても値として扱われること\n- AC4: V4 は次を確かめており、妥当です。\n  - 作成者・管理者による更新と削除、他人の Forbidden、他の組織の NotFound、非公開は作成者だけ\n  - 古い version での Conflict、読み出しから書き込みの間の更新による Conflict、トランザクションの中での認可の再確認\n  - 入力検証、削除の失敗時のロールバックと例外の伝達\n- AC5: V5 は次を確かめており、妥当です。管理者だけであること、組織をまたぐ移管の拒否、途中の失敗で何も移らないこと、version が増えること\n- AC6: V6 は、末尾4文字以外を伏せること、短い鍵をすべて伏せること、管理者・組織の制限を確かめています。妥当です\n- AC7: V7 は次を確かめており、妥当です。\n  - 枠の境界（159.999 と 160.0）\n  - 拒否された呼び出しで枠が延びないこと\n  - Barrier を使った20スレッドの同時呼び出し、hook による割り込みの直列化\n- AC8: V8 は改ざん・形の崩れ（改行・全角数字・大文字の署名など）を広く確かめていますが、期限の境界（期限の時刻ちょうど）を確かめていません。そのため、[重大1] の仕様違反を検出できていません。不十分です\n- AC9: V9 は、ログ・例外のメッセージ・監査の detail に本文・署名・鍵が出ないことを確かめています。妥当です\n- AC10: V10 は、失敗の種類ごとの後に接続が使えること、DB のエラー、ROLLBACK できないときに元の例外を隠さないことを確かめています。妥当です\n- K1〜K7: 上の各テストで確かめています。K8 は AC8 と同じ理由で、期限の境界が足りません\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは、私が目で見た範囲でも見つかりませんでした）\n### E2E の要否\n- 不要です。HTTP の API や UI はなく（対象外）、ライブラリの単体テストで外から見える振る舞いを直接確かめられるためです\n### 不足しているリスク\n- R8/K8: 期限の境界（期限の時刻ちょうどと、小数の now）の検証がありません（[重大1] で直すとき、合わせて追加します）\n### 確認したこと\n- `notes/*.py` をすべて読み、仕様 R1〜R10・設計と突き合わせました。\n  - 認可は `_visible`・`_can_modify` で行い、update・delete はトランザクションの中で読み直した行で判定しています\n  - SQL はすべてプレースホルダーです。ORDER BY は固定の辞書から選んでいます\n  - 楽観的ロックは UPDATE の条件の version と rowcount で判定しています\n  - 移管は1つのトランザクションです\n  - RateLimiter はロックの中で判定と更新をしています\n- `$AQ trace`: すべての要求が unit のチェックに紐づき、合格していました\n- `$AQ history --since 0`: 検証条件・チェックを弱めた変更は見つかりませんでした（unit を追加した記録と bind の記録だけ）\n- gate のログ 20261111-085727-check-unit.log: 62件 OK\n- `python3 -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）: 62件 OK\n- 再現: `verify_link('s', make_link('s',7,ttl_sec=60,now=1000), now=1060)` と `now=1060.9` は、どちらも 7 を返しました（Forbidden になるべき）。`'0'+link` も 7 を返しました（[軽微1]）\n- `git status`: 実装は未コミットです（初期コミットだけ）。git diff は初期状態からの新規追加だけで、既存のテストを変更していないことを確認しました",
+ "files_changed": [],
+ "valid": true
+}

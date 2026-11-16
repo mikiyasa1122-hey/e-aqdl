@@ -1,0 +1,23 @@
+{
+ "case": "TD-04",
+ "rep": 1,
+ "judge_cost_usd": 0.11173419999999999,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込み欠陥そのものを指摘している。`transfer_notes` が移し先 `to_user[\"org_id\"]` を確かめていない点を、箇所（notes/service.py の `transfer_notes`）と原因まで特定している。影響も一致しており、別組織の利用者が owner になって組織の外にメモが渡る、と述べている。コードは `admin[\"role\"]` と `from_user[\"org_id\"]` しか見ておらず、指摘は正確。\n\n**重大2**: コードの欠陥ではなく、テストの不足だけを述べている。`tests/test_ac5_transfer.py` に他組織の移管を拒否するテストがないのは事実。したがって test_gap。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transfer_notes が to_user の org_id を検査せず、別組織へメモが渡る点を原因・影響とも正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"他組織の移管を拒否するテストが tests/test_ac5_transfer.py に実際になく、テスト不足だけを述べている。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（移し先の組織の未検査）と箇所・原因・影響まで一致している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transfer_notes が to_user の org_id を検査せず、別組織へメモが渡る点を原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "他組織の移管を拒否するテストが tests/test_ac5_transfer.py に実際になく、テスト不足だけを述べている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（移し先の組織の未検査）と箇所・原因・影響まで一致している。"
+ }
+}

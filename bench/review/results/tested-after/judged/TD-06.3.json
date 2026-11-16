@@ -1,0 +1,23 @@
+{
+ "case": "TD-06",
+ "rep": 3,
+ "judge_cost_usd": 0.1120622,
+ "judge_raw": "## 分類\n\n**重大1**: 埋め込まれた欠陥そのものを指摘しています。`get_note` は、行があっても見えないメモに Forbidden を返しており、存在しない ID の NotFound と区別できます。報告はこの原因を挙げ、他組織や他人の非公開メモの存在を ID の総当たりで判別できるという影響も述べています。コードの 116〜117 行目とも一致します。行番号の「108〜111 付近」はずれていますが、箇所と内容は正しいです。よって matches_defect です。\n\n**重大2**: `get_note` で、他組織・他人の非公開・存在しないメモが NotFound になることを確かめるテストがない、という指摘です。上のテストを見ると、`test_ac2_view.py` にその検証はなく、指摘は事実です。実装の欠陥ではなくテストの不足だけを述べているので、test_gap です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し NotFound と区別できるため、他組織・他人の非公開メモの存在が分かるという、埋め込み欠陥の原因と影響を正しく指摘している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"get_note の拒否が NotFound に揃うことを確かめるテストが実際になく、テスト不足だけを述べている。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（get_note の Forbidden による存在の漏えい）を原因・影響とも正しく捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し NotFound と区別できるため、他組織・他人の非公開メモの存在が分かるという、埋め込み欠陥の原因と影響を正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "get_note の拒否が NotFound に揃うことを確かめるテストが実際になく、テスト不足だけを述べている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（get_note の Forbidden による存在の漏えい）を原因・影響とも正しく捉えている。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLN-03",
+ "rep": 1,
+ "sec": 26.9,
+ "exit": 0,
+ "cost_usd": 0.1384085,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23335,
+  "cache_read_input_tokens": 119025,
+  "output_tokens": 3315,
+  "output_tokens_details": {
+   "thinking_tokens": 964
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23335,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1755,
+    "cache_read_input_tokens": 38877,
+    "cache_creation_input_tokens": 5087,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5087
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e7dd616c\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R5, notes/service.py:220 / 対応区分: 改善提案 / 内容: transfer_notes は移管したメモの updated_at を更新しない。仕様に規定がないので欠陥ではない。 / 提案: 一覧を updated 順で見せる際に移管を新着扱いにしたいなら、`updated_at` も更新する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は、題名・本文・タグの境界値と tags の型違い（文字列そのもの）、タグ登録の途中失敗でメモが残らないことを `before_write` フックで確かめており妥当。\n- AC2: V2 は、組織・非公開・存在しない場合がすべて NotFound になることと、閲覧数を確かめている。実装は `BEGIN IMMEDIATE` の中で `UPDATE views = views + 1` と再検証をするので、数え漏れは構造上起きない。妥当。\n- AC3: V3 は、範囲外の page・per_page・sort、`%` と `_` のリテラル扱い、SQL 文字列を値として渡す場合、タグの OR、タグの検査を確かめており妥当。コードでは、title と body の両方に ESCAPE 句があり、`\\` も `%` も `_` もエスケープし、値はすべてプレースホルダーで渡している。f-string で SQL に埋め込むのは、固定の辞書（SORT_COLUMNS）の値とプレースホルダーの `?` だけ。\n- AC4: V4 は、権限、非公開は NotFound、古い version、読み出しと書き込みの間の割り込み、トランザクション内での権限の再確認、更新時の検証、削除の途中失敗の巻き戻しを確かめており妥当。UPDATE 条件の version と rowcount による楽観的ロックも、コードで確認した。\n- AC5: V5 は、管理者だけ、組織が一致すること、全部か何もなしかを確かめている。コード上は、単一トランザクションで、`org_id` を絞って更新している。妥当。\n- AC6: V6 は鍵の伏せ字を確かめており妥当。コードは、8文字未満はすべて伏せ、それ以上は末尾4文字だけを残している。\n- AC7: V7 は、枠の境界、拒否された呼び出しで枠が延びないこと、並行呼び出し、チェック内に割り込みが入る場合を確かめている。ロックの内側で判定しており、sleep に頼らない形で妥当。\n- AC8: V8 は、期限の境界（ちょうど以降は無効）、改ざん、形の崩れを確かめている。コードは fullmatch で形を検査し、`compare_digest` で署名を比べている。妥当。\n- AC9: V9 は、ログ・例外・出力に機密情報が出ないことを確かめている。コードでは、ログは ID だけで、リンクの例外メッセージにも署名を含めない。妥当。\n- AC10: V10 は、例外の後も接続を使い続けられることを確かめている。コードでは `transaction()` が BaseException で ROLLBACK し、ROLLBACK 自体の失敗も元の例外を隠さない。妥当。\n- リスク K1〜K8 は、いずれも対応する VK が bind されており、上の確認と整合する。\n- エンジンが検出したテストの兆候: なし。\n- 検証条件の弱体化: `history` は bind だけで、削除や弱体化はない。\n### E2E の要否\n- 不要。HTTP や UI を持たない標準ライブラリだけのパッケージで、SQLite と別々の接続・スレッドを使う unittest が実際の経路を通している。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、63件がすべて合格した。\n- notes/ の全ソース（service.py、db.py、ratelimit.py、share.py、errors.py）を、仕様と設計に照らして読んだ。\n- `aqdlc trace` と `aqdlc history --since 0` を実行した。AC1〜AC10 とリスクの対応は揃っていて、検証の削除や弱体化はない。\n- 利用者の入力から SQL までをたどった（LIKE のエスケープ、ESCAPE 句、プレースホルダー、ORDER BY の許可リスト、OFFSET の上限）。\n- 認可（`_visible` と `_can_modify`）が、更新・削除で書き込みトランザクション内の再読込にも適用されていることを確認した。\n- 反証テストは無効（counterfactual.mode: off）なので、検証が欠陥を検出できることまでは確認していない。",
+ "files_changed": [],
+ "valid": true
+}

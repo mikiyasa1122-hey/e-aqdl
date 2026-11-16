@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 2,
+ "sec": 34.0,
+ "exit": 0,
+ "cost_usd": 0.1252646,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18315,
+  "cache_read_input_tokens": 126486,
+  "output_tokens": 3934,
+  "output_tokens_details": {
+   "thinking_tokens": 1587
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18315,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1872,
+    "cache_read_input_tokens": 39178,
+    "cache_creation_input_tokens": 6612,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6612
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `share.py` の `LINK_RE` は `[0-9]{1,18}` で、先頭ゼロ付きの note_id や期限（例: `007.…`）も形として通す。署名は `int` に変換した値で計算するため、`7` と `007` は同じ署名で有効になる。仕様は「10進の数字だけ」としか定めておらず、仕様違反ではない。 / 提案: 厳密にするなら `0|[1-9][0-9]*` の形に限る。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。`create_note` は検証（題名の空白のみ・100文字超、本文10000文字、タグ6個以上、タグの文字種、tags が文字列）を、トランザクションの前に行う。タグの INSERT 前に `before_write(\"create:tags\")` を呼んでおり、そこで障害を起こして何も残らないことを確かめている（`test_ac1_create.py`、9件）。\n- AC2: 妥当。`_visible` を閲覧数の加算の前と後の2回確かめる。閲覧数の加算は `views = views + 1` の1文で、BEGIN IMMEDIATE の中にある。他の組織・他人の非公開・存在しないメモはすべて NotFound になる。`test_ac2_view.py` の7件が、同時閲覧と、判定の後に起きる削除・変更を扱っている。\n- AC3: 妥当。LIKE は `ESCAPE '\\'` を使い、`\\`・`%`・`_` をエスケープしている。title と body には同じエスケープ済みパターンを渡している。タグの IN とそのほかの値はプレースホルダーで渡し、ORDER BY は固定の辞書から選ぶ。page・per_page の境界、bool、巨大な page、SQL 文字列の入力、タグの OR も確かめている（11件）。\n- AC4: 妥当。UPDATE の条件に `version` を入れて rowcount で判定する。認可はトランザクション内で読み直した行で再判定する。読み出しと書き込みの間に更新が入った場合は Conflict になる。非公開メモは管理者にも NotFound になる。削除の失敗時はタグとメモをまとめてロールバックし、例外を伝える（12件）。\n- AC5: 妥当。管理者であること、3者が同じ組織であることを確かめてから、1つのトランザクションで全件を移す。途中の障害を `before_write` で再現し、元のままであることを確かめている。\n- AC6: 妥当。8文字未満は全部伏せ、8文字以上は末尾4文字だけを残す。境界も確認できる。\n- AC7: 妥当。ロックの下で判定し、`clock` を差し替えて枠の境界（`>= window`）を確かめている。20スレッドの同時呼び出しで成功が5件ちょうどになる。`hook` で判定の途中に割り込む順序も、sleep ではなく Event で決定的に再現している。\n- AC8: 妥当。`fullmatch` で形を確かめ、`now >= expires` で期限を判定し、`compare_digest` で署名を比べる。期限の境界、改ざん、形の崩れたリンクを確かめている。\n- AC9: 妥当。ログは ID だけで、例外メッセージに本文・署名・鍵は含まれない。\n- AC10: 妥当。`transaction` は BaseException と COMMIT の失敗でもロールバックし、ロールバックの失敗で元の例外を隠さない。例外の後も接続を使い続けられることを確かめている。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのテストは見つからず、検証条件の弱体化も確認していない。\n\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、SQLite のインメモリ接続と複数スレッドの単体テストで、リスクの経路を直接確かめている。\n\n### 不足しているリスク\n- なし。ロック待ち5秒を超えるほどの競合で `OperationalError` が出る経路は仕様にない。\n\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/` の全ソースを要求と突き合わせた。確認した点は次のとおり。\n  - 認可と SQL の組み立て（LIKE のエスケープ、プレースホルダー）。\n  - トランザクション境界と楽観的ロック。\n  - RateLimiter のロックと、共有リンクの検証。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。62件すべて成功（0.6秒）。\n- `aqdlc.py history` は先頭の一部だけ出力し、パイプを閉じたため途中で BrokenPipe になった。出力した範囲に検証条件の弱体化はなかったが、全件は確認していない。\n- コードの変更・gate の実行・依存関係のインストールはしていない。",
+ "files_changed": [],
+ "valid": true
+}

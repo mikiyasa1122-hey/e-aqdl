@@ -1,0 +1,49 @@
+{
+ "case": "TD-08",
+ "rep": 3,
+ "sec": 29.3,
+ "exit": 0,
+ "cost_usd": 0.1166248,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 15842,
+  "cache_read_input_tokens": 172768,
+  "output_tokens": 3596,
+  "output_tokens_details": {
+   "thinking_tokens": 536
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15842,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1990,
+    "cache_read_input_tokens": 42921,
+    "cache_creation_input_tokens": 388,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 388
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c3a94d21\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3 / 対応区分: 修正必須 / 内容: `get_note` が閲覧数を数え漏れする。`notes/service.py:116` でトランザクションの外から `views` を読み、`:119` で `SET views = 古い値+1` と書いている。 / 成立条件: 2つの接続（別スレッド）が、1つ目の読み出しから書き込みまでの間に、同じメモを閲覧する。 / 影響: 閲覧数が2回分でなく1回分しか増えない。R2「同時に閲覧されても数え漏れがないこと」に反する。 / 根拠: 一時 DB・2接続で `hooks.before_write(\"view\")` の中から2つ目の接続の `get_note` を呼んで再現した。2回閲覧して `views` は 1 だった。上流で防ぐ仕組みは見つからなかった。`BEGIN IMMEDIATE` は書き込みだけを直列化し、外で読んだ値は守らない。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` に変える。`views` の先読みは削除する。可視性の確認はトランザクション内の `_row` の結果で行う。\n- [重大2] 区分: テスト / 対象: AC2, K3 / 対応区分: 証拠不足 / 内容: 同時閲覧で数え漏れしないことを確かめるテストがない。 / 根拠: `tests/test_ac2_view.py` は `threading`・`os`・`tempfile` を import しているが使っていない。`ViewCountTest` は同じ接続での直列の閲覧3回だけを確かめている。AC2 の「閲覧数が正確に増える」と K3 の中心の検証が空洞で、そのため [重大1] を gate が検出できなかった。 / 提案: 一時ファイルの DB に別接続を2つ作る。`hooks.before_write(\"view\")` の中で別接続から `get_note` を呼び、最終的な views が2であることを確かめるテストを追加する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1・VK4 は検証の拒否（題名・本文・タグ・文字列タグ）と、`create:tags` で失敗を注入したときに何も残らないことを確かめており妥当。\n- AC2: 可視性（他の組織・他人の非公開・存在しない → NotFound、判定後の変更）は妥当。閲覧数の同時実行は未検証で、実装も誤っている（重大1・2）。\n- AC3: V3・VK2 は範囲外・検索語・`%` `_` のエスケープ・タグ OR を確かめている。コードも確認した（ESCAPE 句、プレースホルダー、title と body の両方に同じ escaped pattern を渡している）。ORDER BY は許可リストから選ぶ。妥当。\n- AC4: 認可・version の競合・判定後の変更・削除の失敗がテストされている。実装は、トランザクション内で行を読み直して認可と検証を行い、`UPDATE ... WHERE version` を rowcount で判定する。妥当。\n- AC5: 管理者・組織の検査、途中失敗で元のままになることがテストされている。実装も `transaction()` 内で一括更新する。妥当。\n- AC6: api_key の伏せ方（8文字未満はすべて、8文字以上は末尾4文字を残す）をコードで確認した。妥当。\n- AC7: ロック内で数える実装とテストの `hook` により、決定論的に検証できている。窓の境界は `>=` で、仕様と一致する。妥当。\n- AC8: 形式は fullmatch、署名は `compare_digest`、期限は `>=` で判定している。妥当。\n- AC9: ログには ID だけを出しており、例外メッセージにも本文・署名・api_key は含まれない。妥当。\n- AC10: `_rollback` と `transaction` の例外後の再利用をテストしており妥当。\n- エンジン検出のテストの兆候: なし。`git status` では tests と notes が未追跡のため、`git diff` による改ざんの比較はできなかった。\n\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリで、unittest で実 SQLite に対して検証している）。ただし同時実行の検証は、別接続を使ったテストを追加する必要がある。\n\n### 不足しているリスク\n- K3（R2 の同時閲覧）: 実装の欠陥があり、検証もない（重大1・2）。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py 全体・tests/base.py・tests/test_ac2_view.py を読んだ。\n- `python3 -m unittest discover -s tests -t .`: 61件が OK。ただし閲覧の同時実行はテストされていない。\n- 一時 DB と2接続による再現スクリプト: 2回閲覧して `views` が 1 になった（重大1）。\n- SQL の確認: LIKE のワイルドカードとエスケープ文字は `_like_escape` で処理され、`ESCAPE '\\\\'` が付いている。値はすべてプレースホルダーで渡されている。f-string で埋め込む SQL の部分は定数（`where`・許可リストの ORDER BY・`?` の列挙）だけ。\n- 認可: `update_note` と `delete_note` は書き込みと同じトランザクション内で `_check_modify` を行っている。`transfer_notes` は同じ組織のメモだけを、1つのトランザクションで移す。",
+ "files_changed": [],
+ "valid": true
+}

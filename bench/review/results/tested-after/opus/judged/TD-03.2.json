@@ -1,0 +1,38 @@
+{
+ "case": "TD-03",
+ "rep": 2,
+ "judge_cost_usd": 0.2746116,
+ "judge_raw": "## 判定\n\n**埋め込んだ欠陥は検出された（yes）。** 該当するのは軽微1です。ただし、レビュー担当は重大度を低く見積もっています。\n\n### 各指摘の分類\n\n- **重大1（sort の型）→ real_other**\n  - `[\"updated\"] in dict` は、ハッシュできない値なので TypeError になります。\n  - R3 は「範囲外は ValidationError」と定めているので、仕様違反です。\n  - コードと仕様で裏づけが取れており、埋め込んだ欠陥とは別の、実在する欠陥です。\n\n- **重大2（version の型）→ real_other**\n  - INTEGER の列と `'1'` を比べると、SQLite の型の変換で一致します。そのため UPDATE と監査ログがコミットされます。\n  - その後、トランザクションの外の `version + 1` で TypeError が出ます。\n  - 結果として、呼び出し側には例外が返るのに、更新は残ります。この経路は実在します。\n\n- **軽微1（省略した title・body をトランザクションの前の行から取る）→ matches_defect**\n  - 箇所（update_note の 179・185・186 行）、原因（トランザクションの中で読み直した行を使わない）、影響（他の更新の本文が古い値に戻る）のすべてが、埋め込んだ欠陥と一致します。\n  - ただし、レビュー担当は「通常の使い方では起きない」として、改善提案に格下げしています。正解は重大度 high なので、この評価は過小です。\n\n- **軽微2（共有リンクの桁数の制限）→ real_other**\n  - SQLite の整数の範囲内である 19 桁の note_id では、make_link で作ったリンクが verify_link で Forbidden になります。\n  - 正当なリンクを拒否するので、R8 に反する実在の欠陥です。影響は境界の場合に限られます。\n\n- **軽微3（trace の impl-map）→ style**\n  - 追跡用のメタデータの整備についての提案で、コードの欠陥の主張ではありません。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"ハッシュできない sort を渡すと `sort not in SORT_COLUMNS` が TypeError になり、R3 の『範囲外は ValidationError』に反する、実在する欠陥である。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"文字列の version は SQLite の型の変換で一致してコミットされ、その後トランザクションの外の `version + 1` で TypeError になる。例外が返るのに更新が残る、実在する欠陥である。\"}, {\"label\": \"軽微1\", \"class\": \"matches_defect\", \"reason\": \"省略された title・body をトランザクションの前に読んだ row から取り、読み直さないため他の更新を消すという、埋め込んだ欠陥と同じ箇所・原因・影響を指摘している（重大度は過小評価）。\"}, {\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"LINK_RE が 1〜18 桁に制限しているため、SQLite の範囲内の 19 桁の note_id で make_link が作った正当なリンクが Forbidden になり、R8 に反する。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"trace の impl-map の登録についての、保守性・メタデータの提案で、コードの欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"軽微1\", \"note\": \"埋め込んだ欠陥は軽微1で正しく特定されているが、レビュー担当は『通常の使い方では起きない』として改善提案に格下げしており、正解の重大度 high に対して過小評価である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "ハッシュできない sort を渡すと `sort not in SORT_COLUMNS` が TypeError になり、R3 の『範囲外は ValidationError』に反する、実在する欠陥である。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "文字列の version は SQLite の型の変換で一致してコミットされ、その後トランザクションの外の `version + 1` で TypeError になる。例外が返るのに更新が残る、実在する欠陥である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "matches_defect",
+    "reason": "省略された title・body をトランザクションの前に読んだ row から取り、読み直さないため他の更新を消すという、埋め込んだ欠陥と同じ箇所・原因・影響を指摘している（重大度は過小評価）。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "LINK_RE が 1〜18 桁に制限しているため、SQLite の範囲内の 19 桁の note_id で make_link が作った正当なリンクが Forbidden になり、R8 に反する。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "trace の impl-map の登録についての、保守性・メタデータの提案で、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "軽微1",
+  "note": "埋め込んだ欠陥は軽微1で正しく特定されているが、レビュー担当は『通常の使い方では起きない』として改善提案に格下げしており、正解の重大度 high に対して過小評価である。"
+ }
+}

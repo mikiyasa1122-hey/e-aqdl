@@ -1,0 +1,49 @@
+{
+ "case": "CLN-06",
+ "rep": 2,
+ "sec": 91.2,
+ "exit": 0,
+ "cost_usd": 0.5390114,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 38524,
+  "cache_read_input_tokens": 284417,
+  "output_tokens": 8694,
+  "output_tokens_details": {
+   "thinking_tokens": 4266
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 38524,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3335,
+    "cache_read_input_tokens": 63697,
+    "cache_creation_input_tokens": 2257,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2257
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8e643ace\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, AC4, R10 / 対応区分: 改善提案 / 内容: `update_note` は `version` の型を検査しない。文字列の `\"1\"` を渡すと、SQLite の型親和性で `WHERE version = ?` が一致して更新がコミットされる。その後、`return version + 1`（notes/service.py:310 付近、`update_note` の末尾）で TypeError が起きる。呼び出し側には失敗に見えるが、更新は残っている（実行して確認: 例外 TypeError、DB は version=2・body='x'）。仕様に version の型の規定がないため、仕様違反ではなく改善提案とする / 提案: トランザクションの前に `isinstance(version, int) and not isinstance(version, bool)` を確かめて、ValidationError にする。あるいは戻り値を DB から読んだ値にする\n- [軽微2] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `LINK_RE` が note_id・期限を1〜18桁に制限している（notes/share.py の `LINK_RE`）。一方で `make_link` は桁数を制限しない。そのため、note_id が 10^18 以上（SQLite の rowid は最大19桁）や、ttl が非常に大きいときは、作ったリンクが必ず Forbidden になる（実行して確認: `make_link(\"s\", 10**18)` で作ったリンクは verify で拒否された）。実用上はまず起きない / 提案: `make_link` で同じ桁数の制限を検査して ValueError にするか、正規表現を19桁まで広げる\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は次を確かめており、妥当。題名の境界（0・空白だけ・100・101文字・型違い）、本文の境界（10000・10001文字）、タグの規則（大文字・空白・21文字・空・改行が前後に付くもの・非ASCII・アンダースコア・型違い）、重複を数えて保存は重複を除くこと、文字列の拒否。さらに、検証で失敗したときと途中（create:tags）で失敗したときに notes・note_tags・audit が0件になることと、監査ログの記録\n- AC2: test_ac2_view は次を確かめており、妥当。他の組織（一般・管理者）、他人の非公開（同じ組織の一般・管理者）、存在しないメモがすべて NotFound になること。NotFound のときは閲覧数が増えないこと。判定の後に非公開へ変わったときも NotFound になること。差し込み口による割り込みと、4スレッド×別々の接続×10回で閲覧数が40になること（数え漏れがない）\n- AC3: test_ac3_list_search は次を確かめており、妥当。範囲（他の組織・他人の非公開を除き、管理者にも見えない）、2種類の並び順、ページング・巨大な page、不正な page・per_page・sort（bool・float・文字列・範囲外）。% と _ と \\ をそのままの文字として扱うこと、タグの OR、検索語とタグの検査。ESCAPE 句を外すと `%` と `_` のテストが失敗するため、エスケープが実際に適用されていることを確かめられている\n- AC4: test_ac4_update_delete は次を確かめており、妥当。作成者・管理者による更新、他人は Forbidden、他の組織と非公開は NotFound、古い version の Conflict、読み出しと書き込みの間に割り込んだ更新の Conflict、変えない欄が最新の行から取られること、トランザクションの中で認可を判定し直すこと、更新の入力検証、失敗したときに何も残らないこと。削除では、途中で失敗したときにタグとメモが巻き戻ることと、例外が呼び出し側に伝わること。UPDATE の条件から version を外すと Conflict のテストが失敗する\n- AC5: test_ac5_transfer は次を確かめており、妥当。全件（非公開を含む）の移管、管理者だけであること、組織をまたぐ4つの組み合わせが Forbidden になること、途中（2件目）で失敗したら全件が元のままになること\n- AC6: test_ac6_audit は次を確かめており、妥当。末尾4文字を残すこと、7文字・ちょうど8文字・空の鍵の境界、管理者だけであること、自分の組織だけであること\n- AC7: test_ac7_ratelimit は次を確かめており、妥当。上限、利用者ごとに数えること、枠の境界（159.999 秒は拒否、160.0 秒は新しい枠）、拒否された呼び出しで枠が延びないこと。20スレッドを Barrier で同時に呼んで成功がちょうど5回になること。差し込み口で検査の途中に割り込ませても直列になること（Event を使い、sleep には頼っていない）\n- AC8: test_ac8_share は次を確かめており、妥当。期限の時刻ちょうどが無効になる境界、note_id・期限・署名の改ざん、別の秘密鍵、形の崩れたリンク（大文字の16進、末尾の改行、前の空白、負の数、桁の過不足、指数表記、全角以外の Unicode 数字、型違い）\n- AC9: test_ac9_secrets は次を確かめており、妥当。ログに本文・署名・api_key・秘密鍵が出ないこと（ログが1件以上あることも確かめている）、5種類の例外メッセージ、監査ログの detail\n- AC10: test_ac10_recovery は次を確かめており、妥当。Conflict・ValidationError・RuntimeError・IntegrityError の後に in_transaction が False になり、次の操作が成功すること。SQLite が先にロールバックした状態でも元の例外が隠れないこと\n- K1・K2・K3・K4・K5・K6・K7・K8: 上の各テストで確かめている。K2 については、sort をホワイトリストにしていること、IN 句がプレースホルダーだけで組み立てられていることをコードで確認した\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは目視でも見つからなかった）\n### E2E の要否\n- 不要（HTTP・UI がないライブラリで、仕様も HTTP を対象外としている。公開関数の単体・結合テストが利用者の操作の経路そのものになっている）\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py をすべて読み、仕様の R1〜R10 とコードの経路を突き合わせた（認可 `_visible`・`_can_modify` がすべての閲覧・更新・削除・一覧・検索に適用されていること、更新と削除はトランザクションの中で読み直してから判定し直していること、LIKE の ESCAPE とエスケープの対象が題名と本文の両方に渡る pattern であること、IN 句がプレースホルダーであること、ORDER BY がホワイトリストであること）\n- `$AQ trace`: すべての要求・リスクが unit の検証に結び付き、結果は合格\n- `$AQ history --since 0`: 検証条件は unit を1件追加しただけで、弱めた・消した変更はない\n- gate のログ 20261111-085334-check-unit.log: 63件、合格\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . -q`: 63件、合格\n- 自分で書いた確認のスクリプト（メモリ上の DB）の結果:\n  - version を文字列で渡すと、コミットした後に TypeError になる → 軽微1\n  - 全角空白だけの題名は拒否される\n  - 検索は ASCII の大文字・小文字を区別しない（仕様に規定がないため指摘にしない）\n  - 先頭にゼロが付いた note_id のリンク（例: 07）は、同じ値として受け付けられる（意味は変わらず、署名を回避できないため指摘にしない）\n  - 19桁の note_id のリンクは拒否される → 軽微2\n- `git status`: レビューの前と後で、作業ツリーに変更がないことを確認した",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-04",
+ "rep": 3,
+ "sec": 26.7,
+ "exit": 0,
+ "cost_usd": 0.10101530000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13897,
+  "cache_read_input_tokens": 124413,
+  "output_tokens": 3297,
+  "output_tokens_details": {
+   "thinking_tokens": 463
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13897,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2104,
+    "cache_read_input_tokens": 38672,
+    "cache_creation_input_tokens": 2150,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2150
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3472c88d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6, K1 / 対応区分: 修正必須 / 内容: `transfer_notes` が移す先（to_user）の組織を検査していない。仕様は「移す元・移す先・管理者がすべて同じ組織のときだけ」。 / 成立条件: 組織 A の管理者が、A の利用者のメモを組織 B の利用者を to_user にして移管する。 / 影響: 組織 A のメモ（非公開を含む）の所有者が、組織 B の利用者になる。`notes.org_id` は A のままなので、メモは A に属したまま B の利用者が所有者になる。K6「移管で組織の外にメモが渡る」が現実に起きる。移管後、元の組織の管理者は `_can_modify` により、組織が一致するメモなら引き続き操作できる。一方 `_visible` は組織が一致しないと NotFound を返すため、B の利用者が所有者でも自分のメモを見られない不整合な状態になる。 / 確認した保証: 検査は `notes/service.py:211-214` の管理者権限と `from_user[\"org_id\"]` の2つだけ。to_user の `org_id` を見る箇所は呼び出し元にも DB にもない。DB の外部キーは owner_id→users.id だけで、組織の整合は強制していない。実行して確認した。組織 1 の管理者が組織 2 の x を to_user にして移管すると、例外なく成功した。その直後に x が `get_note` すると NotFound になった。 / 根拠: `notes/service.py:209-222`、`notes/service.py:213` / 提案: `if to_user[\"org_id\"] != admin[\"org_id\"]: raise Forbidden(...)` を、`transaction` を開く前に追加する。\n- [重大2] 区分: テスト / 対象: AC5, K6 / 対応区分: 証拠不足 / 内容: 移管の拒否テストが「管理者でない」場合だけで、移す元・移す先が別の組織の場合の Forbidden を確かめていない。 / 根拠: AC5 と K6 は組織をまたぐ移管の拒否を必須としている。`tests/test_ac5_transfer.py` には eve / eve_admin を使ったケースがなく、重大1の欠陥はテストが全部通る状態で見逃されている。 / 提案: ①to_user が別の組織、②from_user が別の組織、③別の組織の管理者、の3ケースで、Forbidden になることと所有者・version・audit が変わらないことを確かめるテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成の検証・失敗時に何も残らないことを `before_write` の差し込み口で確かめている。コードも `transaction` で1つにまとまっており妥当。\n- AC2: 見え方の規則、NotFound、閲覧数のテストがある。コードは `BEGIN IMMEDIATE` と SQL 内の加算で数え漏れを防ぐ。妥当と判断した。\n- AC3: 一覧と検索の入力の拒否、LIKE のエスケープ（`%` `_` `\\` に対応し、題名・本文の両方が同じ pattern）、プレースホルダー、タグの OR を確認した。LIMIT・OFFSET も値として渡している。妥当。\n- AC4: 楽観的ロックは UPDATE の WHERE に version を入れて rowcount で判定し、トランザクション内で認可を再検査している。妥当。\n- AC5: 上記のとおり不十分。組織をまたぐ拒否が未検証で、実装にも欠陥がある（重大1・2）。途中失敗の巻き戻しと version の増加は検証されている。\n- AC6: 8文字未満は全部伏せ、それ以外は末尾4文字を残す実装で、テストもある。妥当。\n- AC7: クロックを注入でき、枠の境界は `>=` で、ロック内で判定している。`hook` による並行再現のテストがある。妥当。\n- AC8: 正規表現は `fullmatch`、`compare_digest` を使い、期限は `>=` で判定している。境界のテストがある。妥当。\n- AC9: ログは ID だけを出している。テストがある。妥当。\n- AC10: ROLLBACK の失敗で元の例外を隠さず、接続を再利用できるテストがある。妥当。\n- エンジンが検出したテストの兆候（skip・.only・アサーションなし）: なし。改ざん・弱体化の兆候は、テストファイルの内容から見つからなかった（`$AQ history` は未実行）。\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、unittest が実際の SQLite（メモリ上）を使って規則を確かめている。\n### 不足しているリスク\n- K6: 移す先・移す元の組織をまたぐ移管の拒否（重大1・2）。\n- 未確認: 移す先の利用者が存在するかの検査はない。ただし仕様は呼び出し側が検証済みの dict を渡す前提としており、指摘にはしない。\n### 確認したこと\n- spec.md と design.md、notes/*.py の全ソースを読んだ。\n- `python3 -m unittest discover -s . -t .`: 62 件すべて成功。\n- 組織をまたぐ移管の再現スクリプトを、メモリ DB で実行した。管理者が別組織の to_user へ移管して成功し、その後 to_user が `get_note` すると NotFound になった。\n- `gate` は実行していない。ファイルは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

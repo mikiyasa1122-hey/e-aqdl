@@ -1,0 +1,33 @@
+{
+ "case": "CLN-01",
+ "rep": 3,
+ "judge_cost_usd": 0.2808836,
+ "judge_raw": "## 判定結果\n\n欠陥のない題材です。それでも、レビュー担当の重大2件はコード上で実際に成り立つ欠陥でした。どちらも現行のテストでは確かめていません。\n\n### [重大1] version に数字の文字列を渡すと、コミットした後に TypeError になる → real_other\n- **成り立つ条件:** `update_note(conn, alice, nid, \"1\", body=\"z\")` のように呼ぶ。SQLite は INTEGER 列と文字列 `'1'` を比べるとき、文字列を数値に変える。そのため `WHERE version = ?` が一致し、UPDATE・タグの更新・監査ログ・COMMIT がすべて通る。\n- **何が起きるか:** その後、with ブロックの外にある `return version + 1`（notes/service.py:197）で `\"1\" + 1` の TypeError になる。呼び出し側は失敗と受け取るのに、DB には更新が残る。\n- **評価:** 仕様は version の型を決めていないので、呼び出し側の誤用とも言えます。ただ「例外なのに書き込みは確定している」状態は R10・K4 の趣旨に反するため、実在する欠陥に分類しました。重大とするのは重すぎます。報告の行番号（301）は、提示したコード（197）と合っていません。\n\n### [重大2] sort にハッシュできない値を渡すと ValidationError にならない → real_other\n- **成り立つ条件:** `list_notes(..., sort=[\"updated\"])` と呼ぶと、`sort not in SORT_COLUMNS`（dict の検索）で `TypeError: unhashable type` になる。\n- **評価:** R3 は「範囲外は ValidationError」と定めています。また page・per_page では型を検査しているので、sort だけ漏れています。実在する欠陥です。報告の「テストは文字列と None の sort を確かめている」は不正確で、テストに None はありません。ただし分類には影響しません。\n\n### [軽微1] 19桁の note_id のリンクを verify_link が拒否する → real_other（深刻度は低い）\n- **成り立つ条件:** `make_link` は桁数に上限がないので、note_id が 10^18 以上（SQLite の id の範囲内）だとリンクを作れる。しかし `LINK_RE` は18桁までなので、`verify_link` は Forbidden を返す。\n- **評価:** 仕様は「10進の数字だけ」で桁数を決めていないので、正しいリンクを拒否するずれにあたります。自動採番ではまず届かない値です。\n\n### [軽微2] Forbidden の `__context__` にリンク全体が残る → style\n- `from None` を付けているので、トレースバックには出ません。例外のメッセージにも出ません。R9 が対象にしているのはログ・例外のメッセージ・出力なので、仕様違反ではありません。\n- 残るのは形の崩れた入力（呼び出し側が渡したもの）だけです。より安全にする提案にとどまります。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"version=\\\"1\\\" を渡すと、SQLite が文字列を数値に変えて比べるため WHERE version = ? が一致してコミットまで進み、その後 with の外の return version + 1 で TypeError になる（例外なのに更新と監査ログが確定する）。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"sort=[\\\"updated\\\"] のようなハッシュできない値で、dict の in 判定が TypeError になり、R3 が求める ValidationError にならない。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"make_link は19桁の note_id（10^18 以上、SQLite の id の範囲内）でもリンクを作るが、LINK_RE が18桁までなので verify_link が正しいリンクを Forbidden にする（実際にはまず起きない値）。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"from None で表示は抑えられ、例外のメッセージにも出ないので R9 違反ではなく、__context__ に入力が残る点を直す安全性の提案にとどまる。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、version の型の未検査によるコミット後の例外と sort の型の未検査は実在し、テストもないので、題材の見落としとして作り手が確かめるべき。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "version=\"1\" を渡すと、SQLite が文字列を数値に変えて比べるため WHERE version = ? が一致してコミットまで進み、その後 with の外の return version + 1 で TypeError になる（例外なのに更新と監査ログが確定する）。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "sort=[\"updated\"] のようなハッシュできない値で、dict の in 判定が TypeError になり、R3 が求める ValidationError にならない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "make_link は19桁の note_id（10^18 以上、SQLite の id の範囲内）でもリンクを作るが、LINK_RE が18桁までなので verify_link が正しいリンクを Forbidden にする（実際にはまず起きない値）。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "from None で表示は抑えられ、例外のメッセージにも出ないので R9 違反ではなく、__context__ に入力が残る点を直す安全性の提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、version の型の未検査によるコミット後の例外と sort の型の未検査は実在し、テストもないので、題材の見落としとして作り手が確かめるべき。"
+ }
+}

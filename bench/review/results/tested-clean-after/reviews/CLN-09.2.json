@@ -1,0 +1,49 @@
+{
+ "case": "CLN-09",
+ "rep": 2,
+ "sec": 36.9,
+ "exit": 0,
+ "cost_usd": 0.18756189999999998,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 30226,
+  "cache_read_input_tokens": 214139,
+  "output_tokens": 4522,
+  "output_tokens_details": {
+   "thinking_tokens": 1668
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 30226,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1741,
+    "cache_read_input_tokens": 49880,
+    "cache_creation_input_tokens": 975,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 975
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 542df200\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: LINK_RE が先頭ゼロを許すため、`007.123.sig` と `7.123.sig` のように、同じ署名で note_id が同じリンクの表記が複数ある。署名は int 化した値に対して計算される。検証結果（note_id）は同じなので、安全上の問題はない。 / 提案: 正規形（先頭ゼロなし）だけを通す。仕様に規定がないので任意。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当。題名・本文・タグの境界値、タグの重複、タグが文字列そのものの場合、末尾に改行があるタグ、タグ挿入時の途中失敗（`create:tags` フック）での全ロールバックを確かめている。\n- AC2: V2 は妥当。同じ組織・非公開・他の組織・存在しないメモが NotFound になることを確かめている。閲覧数の同時加算は、別々の接続・別々のスレッドで確かめている。実装は `views = views + 1` を `BEGIN IMMEDIATE` の中で行っており、数え漏れは起きない。確認後に削除・変更された場合は NotFound になり、閲覧数の加算もロールバックされる。\n- AC3: V3 は妥当。範囲外の page・per_page・sort、極端に大きな page、`%`・`_`・`\\` のリテラル検索、タグの OR 絞り込み、SQL 文字列を検索語に入れた場合を確かめている。実装は全箇所でプレースホルダーを使い、`ORDER BY` は固定の辞書から選ぶ。LIKE は題名と本文の両方に同じエスケープ済みパターンと `ESCAPE '\\'` を適用している。\n- AC4: V4 は妥当。作成者・管理者・他の組織・非公開・古い version・読み出しと書き込みの間の他の更新・判定後の移管・検証・削除途中の失敗を確かめている。認可と検証は、トランザクション内で読み直した行で行っている。\n- AC5: V5 は、移管の元・先・管理者の組織が一致する条件と、途中の失敗でのロールバックを確かめている。コードも `org_id` で絞り、全体を1つのトランザクションにしている。テストの中身までは細かく読んでいない（コード経路で確認した）。\n- AC6: V6 は妥当。8文字未満は全部伏せ、8文字以上は末尾4文字を残す実装になっている。\n- AC7: V7 は妥当。ちょうど window 秒での枠の切り替え、拒否した呼び出しが枠を延ばさないこと、20スレッドの同時呼び出し、チェック中に割り込みが入る場合（`hook` による決定論的な再現）を確かめている。\n- AC8: V8 は妥当。期限ちょうど、改ざん、形の崩れたリンクを確かめている。\n- AC9: V9 は、ログ・例外メッセージ・監査の detail に本文・署名・api_key が出ないことを確かめている。実装のログと例外は ID だけを出している。\n- AC10: V10 は、例外の後に接続が再利用できることを確かめている。`transaction()` は `BaseException` でも ROLLBACK し、ROLLBACK 自体の失敗で元の例外を隠さない。\n- K1〜K8 のリスクは、上の各 AC の検証でカバーされている。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのファイルはなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実 DB（メモリ・ファイル）を使った単体・結合テストでリスクを確かめられている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、63件がすべて合格した。\n- `service.py`・`db.py`・`ratelimit.py`・`share.py` を、仕様の R1〜R10 と1行ずつ突き合わせた。認可（`_visible`・`_can_modify`）、SQL のプレースホルダー、LIKE のエスケープ、楽観的ロックの `WHERE version`、トランザクション境界、`RateLimiter` のロックと境界（`>= window`）、リンクの正規表現（`fullmatch`・`[0-9]`）と `compare_digest` をたどった。\n- `history --since 0` を確認した。検証条件の弱体化を示す変更は見つからなかった。ただし出力の確認は先頭部分だけで、全件は読んでいない。また、ソースは git に未追跡だったので、テストの改ざんを `git diff` では確かめられなかった。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-05",
+ "rep": 1,
+ "sec": 21.8,
+ "exit": 0,
+ "cost_usd": 0.1206833,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 20019,
+  "cache_read_input_tokens": 157773,
+  "output_tokens": 2481,
+  "output_tokens_details": {
+   "thinking_tokens": 393
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20019,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1466,
+    "cache_read_input_tokens": 39726,
+    "cache_creation_input_tokens": 644,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 644
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 78281336\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 (notes/service.py:295-311 の search_notes) / 対応区分: 修正必須 / 内容: 検索が他人の非公開メモを返す。SQL の条件が `org_id = ?` だけで、`private = 0 OR owner_id = ?` がない。一覧の list_notes (281行) には同じ条件があるが、検索には適用されていない。 / 成立条件: 同じ組織の利用者 A が非公開メモを作り、同じ組織の別の利用者 B が、題名か本文にある語で検索する。 / 影響: R3「他人の非公開メモは含めない」の違反。題名が検索結果に出て、非公開メモの存在と題名が漏れる。R2 の NotFound 方針にも反する。 / 根拠: 再現で確認した。メモリ上の DB で A が「secret title」を private=True で作成し、B が `search_notes(conn, B, 'secret')` を呼ぶと `[{'id': 1, 'title': 'secret title'}]` が返った。上流の認可やテストでの防止もない。tests/test_ac3_list_search.py:50-83 の SearchTest は、非公開メモ「secret 100%」を作っているのに、alice の検索結果に含まれないことを確かめていない。 / 提案: search_notes の WHERE を `org_id = ? AND (private = 0 OR owner_id = ?) AND (...)` にし、args に `user[\"id\"]` を加える。あわせて、他人の非公開メモが検索結果に出ないこと（本人の検索には出ること）を確かめるテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成・拒否・途中失敗の巻き戻しは hook で再現するテストがあり妥当。\n- AC2: 閲覧の見え方と NotFound は妥当。閲覧数の同時加算は BEGIN IMMEDIATE のトランザクション内の UPDATE で守られている。\n- AC3: 不十分。一覧の範囲外入力と LIKE のエスケープは確かめている。検索での他人の非公開メモの除外は未検証で、実際に欠陥がある（重大1）。\n- AC4: 楽観的ロックは UPDATE の `WHERE version` と、トランザクション内で読み直した行の再検査で実装されていて妥当（コードを読んで確認）。\n- AC5: 同じ組織の判定と全か無かの移管があり妥当。\n- AC6: 8文字未満の鍵と、末尾4文字以外を伏せる処理を実装していて妥当。\n- AC7: 枠の境界は `>=`、ロックと hook は決定論的で妥当。\n- AC8: 形式は fullmatch、期限は `>=`、署名は compare_digest で妥当。\n- AC9: ログには ID だけを出している。コードを読んだ範囲では本文・署名・api_key を出していない。\n- AC10: ROLLBACK と、例外後の接続の再利用が実装されていて、テストもある。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要。ライブラリで、UI も外部連携もない。unittest の結合テストで足りる。\n### 不足しているリスク\n- K1: 検索経路で他人の非公開メモが漏れる（重大1）。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 61 件が全部通った。ただし検索の非公開メモを確かめるテストがないため、通っても欠陥を見逃す。\n- 再現スクリプトで、検索による非公開メモの漏えいを確認した。\n- spec.md、design.md、notes/*.py をすべて読み、SQL のプレースホルダー、ESCAPE 句、認可の呼び出し経路を確認した。",
+ "files_changed": [],
+ "valid": true
+}

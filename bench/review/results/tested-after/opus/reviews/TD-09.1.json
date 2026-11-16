@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 1,
+ "sec": 52.5,
+ "exit": 0,
+ "cost_usd": 0.3591982,
+ "num_turns": 6,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 27435,
+  "cache_read_input_tokens": 165891,
+  "output_tokens": 5325,
+  "output_tokens_details": {
+   "thinking_tokens": 1364
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27435,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2896,
+    "cache_read_input_tokens": 46051,
+    "cache_creation_input_tokens": 1964,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1964
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6（notes/service.py `transfer_notes` 313〜327行） / 対応区分: 修正必須 / 内容: 移管が全部か何もしないかになっていない。メモ1件ごとに別々の `with transaction(conn)` でコミットしているため、途中で失敗すると、それまでに移したメモがコミットされたまま残る。移す対象の ID を読む処理と監査ログの記録も、更新とは別のトランザクションになっている / 成立条件: 2件目以降の移管で例外が起きたとき（DB エラー、ロック待ちの時間切れ、`hooks.before_write` での失敗など）。移管の途中に別の接続から書き込みが入る場合も含む / 影響: 一部のメモだけ持ち主が変わり、仕様の「途中で失敗したら元のまま」に反する。持ち主が混ざったまま監査ログも残らない / 確認した保証: 呼び出し元や DB の制約に、これを防ぐものはない。test_ac5_transfer.py は正常系と拒否だけを確かめており、途中で失敗するテストはない / 根拠: scratchpad の repro.py で、メモ3件のうち2件目の `transfer:<id>` で例外を起こした。持ち主は `[2, 1, 1]` になり、1件目だけが移っていた / 提案: ID の読み出し・全件の UPDATE・監査ログを、1つの `with transaction(conn):` の中にまとめる。全件の UPDATE は `UPDATE notes SET owner_id=?, version=version+1 WHERE owner_id=? AND org_id=?` の1文でもよい\n- [重大2] 区分: テスト / 対象: AC5, K6, K4 / 対応区分: 証拠不足 / 内容: 移管の途中で失敗したときに元のまま残ることを確かめるテストがない / 根拠: AC5 には「失敗時に元のまま」が明記されている。設計でも、途中の失敗を `hooks.before_write` で再現すると決めている。このテストがないため、重大1の欠陥が gate を通ってしまった / 提案: `fail_at(\"transfer:<2件目の id>\")` で失敗させ、すべてのメモの owner_id と version が元のままであること、transfer の監査ログが増えていないことを確かめるテストを追加する\n- [軽微1] 区分: 実装 / 対象: R3, AC3（service.py 239行） / 対応区分: 改善提案 / 内容: `sort` にハッシュできない値（list など）を渡すと、`in SORT_COLUMNS` が ValidationError ではなく TypeError になる / 提案: 先に `isinstance(sort, str)` で確かめる\n- [軽微2] 区分: 実装 / 対象: R9（share.py 370〜373行） / 対応区分: 改善提案 / 内容: `raise ValueError(link)` の後に `from None` を付けているので、トレースバックには出ない。ただし、リンク全体（署名を含む）が `__context__` に残る / 提案: ValueError にリンクを入れずに例外を起こすか、例外を使わずに直接 Forbidden を起こす\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成時の入力検証（境界・型・タグの規則）と、`create:tags` での失敗後に何も残らないことを確かめており、妥当\n- AC2: 見えないメモがどれも NotFound になること、確かめた後に非公開になった場合、閲覧が割り込んだ場合、スレッドからの同時閲覧を確かめており、妥当\n- AC3: 範囲、並び順、ページの境界と大きすぎる page、% と _ を普通の文字として探すこと、タグの OR 条件、SQL の文字列をただの値として扱うこと、入力の拒否を確かめており、妥当（`\\` を含む検索語のテストはない。実装は ESCAPE とエスケープの処理で対応している）\n- AC4: 古い version による Conflict、読み出しから書き込みの間の更新、トランザクションの中での認可の再確認、非公開メモ、更新時の入力検証、削除の途中の失敗と例外の伝わり方を確かめており、妥当\n- AC5: 正常系・管理者だけ・同じ組織の中だけ、は確かめている。しかし「失敗時に元のまま」の検証がないため不十分（重大2）。実装も条件を満たしていない（重大1）\n- AC6: 8文字未満の鍵と、末尾4文字の残し方を確かめており、妥当\n- AC7: 枠の中の回数、ちょうど window 秒の境界、拒否された呼び出しで枠が延びないこと、スレッドの同時呼び出し、判定中の割り込みが hook で直列化されることを確かめており、妥当\n- AC8: 期限ちょうどの境界、改ざん、形の崩れたリンクを確かめており、妥当\n- AC9: ログと例外に、本文・署名・api_key が出ないことを確かめている。概ね妥当\n- AC10: 例外の後に接続を使い続けられることを確かめており、妥当\n- K1: 一覧・検索・閲覧・更新・削除で、他の組織と他人の非公開メモを除外することを確かめており、妥当\n- K2: SQL はすべてプレースホルダーで値を渡している。sort は許可したキーから対応する文字列を引いている。LIKE には ESCAPE '\\' があり、題名・本文の両方にエスケープ済みの pattern を渡している。妥当\n- K3: 閲覧・更新・回数制限の競合は、hook とスレッドで再現しており、妥当\n- K4・K6: 移管の途中の失敗を確かめていないため不十分（重大1・2）\n- K5・K7・K8: 妥当\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは見当たらない）\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリのため。単体テストで実際の SQLite を使っており、モックはしていない）\n\n### 不足しているリスク\n- K6・K4: 移管の途中で失敗したとき、一部だけ移る（テストがなく、実装にも欠陥がある）\n\n### 確認したこと\n- spec.md と design.md、notes/*.py をすべて、tests/ を主要な部分について読み、仕様と突き合わせた\n- `$AQ trace` を実行した: R1〜R10 はすべて unit チェックに結び付いていて合格。反証テストは無効\n- `$AQ history --since 0` を実行した: check を弱めたり、消したりした記録はない\n- `python3 -m unittest discover -s tests -t . -q` を実行した: 62件すべて合格\n- scratchpad の再現スクリプト（`/tmp/claude-0/-tmp-claude-0-td-after-work-aqdlc-test-d3oirgus-app/7a89fb32-1fd0-4489-809a-63c3b83ce7ea/scratchpad/repro.py`）で移管の途中失敗を再現した: 持ち主が `[2, 1, 1]` になり、一部だけ移った\n- コードの経路で確かめたこと: 閲覧・更新・削除で認可を再確認する場所、楽観的ロック（UPDATE の WHERE に version を入れ、rowcount で判定）、ROLLBACK の失敗で元の例外を隠さないこと、RateLimiter の境界（`>=`）とロック、共有リンクの fullmatch と compare_digest、期限の境界（`>=`）、監査ログの組織での絞り込みと鍵の伏せ方\n- git の作業ツリーは変更していない（バイトコードも書き出していない）",
+ "files_changed": [],
+ "valid": true
+}

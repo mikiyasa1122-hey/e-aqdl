@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 2,
+ "sec": 96.2,
+ "exit": 0,
+ "cost_usd": 0.5418415999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 38133,
+  "cache_read_input_tokens": 250048,
+  "output_tokens": 9336,
+  "output_tokens_details": {
+   "thinking_tokens": 4624
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 38133,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3195,
+    "cache_read_input_tokens": 63700,
+    "cache_creation_input_tokens": 1877,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1877
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "ブラインドレビューは終わりました。報告を書きます。\n\n## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, R10, AC4, AC10 / 対応区分: 改善提案 / 内容: `update_note` が `version` の型を確かめていない。`\"1\"`（文字列）を渡すと、SQLite の型変換で `WHERE version = '1'` に一致して更新は COMMIT されるが、その後の `return version + 1`（notes/service.py:306）で TypeError になる。呼び出し側には例外が届くのに、データは更新済み（version=2）のまま残る。実行して確かめた。version の型は仕様に書かれていないため、仕様違反ではなく改善提案とする / 提案: トランザクションの前に `_int_in(version, 1, None, \"version\")` で検査する。戻り値も、DB から読み直した version にする\n- [軽微2] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `LINK_RE` が先頭のゼロを受け入れる（notes/share.py:353）。`007.1060.<署名>` や `7.01060.<署名>` は、int に変換した値で署名を確かめるので有効になる（実行して確かめた）。指すメモと期限は元のリンクと同じなので、権限が広がるわけではない。ただ、同じ署名で表記の違うリンクが通る / 提案: 正規の形（`0|[1-9][0-9]*`）だけを受け入れるか、`_sign` を元の文字列に対して計算する\n- [軽微3] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `LINK_RE` が数字を18桁までに制限している。このため、SQLite の rowid の範囲（最大19桁）にある note_id や、大きな ttl から作った正規のリンクが Forbidden になる（note_id=10**18 で実行して確かめた）。拒否する側に倒れるだけで安全上の問題はなく、実運用でもまず届かない値である / 提案: 桁数の上限を19桁に広げるか、上限を仕様書・コードのコメントに明記する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は次を確かめており妥当。題名の境界（0・空白だけ・100・101文字・型違い）、本文の境界（10000・10001文字）、タグの規則（大文字・改行・21文字・非 ASCII・型違い）、重複を数えて保存は重複を除くこと、文字列の tags を拒否すること、途中の失敗（hook）と検証エラーで notes・note_tags・audit が3つとも0件のままであること\n- AC2: 他の組織、他の組織の管理者、他人の非公開、管理者から見た他人の非公開、存在しない ID が、すべて NotFound になることを確かめている。判定の後に非公開へ変わった場合の NotFound と閲覧数のロールバック、別接続の4スレッドから40回閲覧して数え漏れがないことも確かめており、妥当\n- AC3: 範囲と非公開の除外、両方の sort、ページの境界と極端に大きい page、型違い（bool・str・float）の拒否を確かめている。検索は % _ \\ を普通の文字として扱うこと、タグの OR、SQL 片が値として扱われること、q・タグの検証も確かめており、妥当。コードでも、ORDER BY はホワイトリスト、ほかの値はすべてプレースホルダー、ESCAPE '\\' は題名・本文の両方に付いていることを確かめた\n- AC4: 作成者と同じ組織の管理者による更新・削除、Forbidden と NotFound の区別、非公開を扱えるのは作成者だけであること、古い version での Conflict を確かめている。読み出しと書き込みの間に他の更新が入った場合（hook）の Conflict、未変更の欄を最新の行から取ること、判定の後に移管された場合の再認可、更新時の R1 検証、削除の途中の失敗によるロールバックと例外の伝搬も確かめており、妥当。さらに、別接続の8スレッドから同時に更新すると成功は1件だけで残りは Conflict になることを、自分で実行して確かめた\n- AC5: 管理者だけであること、4通りの組織の組み合わせでの Forbidden、途中の失敗で全件元のままであること、非公開も移ることを確かめており、妥当\n- AC6: 末尾4文字以外を伏せること、7文字・8文字・0文字の境界、管理者だけであること、自分の組織だけであることを確かめており、妥当\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドを Barrier で同時に呼んでも上限を超えないことを確かめている。hook で判定の途中に割り込ませても直列化されることも確かめており、妥当。Barrier と Event による同期で、sleep には頼っていない\n- AC8: 期限ちょうど（1060）で無効になること、note_id・期限・署名の改ざん、別の鍵、16種類の形の崩れ（大文字・改行・符号・指数表記・アラビア数字・型違い）を確かめており、妥当。先頭のゼロのテストはない（軽微2）\n- AC9: ログ・例外のメッセージ・監査ログの出力に、本文・署名・api_key・秘密鍵が出ないことを確かめており、妥当\n- AC10: Conflict・ValidationError・注入した失敗・IntegrityError の後に接続を使い続けられること、in_transaction が False に戻ること、SQLite が自動でロールバックした後も元の例外が伝わることを確かめており、妥当\n- K1〜K8: 上の各受け入れ条件のテストで確かめている。K3 は閲覧・更新・回数制限のそれぞれで、別スレッドからの実行か hook で決定論的に再現している\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは、確認しても見つからなかった）\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、仕様でも HTTP は対象外。実際の SQLite ファイルと別接続・別スレッドを使った結合レベルのテストがあり、リスクに見合っている）\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）: 63件すべて合格。gate のログ（20261111-085247-check-unit.log）も exit=0・63件で合格\n- `$AQ trace`: R1〜R10・AC1〜AC10・K1〜K8 は、すべて unit の検証に対応付けられている\n- `$AQ history --since 0`: check の追加と bind だけで、検証の削除・弱体化はない\n- `git status`: レビュー中にファイルの変更はない（新規の未追跡ファイルだけ）\n- スクラッチパッドの probe.py で次を実行し、結果を確かめた。文字列の version で更新した場合（軽微1）、先頭にゼロのあるリンク（軽微2）、19桁の note_id（軽微3）、page=2**62 の境界（空の結果になり例外は出ない）、検索で大文字と小文字を区別しないこと、別接続8スレッドからの同時更新（成功1件・Conflict 7件・version=2）\n- コードで次をたどった。`_visible` と `_can_modify` の適用箇所（get / update / delete はトランザクションの中で読み直してから再判定する）、transfer の組織の条件と全件のロールバック、`export_audit` の組織の絞り込み、RateLimiter のロックの範囲、share の `compare_digest` と期限の比較、ログとエラーメッセージに渡している値（ID と件数だけ）",
+ "files_changed": [],
+ "valid": true
+}

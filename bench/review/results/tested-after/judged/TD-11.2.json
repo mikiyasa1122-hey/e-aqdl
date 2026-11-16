@@ -1,0 +1,23 @@
+{
+ "case": "TD-11",
+ "rep": 2,
+ "judge_cost_usd": 0.11050420000000001,
+ "judge_raw": "各指摘を正解データとコードに照らして分類した。\n\n- **重大1**: `export_audit` が api_key を伏せずに `actor_key` として返していると指摘している。埋め込んだ欠陥と箇所・原因・影響がすべて一致するので、matches_defect とする。\n- **重大2**: AC6 のテストが `actor_key` の中身を検査していないという、テスト不足だけの指摘。実際に `tests/test_ac6_audit.py` は `(action, actor)` しか確かめていないので、test_gap とする。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずに actor_key として返しており、埋め込んだ欠陥と箇所・原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"AC6 のテストが actor_key の伏字を検査していないというテスト不足の指摘で、実際にそのとおりである。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が api_key の無マスク出力を、原因（そのまま返す）と影響（鍵の漏えい）まで正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずに actor_key として返しており、埋め込んだ欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "AC6 のテストが actor_key の伏字を検査していないというテスト不足の指摘で、実際にそのとおりである。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が api_key の無マスク出力を、原因（そのまま返す）と影響（鍵の漏えい）まで正しく指摘している。"
+ }
+}

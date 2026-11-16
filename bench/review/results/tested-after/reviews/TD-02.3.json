@@ -1,0 +1,49 @@
+{
+ "case": "TD-02",
+ "rep": 3,
+ "sec": 29.0,
+ "exit": 0,
+ "cost_usd": 0.09901700000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13060,
+  "cache_read_input_tokens": 125010,
+  "output_tokens": 3426,
+  "output_tokens_details": {
+   "thinking_tokens": 1097
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13060,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1908,
+    "cache_read_input_tokens": 38079,
+    "cache_creation_input_tokens": 2461,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2461
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fda594\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:17,100-110（list_notes） / 対応区分: 修正必須 / 内容: `page` に SQLite の整数上限を超える大きな整数を渡すと、`ValidationError` でも空の結果でもなく、素の `OverflowError` が呼び出し側に漏れる。`MAX_OFFSET` は定義されているが、どこにも使われていない。定数のコメントは「超える page は結果なしにする」と書いている。 / 成立条件: `list_notes(conn, user, page=10**30)` のように、`(page-1)*per_page` が 2**63-1 を超える値を渡す。page が int で 1 以上、per_page が 1〜50 なら、入力検証はすべて通る。 / 影響: 仕様 R3 の「範囲外は ValidationError」と、設計意図の「結果なし」のどちらにも反する。呼び出し側は業務エラー（NotesError）だけを捕まえる想定なので、業務エラーの外で落ちる。 / 確認した保証: 検証は型・下限・上限・sort だけで、offset の上限はない。`tests/test_ac3_list_search.py` にこの境界のテストはない。実行して確認した。`list_notes(..., page=10**30)` で `OverflowError: Python int too large to convert to SQLite INTEGER` になった。 / 根拠: notes/service.py:17（`MAX_OFFSET` が未使用）、同 100-110（offset をそのまま LIMIT/OFFSET に渡している）。 / 提案: `offset > MAX_OFFSET` のとき、`items=[]`・`total` はそのままの結果を返す（または `ValidationError`）。あわせて境界値のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:20-40 / 対応区分: 改善提案 / 内容: 署名の対象が正規化した整数（`f\"{note_id}:{expires}\"`）なので、`007.<期限>.<署名>` のように先頭ゼロを付けた形も note 7 のリンクとして有効になる。仕様が「形の崩れ」を厳密に定めていないため、欠陥とは扱わない。 / 提案: 厳密にしたいなら、先頭ゼロを拒否するか、受け取った文字列そのものを署名対象にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 入力の境界、タグ、途中失敗（`hooks.before_write` の差し込み口）で何も残らないことを確かめており、妥当。\n- AC2: 可視性の規則と、並行する閲覧数を確かめており、妥当。実装は `BEGIN IMMEDIATE` の中で更新と再確認を行っており、数え漏れはない。\n- AC3: 検索の `%`/`_`/`\\` のエスケープ、OR のタグ絞り込み、プレースホルダーは妥当。page の巨大値という境界がないため不十分で、重大1がそれにあたる。\n- AC4: 競合、判定後の移管、削除の失敗の伝播を確認しており、妥当。\n- AC5: 組織をまたぐ移管の拒否と、途中失敗でのロールバックを確認しており、妥当。\n- AC6: 伏せ字（8文字未満を含む）を確認しており、妥当。\n- AC7: 枠の境界と、同時の呼び出し（`hook` で決定論的に再現）を確認しており、妥当。\n- AC8: 期限の境界と、改ざん・形の崩れを確認しており、妥当。\n- AC9: 本文・署名・api_key がログや例外に出ないことを確認しており、妥当。コードでも、例外メッセージとログに該当する値は含まれていない。\n- AC10: 例外の後も接続を使い続けられることを確認しており、妥当。\n- エンジンが検出したテストの兆候: なし。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストが SQLite の実体を使って検証している。\n\n### 不足しているリスク\n- R3/K1: list_notes の巨大な page（重大1）。\n- ほかは「なし」。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py をすべて読んだ。認可は `_visible`/`_can_modify` を経由していること、SQL は値がすべてプレースホルダーで渡されていること、LIKE は ESCAPE 付きで `\\`・`%`・`_` を処理していることを確認した。\n- `python3 -m unittest discover -s tests -t .` を実行し、62件がすべて合格した。\n- `aqdlc.py history --since 0` を確認した。検証条件が弱められた形跡はなかった。\n- 巨大な page による `OverflowError` を実機で再現した。",
+ "files_changed": [],
+ "valid": true
+}

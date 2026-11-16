@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 1,
+ "sec": 30.9,
+ "exit": 0,
+ "cost_usd": 0.24356080000000002,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 49302,
+  "cache_read_input_tokens": 106568,
+  "output_tokens": 3568,
+  "output_tokens_details": {
+   "thinking_tokens": 1263
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 49302,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1759,
+    "cache_read_input_tokens": 42777,
+    "cache_creation_input_tokens": 6525,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6525
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `share.py` の `LINK_RE` は先頭ゼロを許す。そのため「007.期限.署名」のような別表記のリンクも、`int()` 後の値で署名が一致すれば有効になる。仕様の「10進の数字だけ」は満たしており、署名の偽造にはならない。同じリンクに複数の表記が通ることだけが問題になる / 提案: 厳密にするなら、先頭ゼロを拒否する（例: `0|[1-9][0-9]{0,17}`）。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_ac1_create.py` の検証は妥当。`hooks.before_write(\"create:tags\")` で途中失敗を注入して全体が巻き戻ることを確かめており、K4 のリスクにも合う。入力の境界値（題名・本文・タグ・tags が文字列）も見ている。実装は `_validate` と `transaction` で要件どおり。\n- AC2: 妥当。他組織・他人の非公開・存在しないメモが NotFound になることを確かめている。閲覧後に非公開へ変わるケースも見ている。数え漏れについては、割り込み閲覧と別接続の 4 スレッド×10 回で合計 40 になることを確かめており、sleep に頼らない。K1・K3 に合う。\n- AC3: 妥当。ページ・件数・並び順の範囲外、`%` と `_`、タグの OR とタグの検査を見ている。コードでは `ESCAPE '\\\\'`、エスケープ処理、プレースホルダーが題名・本文の両方に同じパターンで適用されており、K2 に合う。\n- AC4: 妥当。作成者・管理者・他の組織・非公開、古い version、読み出しから書き込みの間の割り込み、判定後の移管での再判定、更新時の検証、削除失敗時の巻き戻しと例外の伝播を見ている。UPDATE の WHERE に version があり、`rowcount` で判定している。\n- AC5: `test_ac5_transfer.py` は、管理者だけが移せること、同じ組織でなければ Forbidden になること、途中失敗で元に戻ることを確かめる構成。コードは `transfer_notes` が単一トランザクションで、WHERE に org_id を含めており、K6 に合う。\n- AC6: 妥当。末尾 4 文字以外を伏せ、8 文字未満は全部伏せる。コードの経路も一致している。\n- AC7: 妥当。時刻を注入して枠の境界（159.999 と 160.0）を確かめている。拒否された呼び出しで枠が延びないことも見ている。20 スレッドの同時呼び出しで成功が 5 回になることと、チェック中の割り込み（hook）が直列化されることも確かめており、sleep 依存ではない。\n- AC8: 妥当。期限ちょうど、改ざん、形の崩れを見ている。実装は `fullmatch`、`compare_digest`、`>=` の判定で、K8 に合う。\n- AC9: 妥当。ログと例外に本文・署名・api_key が出ないことを確かめている。実装のログは ID だけを出している。\n- AC10: 妥当。例外の後に `_rollback` で接続が使える状態に戻ることを確かめている。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストファイルは見つからなかった。検証条件の変更履歴にも、弱められた形跡はない。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実 DB（メモリ上とファイル上）を使った単体テストが、並行実行と途中失敗まで確かめている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/*.py` の全ソースを、利用者の入力から SQL・認可・トランザクションまでたどった。\n- `python3 -m unittest discover -s tests -t .` を実行した。62 件がすべて通った。\n- 実行した `$AQ trace` は、すべての AC と K に検証が対応していることを示した。`history` は途中で出力が切れたため、先頭付近しか確認していない。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

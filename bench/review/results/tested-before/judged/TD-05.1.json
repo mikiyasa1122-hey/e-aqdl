@@ -1,0 +1,18 @@
+{
+ "case": "TD-05",
+ "rep": 1,
+ "judge_cost_usd": 0.1096122,
+ "judge_raw": "重大1は、埋め込まれた欠陥そのものを指摘しています。\n\n- **箇所**: コードの `search_notes`（notes/service.py の151〜167行）で、一致しています。\n- **原因**: WHERE 句が `org_id = ?` だけで、`private = 0 OR owner_id = ?` がありません。正解データの「検索の条件に非公開メモの除外がない」と同じです。\n- **影響**: 同じ組織の他人の非公開メモの題名が検索結果に出ます。これも正解データと同じです。\n- **根拠と提案**: 再現結果と、条件を足す修正案が示されています。テスト不足にも触れていますが、実装の原因と影響を述べているので、test_gap ではなく matches_defect とします。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes の WHERE に非公開メモの除外（private = 0 OR owner_id = ?）がなく、同じ組織の他人の非公開メモが検索結果に出るという、埋め込んだ欠陥の原因と影響が一致している。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"指摘は欠陥の箇所・原因・影響が正解と一致し、再現と修正案も示されている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes の WHERE に非公開メモの除外（private = 0 OR owner_id = ?）がなく、同じ組織の他人の非公開メモが検索結果に出るという、埋め込んだ欠陥の原因と影響が一致している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "指摘は欠陥の箇所・原因・影響が正解と一致し、再現と修正案も示されている。"
+ }
+}

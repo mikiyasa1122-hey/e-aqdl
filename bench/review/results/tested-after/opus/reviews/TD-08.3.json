@@ -1,0 +1,49 @@
+{
+ "case": "TD-08",
+ "rep": 3,
+ "sec": 103.0,
+ "exit": 0,
+ "cost_usd": 0.5995267999999999,
+ "num_turns": 9,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 18,
+  "cache_creation_input_tokens": 44392,
+  "cache_read_input_tokens": 391994,
+  "output_tokens": 8296,
+  "output_tokens_details": {
+   "thinking_tokens": 2374
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 44392,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3696,
+    "cache_read_input_tokens": 64598,
+    "cache_creation_input_tokens": 374,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 374
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c3a94d21\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3（notes/service.py `get_note`） / 対応区分: 修正必須 / 内容: 閲覧数を「トランザクションの外で読んだ値 + 1」で上書きしている（`views = row[\"views\"]` を読み、その後 `UPDATE notes SET views = ? ...` に `views + 1` を渡す）。読み出しと書き込みの間に別の接続から閲覧が入ると、片方の加算が消える（更新の取りこぼし） / 成立条件: 同じメモを、別の接続・別のスレッドからほぼ同時に閲覧する。具体的には、A が `_row` で views を読んでから `BEGIN IMMEDIATE` までの間に、B の閲覧が終わる場合 / 影響: 仕様 R2「同時に閲覧されても数え漏れがないこと」と AC2「閲覧数が正確に増える」を満たさない。閲覧数が実際より少なく記録される / 確認した保証: `transaction()` の BEGIN IMMEDIATE は書き込みを直列にするが、加算の元になる値はトランザクションの前に読んでいるので守られない。DB の制約やトリガーでも防いでいない。トランザクション内の `_row` の読み直しは可視性の判定だけに使われ、views の計算には使われていない / 根拠: notes/service.py の `get_note`（`views = row[\"views\"]` → `hooks.before_write(\"view\")` → `UPDATE notes SET views = ? WHERE id = ?`, `(views + 1, note_id)`）。再現: 一時ファイルの DB に2つの接続を作り、`before_write(\"view\")` の差し込み口で2つ目の接続から `get_note` を1回実行させてから、1つ目の `get_note` を最後まで進めた。2回閲覧したのに views は 1 だった（scratchpad の repro_view.py。出力 `views after 2 views = 1`） / 提案: トランザクションの中で `UPDATE notes SET views = views + 1 WHERE id = ?` と DB 側で加算する。そのうえで、上と同じ差し込み口を使って別接続の閲覧を間に入れ、views が 2 になることを確かめるテストを tests/test_ac2_view.py に足す（いまの test_ac2_view.py は threading・tempfile を import しているのに、同時閲覧のテストがない）\n- [軽微1] 区分: 実装 / 対象: R8, K8（notes/share.py `verify_link`） / 対応区分: 改善提案 / 内容: 先頭に 0 を付けたリンク（`07.1060.<署名>` や `7.01060.<署名>`）が有効と判定される。`int()` で正規化してから署名を確かめているため。署名する内容（note_id と期限）は変わらないので、権限の拡大や期限の延長は起きない / 提案: LINK_RE を `(0|[1-9][0-9]{0,17})` にするなどして正規の形だけを受け付けるか、受け取った文字列そのものを署名の対象にする。リンクの形を1つに決めておくと扱いやすくなる\n- [軽微2] 区分: 設計 / 対象: R1〜R10（trace の impl-map） / 対応区分: 改善提案 / 内容: impl-map の実装ファイルが、すべて中身のない `notes/__init__.py` になっている。実際の実装は service.py・ratelimit.py・share.py にあり、設計の「要求との対応」とも合わない / 提案: impl-map を設計どおりのファイルに更新する（R7 → ratelimit.py、R8 → share.py、残り → service.py）\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は、題名・本文・タグの境界（100/101、10000/10001、20/21 文字、改行、型の違い）、重複を数える個数の上限と、保存時に重複を除くこと、文字列の tags の拒否、途中の失敗（create:tags）で notes・note_tags・audit に何も残らないことを確かめている。妥当\n- AC2: 見え方（他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しない ID がどれも NotFound になること、判定の後に非公開にされた場合）は妥当。閲覧数は1つの接続で順に呼んだときの増え方しか確かめておらず、R2 の「同時でも数え漏れがない」を検証していない。実装にも欠陥がある（[重大1]）。不十分\n- AC3: 範囲（他の組織・他人の非公開を含めない。管理者にも他人の非公開は見えない）、並び順、ページ送り、巨大な page、不正な page/per_page/sort（bool・float・文字列を含む）、% と _ と \\ をそのままの文字として探すこと、タグの OR、SQL の文字列を値として扱うこと、検索語とタグの検査を確かめている。コードでも、LIKE には ESCAPE '\\' が付いて題名と本文の両方に適用されていること、プレースホルダーで値を渡していること、sort はホワイトリストであることを確かめた。妥当\n- AC4: 作成者・同じ組織の管理者による更新・削除の成功、他人の Forbidden、他の組織の NotFound、非公開は作成者だけ、古い version の Conflict、読み出しと書き込みの間に他の更新が入ったときの Conflict、変えない欄を最新の行から取ること、判定の後に移管されたら拒否すること、更新での入力検証、削除の途中の失敗でロールバックされ例外が伝わることを確かめている。並行の場面は差し込み口を使って同じ接続で再現しているが、コードでは `WHERE id = ? AND version = ?` と rowcount で判定し、さらに BEGIN IMMEDIATE の中で読み直しているので、別接続でも同じように守られる。妥当\n- AC5: 管理者だけ、組織の組み合わせ4通りが Forbidden、途中の失敗でまったく移らないこと、非公開のメモも移ること、監査ログを確かめている。妥当\n- AC6: 末尾4文字以外を伏せること、7・8・0 文字の境界、管理者だけ、自分の組織のログだけを確かめている。妥当\n- AC7: 枠の中の上限、ちょうど window 秒で新しい枠になる境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドを Barrier でそろえた同時呼び出し、差し込み口で判定の途中に別スレッドを割り込ませる直列化のテストがある。最後のテストは wait(0.5) を使うが、ロックの中で止めて判定を観察する作りで、ロックを外せば失敗する。妥当\n- AC8: 期限のちょうど・その後、ID・期限・署名の改ざん、別の秘密鍵、多数の崩れた形（大文字、改行、空白、負の数、指数表記、全角数字、型の違い）を確かめている。妥当（先頭の 0 は [軽微1]）\n- AC9: ログ・例外のメッセージ・監査の出力に、本文・署名・api_key・秘密鍵が出ないことを確かめている。妥当\n- AC10: Conflict・ValidationError・差し込んだ失敗・DB の整合性エラー・すでにロールバックされた状態のそれぞれで、例外が伝わり、トランザクションが閉じ、接続を使い続けられることを確かめている。妥当\n- K1: AC2・AC3・AC4・AC5 のテストで、他の組織・他人の非公開について確かめている。妥当\n- K2: AC3 の注入の文字列・ワイルドカードのテストと、コードのプレースホルダーで確かめた。妥当\n- K3: 更新（AC4）と回数の制限（AC7）は妥当。閲覧数はテストがなく、実装にも欠陥がある（[重大1]）。不十分\n- K4・K6: 作成・削除・移管の途中の失敗のテストがある。妥当\n- K5・K7: AC6・AC9 のとおり。妥当\n- K8: AC8 のとおり。妥当\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは、こちらでも見つからなかった\n### E2E の要否\n- 不要（HTTP や画面のないライブラリで、仕様でも HTTP の API は対象外。公開されている関数を実際の SQLite で呼ぶ単体テストが、利用者が通る経路そのものになっている）\n### 不足しているリスク\n- K3: 別々の接続から同時に閲覧する場面の検証がない（[重大1] で追加を提案）\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）: 61件すべて合格。gate のログ（20261111-085755-check-unit.log）も 61件合格で一致\n- 閲覧数の取りこぼしを再現: scratchpad の repro_view.py で、一時ファイルの DB に2つの接続を作って実行。2回閲覧して views=1 になり、欠陥を確かめた\n- 共有リンクの調査: 先頭に 0 を付けたリンク（note_id 側・期限側）を verify_link に渡すと、どちらも 7 が返った（[軽微1]）\n- `$AQ history --since 0`: 検証条件・check は追加だけで、変更・削除・弱体化はなかった。check unit のコマンドは unittest discover のまま\n- `$AQ trace`: 全項目が合格・反証テストは未実施。impl-map が `notes/__init__.py` になっていた（[軽微2]）\n- git: main に初期コミットだけがあり、notes/ と tests/ はコミットされていない。そのため git diff での改ざんの確認はできず、history とテストの中身で判断した\n- コードを読んで確かめた範囲: 認可が `_visible` と `_can_modify` で行われ、更新・削除ではトランザクションの中で読み直した行に適用されていること。移管が組織で絞った WHERE を使い、1つのトランザクションで行われること。`transaction()` が BaseException でロールバックし、ROLLBACK 自体が失敗しても元の例外を隠さないこと。監査ログの伏せ方の境界。RateLimiter の判定・加算がすべてロックの中にあること。ログには ID と期限だけが出ていること",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,43 @@
+{
+ "TD-01": [
+  "tests.test_ac4_update_delete.UpdateTest.test_permission_is_checked_again_inside_the_write"
+ ],
+ "TD-02": [
+  "tests.test_ac3_list_search.ListTest.test_huge_page_returns_no_items"
+ ],
+ "TD-03": [
+  "tests.test_ac4_update_delete.UpdateTest.test_unchanged_fields_come_from_the_latest_row"
+ ],
+ "TD-04": [
+  "tests.test_ac5_transfer.TransferTest.test_only_within_one_org"
+ ],
+ "TD-05": [
+  "tests.test_ac3_list_search.SearchTest.test_percent_and_underscore_are_literal",
+  "tests.test_ac3_list_search.SearchTest.test_scope"
+ ],
+ "TD-06": [
+  "tests.test_ac2_view.VisibilityTest.test_hidden_notes_are_all_not_found",
+  "tests.test_ac2_view.VisibilityTest.test_not_found_does_not_count_a_view"
+ ],
+ "TD-07": [
+  "tests.test_ac8_share.ShareTest.test_expiry_boundary"
+ ],
+ "TD-08": [
+  "tests.test_ac2_view.ViewCountTest.test_concurrent_views_from_threads",
+  "tests.test_ac2_view.ViewCountTest.test_interleaved_view_is_not_lost"
+ ],
+ "TD-09": [
+  "tests.test_ac5_transfer.TransferTest.test_failure_in_the_middle_moves_nothing"
+ ],
+ "TD-10": [
+  "tests.test_ac3_list_search.SearchTest.test_percent_and_underscore_are_literal"
+ ],
+ "TD-11": [
+  "tests.test_ac6_audit.AuditTest.test_key_masked_except_last_four",
+  "tests.test_ac6_audit.AuditTest.test_short_keys_fully_masked"
+ ],
+ "TD-12": [
+  "tests.test_ac1_create.CreateTest.test_tag_count_counts_duplicates_but_stores_unique",
+  "tests.test_ac4_update_delete.UpdateTest.test_update_validates_like_create"
+ ]
+}

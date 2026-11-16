@@ -1,0 +1,18 @@
+{
+ "case": "CLN-05",
+ "rep": 3,
+ "judge_cost_usd": 0.11409219999999999,
+ "judge_raw": "指摘は1件で、実在するコードの欠陥です。`sort not in SORT_COLUMNS` は辞書への所属判定なので、`[]` や `{}` のようにハッシュできない値を渡すと、ValidationError ではなく TypeError（unhashable type）になります。仕様 R3 は「sort は updated か title だけ、範囲外は ValidationError」と定めており、型違いの sort はこれに反します。page と per_page は型違いでも ValidationError になるので、sort だけ扱いが揃っていません。テストにも sort の型違いを通すものはありません。このケースは欠陥なしの題材ですが、作り手の見落としと見るのが妥当です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"list_notes(sort=[]) のようにハッシュできない sort を渡すと `sort not in SORT_COLUMNS` が TypeError を投げ、範囲外は ValidationError とする R3 に反するため、実在する欠陥である。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"埋め込んだ欠陥はないケースで、報告の唯一の指摘は元からあった本物の入力検証の漏れ（sort の型）であり、タグ読み出しの関数化とは無関係。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "list_notes(sort=[]) のようにハッシュできない sort を渡すと `sort not in SORT_COLUMNS` が TypeError を投げ、範囲外は ValidationError とする R3 に反するため、実在する欠陥である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "埋め込んだ欠陥はないケースで、報告の唯一の指摘は元からあった本物の入力検証の漏れ（sort の型）であり、タグ読み出しの関数化とは無関係。"
+ }
+}

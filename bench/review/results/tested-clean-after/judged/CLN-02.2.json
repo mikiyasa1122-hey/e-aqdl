@@ -1,0 +1,18 @@
+{
+ "case": "CLN-02",
+ "rep": 2,
+ "judge_cost_usd": 0.11332619999999999,
+ "judge_raw": "軽微1 は、`list_notes` が COUNT と SELECT を別々に実行している点の指摘です。報告自身が「仕様に一貫性の規定はないため欠陥とはしない」と述べており、仕様 R3 にも一貫性の要件はありません。欠陥の主張ではなく、改善提案として扱います。なお、報告の行番号（131-139）は実際の `list_notes`（141-157）とずれていますが、指摘の内容自体は正しく読めています。\n\nこのケースは欠陥なしなので、`defect_detected` は n/a です。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"list_notes の COUNT と SELECT が別々に実行される点は、報告自身も欠陥としておらず、仕様に一貫性の規定もない改善提案である。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビュー担当は合格と判定し、虚偽の欠陥指摘もしていない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "list_notes の COUNT と SELECT が別々に実行される点は、報告自身も欠陥としておらず、仕様に一貫性の規定もない改善提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は合格と判定し、虚偽の欠陥指摘もしていない。"
+ }
+}

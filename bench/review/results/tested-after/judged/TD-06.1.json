@@ -1,0 +1,28 @@
+{
+ "case": "TD-06",
+ "rep": 1,
+ "judge_cost_usd": 0.11351220000000001,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `get_note` が、見えないメモ(他の組織や他人の非公開)に `Forbidden` を返し、存在しないメモの `NotFound` と区別できる点を指摘しています。箇所(`get_note`)、原因、影響(エラーの種類で存在を推測できる)のすべてが埋め込んだ欠陥と一致するため、matches_defect です。\n- **重大2**: 見えない3パターンで `NotFound` を確かめるテストがない、という指摘です。実装の欠陥ではなくテストの不足であり、実際に `VisibilityTest` にこの検査がないため、test_gap です。\n- **軽微1**: `search_notes` と `_validate` の検査の重複を共通化する提案です。欠陥の主張ではなく保守性の話なので、style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し NotFound と区別できるという、埋め込んだ欠陥の箇所・原因・影響が一致している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"見えない3パターンが NotFound になることを確かめるテストが実際に欠けているという、テスト不足だけの指摘である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥(get_note の Forbidden による存在の漏えい)を原因・影響とも正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し NotFound と区別できるという、埋め込んだ欠陥の箇所・原因・影響が一致している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "見えない3パターンが NotFound になることを確かめるテストが実際に欠けているという、テスト不足だけの指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検査の重複を共通化する保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥(get_note の Forbidden による存在の漏えい)を原因・影響とも正しく特定している。"
+ }
+}

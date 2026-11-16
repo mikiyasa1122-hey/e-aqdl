@@ -1,0 +1,49 @@
+{
+ "case": "CLN-05",
+ "rep": 2,
+ "sec": 30.7,
+ "exit": 0,
+ "cost_usd": 0.1202828,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18047,
+  "cache_read_input_tokens": 124988,
+  "output_tokens": 3558,
+  "output_tokens_details": {
+   "thinking_tokens": 1301
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18047,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1858,
+    "cache_read_input_tokens": 37961,
+    "cache_creation_input_tokens": 7573,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7573
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fba595\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `verify_link` は、`LINK_RE` が先頭のゼロ（例 `007.…`）を許すうえ、署名を `int` に正規化した値で検証する。そのため、正規の `7.…` と同じ署名で、別の文字列表現のリンクも有効になる。仕様は「10進の数字だけ」としか決めておらず、仕様違反ではない。 / 提案: 厳密にするなら、`str(int(x)) == x` の一致、または先頭ゼロの拒否を足す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成の検証（題名・本文・タグの境界、tags が文字列そのものの場合）と、`create:tags` の差し込み口での失敗後に何も残らないことを確かめている。コード上の経路（`create_note` の `transaction`）とも合い、妥当。\n- AC2: 同じ組織の公開メモ、他組織・他人の非公開・存在しないメモの NotFound、閲覧後の非公開化（TOCTOU）、割り込み閲覧、別接続・別スレッドの並行閲覧（40 回）を確かめている。妥当。\n- AC3: 範囲外の page・per_page・sort（型違い・bool を含む）、巨大な page、`%` `_` `\\` のリテラル検索、組織・非公開のスコープ、タグの OR、SQL 文字列の入力、不正なタグを確かめている。`search_notes` の LIKE は `ESCAPE '\\'` で、題名と本文の両方に同じ `pattern` を渡している。値はすべてプレースホルダーで、`sort` は許可リストのみ。妥当。\n- AC4: 認可は `_check_modify` を、トランザクション内で読み直した行に対して行っている。version の競合は `UPDATE ... WHERE version = ?` と `rowcount` で判定する。削除はタグとメモを1トランザクションで消す。テストは `test_ac4_update_delete.py` にある。`delete:note` の途中失敗も差し込み口で再現できる設計で、妥当。\n- AC5: 管理者以外・組織違い・途中失敗でのロールバックを、`transfer:{i}` の差し込み口で確かめている（コードの経路とも一致）。妥当。\n- AC6: 末尾4文字以外の伏せ字と、8文字未満の全伏せをコードで確認した。テストもある。妥当。\n- AC7: 枠の境界（159.999 と 160.0）、拒否が枠を延長しないこと、バリアを使った 20 スレッドで上限 5 回、`hook` による判定途中の割り込みを確かめている。sleep に頼らず決定論的で、妥当。\n- AC8: 期限ちょうどの境界、改ざん、形の崩れ（`fullmatch`）を確かめている。`compare_digest` を使っている。妥当（軽微1を除く）。\n- AC9: ログは ID のみ、例外メッセージに本文・署名・鍵を含まないことをコードで確認した。テストもある。\n- AC10: `transaction` が `_rollback` で元の例外を隠さないことを確認した。`test_ac10_recovery.py` もある。妥当。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのテストは見当たらず、検証の弱体化はなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite と複数スレッドの結合は単体テスト内の実 DB（ファイル）で確かめている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて OK。\n- `history --since 0` を確認した。検証条件の変更は初回の bind のみで、弱体化はなかった。\n- `notes/*.py` を全部読み、仕様・設計と突き合わせた。\n  - 認可（`_visible`・`_can_modify`）。\n  - SQL のプレースホルダー、LIKE の ESCAPE、`ORDER BY` の許可リスト。\n  - トランザクション境界と、判定後の変更への対処（TOCTOU）。\n  - ロック（`RateLimiter`）。\n  - HMAC の検証。\n- 並行処理は、get_note の閲覧数加算（`BEGIN IMMEDIATE`）、update の version 判定、RateLimiter のロックを経路で確認した。\n- 未確認: 多数のスレッドで `BEGIN IMMEDIATE` が5秒のロック待ちを超える場合は、`OperationalError` になりうる。仕様に規定はなく、指摘にはしていない。",
+ "files_changed": [],
+ "valid": true
+}

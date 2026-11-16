@@ -1,0 +1,49 @@
+{
+ "case": "CLN-01",
+ "rep": 2,
+ "sec": 31.6,
+ "exit": 0,
+ "cost_usd": 0.11047050000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14925,
+  "cache_read_input_tokens": 126745,
+  "output_tokens": 3808,
+  "output_tokens_details": {
+   "thinking_tokens": 1400
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14925,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1904,
+    "cache_read_input_tokens": 39325,
+    "cache_creation_input_tokens": 3066,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3066
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6454e556\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:279（list_notes） / 対応区分: 修正必須 / 内容: `sort` に list や dict などハッシュできない値を渡すと、`sort not in SORT_COLUMNS` の dict 検索で ValidationError ではなく TypeError が出る。 / 成立条件: `list_notes(conn, user, sort=[])` または `sort={}`。 / 影響: 仕様は「sort は updated か title だけ。範囲外は ValidationError」と定めている。呼び出し側が ValidationError だけを捕まえていると、不正入力が未処理の例外になる。 / 根拠: 実行で `sort=[]` と `sort={}` が TypeError になるのを確認した。`page=1.0` と `page=None` は ValidationError になる。tests/test_ac3_list_search.py:44 の不正入力は文字列の `sort` しか試しておらず、この経路は検証されていない。 / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS:` に直し、非文字列の sort（list・dict など）が ValidationError になるテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py:341（update_note） / 対応区分: 改善提案 / 内容: `version` が整数でないとき、たとえば文字列 `'1'` を渡す。UPDATE は SQLite の型変換で一致し、コミットされたあとの `return version + 1` で TypeError になる。更新だけが残り、呼び出し側には例外が届く。 / 提案: 冒頭で `version` が bool 以外の int であることを検査し、ValidationError にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: トランザクションの途中で失敗させる hook を使い、何も残らないことと入力の拒否を確かめている。妥当。\n- AC2: 同じ組織・非公開・存在しないメモが NotFound になること、閲覧数の加算、判定後に変更された場合を確かめている。妥当。\n- AC3: 範囲・ページング・LIKE のエスケープ・タグの OR を確かめている。ただし sort に非文字列を渡す異常系がなく、重大1につながっている。不十分。\n- AC4: 競合・認可・NotFound の順序・削除の失敗の伝播を、transaction 内で読み直して判定する実装とともに確認した。テストも hook を使っており、決定論的で妥当。\n- AC5: 組織をまたぐ移管の拒否と、途中で失敗したときの元の状態を確かめている。妥当。\n- AC6: 8文字未満の鍵が全て伏せられること、末尾4文字だけが残ることを確かめている。妥当。\n- AC7: clock の差し替えで枠の境界を確かめ、hook で並行呼び出しも再現している。sleep に頼っていない。妥当。\n- AC8: 期限ちょうど、改ざん、形の崩れたリンクを確かめている。実装は fullmatch と `[0-9]` を使い、`compare_digest` で比較している。妥当。\n- AC9・AC10: ログや例外に機密情報が含まれないこと、例外のあとで接続を再利用できることを確認した。妥当。\n- エンジンが検出したテストの兆候: なし。history を見ると bind だけで、検証条件を弱めた形跡はない。\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、単体テストが SQLite の実体と並行実行まで確かめている。\n### 不足しているリスク\n- K3: 上限を超えて許さないこと、数え漏れがないことは、hook による決定論的な検証で確認した。実際のスレッドを使った競合の再現は未確認だが、BEGIN IMMEDIATE とロックの設計は妥当。\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` で 63 件すべて合格した。\n- service.py・share.py・ratelimit.py・db.py を全て読み、SQL がプレースホルダーと ESCAPE 句を使っていることを確認した。LIKE のエスケープは題名と本文の両方に適用されている。f-string で埋め込む SQL は `where` と `SORT_COLUMNS` の固定値だけで、利用者の入力は入らない。\n- list_notes に `sort=[]`、`sort={}`、`page=1.0`、`page=None` を渡して実行し、`sort` の 2 件が TypeError になることを確認した。\n- update_note に `version='1'` を渡して TypeError になることを確認した（軽微1）。\n- `aqdlc.py history --since 0` で、検証条件の弱体化がないことを確認した。",
+ "files_changed": [],
+ "valid": true
+}
