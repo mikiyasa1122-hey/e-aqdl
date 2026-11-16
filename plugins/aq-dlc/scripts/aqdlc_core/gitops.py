@@ -305,15 +305,22 @@ def push_tree_problems(project, sources):
     if sources is None:
         return ["push する参照を特定できない（--all・--mirror・--tags や、読み切れない書き方）。作業ブランチを1つだけ、"
                 "`git push -u origin <ブランチ>` の形で push する"]
-    code, head = sh_run("git rev-parse --verify -q HEAD^{tree}", project, 30)
-    if code != 0 or not head.strip():
+    def tree(ref):
+        # コミットの tree。Windows の cmd.exe では「^」が特殊文字なので、HEAD^{tree} の形は使わない
+        if not re.fullmatch(r"[A-Za-z0-9._/@{}-]+", ref) or ref.startswith("-"):
+            return None
+        c, t = sh_run(f"git log -1 --format=%T {ref} --", project, 30)
+        t = t.strip().splitlines()[-1].strip() if c == 0 and t.strip() else ""
+        return t if re.fullmatch(r"[0-9a-f]{40,64}", t) else None
+    head = tree("HEAD")
+    if not head:
         return ["HEAD を解決できない（コミットがない）"]
     out = []
     for src in sources:
-        c, t = sh_run(f"git rev-parse --verify -q {shlex.quote(src + '^{tree}')}", project, 30)
-        if c != 0 or not t.strip():
+        t = tree(src)
+        if not t:
             out.append(f"push する参照 {src} を解決できない")
-        elif t.strip() != head.strip():
+        elif t != head:
             out.append(f"push する {src} の内容が、gate の対象（今の HEAD）と違う")
     return out
 
