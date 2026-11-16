@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 3,
+ "sec": 28.8,
+ "exit": 0,
+ "cost_usd": 0.12441660000000002,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 18839,
+  "cache_read_input_tokens": 152406,
+  "output_tokens": 3380,
+  "output_tokens_details": {
+   "thinking_tokens": 612
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18839,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2183,
+    "cache_read_input_tokens": 38691,
+    "cache_creation_input_tokens": 149,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 149
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8, notes/share.py:verify_link / 対応区分: 修正必須 / 内容: 期限の時刻ちょうどでもリンクが有効になる。仕様は「期限の時刻ちょうど以降は無効」。 / 成立条件: `now == expires` のとき。`int(now) > expires` で判定しており、等しい場合は期限切れにならない。 / 影響: 期限の境界で期限切れのリンクを通す（K8）。 / 根拠: 実行確認した。`make_link('s',1,ttl_sec=10,now=100)` を `verify_link('s',l,now=110)` に渡すと、Forbidden ではなく 1 が返った。 / 提案: 比較を `>=` に直す。境界のテスト（expires-1 は有効、expires と expires+1 は Forbidden）を足す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほとんどが正常系の確認だけ。次の検証がない。(a) 他の組織・他人の非公開メモが NotFound になること（K1）。(b) 更新・削除での Forbidden と Conflict（version 違いと競合、AC4）。(c) 閲覧数の同時加算（AC2、K3）。(d) 作成・削除・移管の途中失敗でのロールバック（hooks.before_write を使った再現、AC1、AC5、K4）。(e) 検証の境界（題名100文字、タグ6個、タグの形式、tags に文字列を渡す、page・per_page の範囲外、sort の不正値、AC1・AC3）。(f) LIKE の `%` と `_`、SQL インジェクション文字列、タグの OR 絞り込み（AC3、K2）。(g) api_key の伏せ字の内容（末尾4文字だけ残す、8文字未満はすべて伏せる、AC6）。(h) RateLimiter の境界（ちょうど window 秒）と複数スレッド（AC7）。(i) 共有リンクの期限境界と形式の崩れ（AC8）。(j) ログ・例外に機密情報が出ないこと（AC9）。(k) 例外の後に接続を使い続けられること（AC10）。 / 根拠: これらは仕様が明示した受け入れ条件・リスクで、設計も hooks と RateLimiter.hook を並行・障害の再現用に用意している。しかしテストが使っていないため、重大1のような欠陥も検出できていない。test_export_audit は action と actor しか見ておらず、api_key は検証していない。 / 提案: 上の (a)〜(k) を決定論的なテストとして追加する。並行実行は hooks と RateLimiter.hook を使い、sleep には頼らない。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3, K4, notes/service.py:delete_note / 対応区分: 修正必須 / 内容: delete_note は、削除する行が実際に消えたかを確かめない。権限の確認は transaction の外で行う。 / 成立条件: 権限確認の後、BEGIN IMMEDIATE を取る前に、別の接続が同じメモを削除する場合。 / 影響: 存在しないメモに対して、成功した削除として監査ログ（audit）に1行が残る。 / 根拠: service.py の delete_note は、`DELETE FROM notes` の rowcount を見ず、transaction 内で行を再読込もしない。get_note は transaction 内で再確認している。 / 提案: transaction 内で行を再読込して `_visible`・`_can_modify` を確認する。または rowcount が 0 なら NotFound を投げて rollback する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V は題名が空の場合と正常系だけで不十分。上限・タグ・途中失敗の巻き戻しがない。\n- AC2: 通常の閲覧しか確かめておらず不十分。他の組織・他人の非公開メモ・同時の閲覧数がない。\n- AC3: 一覧の1ページ目と単純な検索だけで不十分。範囲外、%・_、タグ、SQL インジェクションがない。\n- AC4: 所有者による更新・削除の正常系だけで不十分。Forbidden・Conflict・NotFound・管理者がない。\n- AC5: 正常系と非管理者の拒否だけ。別の組織、全部か何もしないか、移管後の所有者を確かめていない。\n- AC6: api_key を検証しておらず不十分。\n- AC7: 単純な上限と枠の再開だけ。ちょうど window 秒と並行がない。\n- AC8: 往復と改ざんだけ。期限の境界、期限切れ、形式の崩れがない。実装にも欠陥がある（重大1）。\n- AC9: 検証なし（実装のログは ID だけで、コード上は問題なし）。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（ライブラリで、HTTP・UI がない）。ただし並行・障害のテストはユニットで必須。\n### 不足しているリスク\n- K1、K2、K3、K4、K5、K7、K8 を確かめるテストがない（重大2）。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功（上の不足を考えると通ること自体は弱い証拠）。\n- `verify_link` の境界を直接実行: now == expires で通る（重大1）。\n- notes/*.py を全読みした。SQL はすべてプレースホルダーで、LIKE は ESCAPE されている。ORDER BY は固定のマップから選んでおり、インジェクションの穴は見つからなかった。\n- 楽観ロックは UPDATE の条件で判定しており、BEGIN IMMEDIATE で直列化されているので妥当。RateLimiter はロック内で判定しており妥当。",
+ "files_changed": [],
+ "valid": true
+}

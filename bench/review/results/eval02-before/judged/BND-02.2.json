@@ -1,0 +1,28 @@
+{
+ "case": "BND-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0619643,
+ "judge_raw": "各指摘の分類です。\n\n- **重大1**: 埋め込まれた欠陥そのものです。`list_notes` の `page < 0` が page=0 を通し、負の OFFSET になる点を、箇所・原因・影響とも正しく指摘しています。なお、レビュー担当は「先頭ページと同じ結果が返る」と書いています。これは SQLite が負の OFFSET を 0 として扱う挙動の説明で、欠陥の判定には影響しません。\n- **重大2**: コードの欠陥の指摘ではなく、テストの不足だけを述べているため、test_gap です。\n- **軽微1**: `search_notes` と `_validate` にあるタグ検査の重複という保守性の提案です。欠陥の主張ではないため、style です。\n\n欠陥は検出されています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の page < 0 が page=0 を許し、負の OFFSET になる点を、同じ箇所・同じ原因・同じ影響で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検査の重複をまとめる保守性の提案で、欠陥ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（page=0 を受け付ける）を箇所・原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の page < 0 が page=0 を許し、負の OFFSET になる点を、同じ箇所・同じ原因・同じ影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検査の重複をまとめる保守性の提案で、欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（page=0 を受け付ける）を箇所・原因・影響とも正確に指摘している。"
+ }
+}

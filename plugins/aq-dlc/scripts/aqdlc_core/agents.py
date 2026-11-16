@@ -123,7 +123,12 @@ def pending_fix(ctx):
                   "内容を確認し、正しければ取り込み、不要なら元に戻す）"} for i, f in enumerate(unowned[:20])]
     if rv and not review_passed(rv) and (not li or li["seq"] < rv["seq"]):
         kind = kind or ("review", rv["n"])
-        items += [f for f in rv.get("findings", []) if f.get("severity") == "重大"] or rv.get("findings", [])
+        fs = rv.get("findings", [])
+        items += [f for f in fs if f.get("severity") == "重大"] or fs
+        # 改善提案は完了を妨げない。参考として渡し、対応の記載は求めない（[重大] があるときだけ。旧形式の記録で
+        # 重大がなければ、従来どおりすべての指摘を修正依頼として渡す）
+        if any(f.get("severity") == "重大" for f in fs):
+            items += [dict(f, info=True) for f in fs if f.get("action_type") == "suggestion"]
     if kind:
         if kind[0] == "unowned":  # 担当外の変更の後の gate の不合格も合わせて伝える
             items += [dict(f, info=True) for f in _gate_items(s, li)[1]]  # 参考（対応の記載は必須にしない）
@@ -386,8 +391,11 @@ def _impl_tail(ctx, s, kind, items):
         if kind[0] == "unowned" and any(not str(f["label"]).startswith("担当外") for f in items):
             what += "と、その後の gate の不合格"
         lines += [f"## 今回の修正依頼（{what}）"]
-        for f in items:
-            lines.append(f"- [{f['label']}] {f['text']}")
+        if kind[0] == "review":
+            lines += _review_fix_lines(items)
+        else:
+            for f in items:
+                lines.append(f"- [{f['label']}] {f['text']}")
         lines.append("")
     from . import holdout as HO
     if HO.enabled(ctx.cfg) and HO.items(s):
@@ -403,6 +411,46 @@ def _impl_tail(ctx, s, kind, items):
     lines += ["", "## Quality Gate のチェック"] + ([f"- {c['name']}（{c.get('kind', 'other')}）: {c['command']}"
                                                   for c in ctx.checks] or ["（未登録）"])
     return lines
+
+
+# レビューの指摘を、対応区分ごとに修正依頼として渡す（REV-02）。区分ごとに、何をすれば完了かを書く
+REVIEW_FIX_GROUPS = [
+    ("fix_required", "実装の修正（修正必須）",
+     "根拠と成立条件を確かめてから、最小の修正をする。仕様そのものが決まっていない・矛盾している場合は直さず、"
+     "実装報告の「## 差し戻し」に書く。",
+     "成立条件の入力・状態で期待どおりに動き、その欠陥で失敗するテストが gate で実行されて合格する"),
+    ("missing_evidence", "検証の追加（証拠不足）",
+     "テスト・検証条件・証拠を足す。根拠のないまま実装を書き換えない。足したテストが失敗して欠陥が見つかった場合に限り"
+     "実装を直し、「## 指摘への対応」にそのことを書く。",
+     "対象の受け入れ条件・リスクを確かめるテストが gate で実行されて合格する（正常系だけでなく、指摘された異常系・境界値も）"),
+    (None, "指摘（対応区分の記録なし）", "指摘の内容と根拠を確かめて対応する。", None),
+]
+
+
+def _review_fix_lines(items):
+    out = []
+    groups = {}
+    for f in items:
+        if f.get("info"):
+            continue
+        key = f.get("action_type") if f.get("action_type") in ("fix_required", "missing_evidence") else None
+        groups.setdefault(key, []).append(f)
+    for key, title, how, done in REVIEW_FIX_GROUPS:
+        fs = groups.get(key)
+        if not fs:
+            continue
+        out += [f"### {title}", how]
+        for f in fs:
+            out.append(f"- [{f['label']}] {f['text']}")
+            if done:
+                out.append(f"  - 完了条件: {done}")
+    opt = [f for f in items if f.get("info") and f.get("action_type") == "suggestion"]
+    if opt:
+        out += ["### 任意の改善（改善提案。完了を妨げない。対応しなくてよい）"]
+        out += [f"- [{f['label']}] {f['text']}" for f in opt]
+    out.append("どの区分でも、テストの削除・skip・アサーションの緩和で合格させることは修正として認めない"
+               "（検証条件の変更履歴はレビューで確かめる）。")
+    return out
 
 
 def _cf_lines(ctx):
@@ -549,8 +597,9 @@ def _brief_reviewer(ctx):
         "軽微な指摘: <数>",
         f"レビュー対象: 仕様 {short(ctx.spec_hash)} / 設計 {short(ctx.design_hash)} / コード {short(ctx.code_fp)}",
         "### 指摘",
-        "- [重大1] 区分: 実装|テスト|仕様|設計 / 対象: R1, V3 / 対応区分: 修正必須|証拠不足 / 内容: … / 成立条件: … / "
+        "- [重大1] 区分: 実装|テスト|仕様|設計 / 対象: R1, AC1 / 対応区分: 修正必須 / 内容: … / 成立条件: … / "
         "影響: … / 根拠: ファイル:行・コードの経路・再現手順 / 提案: 最小の修正",
+        "- [重大2] 区分: テスト / 対象: AC2, K1 / 対応区分: 証拠不足 / 内容: 足りない証拠 / 根拠: 必須である理由 / 提案: 必要な検証",
         "- [軽微1] 区分: … / 対象: … / 対応区分: 改善提案 / 内容: … / 提案: …",
         "### 受け入れ条件ごとの検証の妥当性",
         "- AC1: V1 は〜を確認しており妥当 / 〜のため不十分（受け入れ条件と重要な要求のリスクをすべて書く）",
@@ -564,7 +613,7 @@ def _brief_reviewer(ctx):
         "「受け入れ条件ごとの検証の妥当性」では、テストが通ることではなく、そのテストが受け入れ条件・リスクを"
         "本当に確かめているか（正常系だけでなく異常系・境界値、モックしすぎ、弱いアサーション）を評価する。",
         "「重大」の基準: 受け入れ条件の未達、重要な要求の検証不足・空洞化、設計との重大な不整合、重大なセキュリティの穴、"
-        "テストの改ざん・弱体化。スタイルや好みは「軽微」。重大が1件でもあれば判定は「要修正」。",
+        "テストの改ざん・弱体化。スタイルや好みは「軽微」。重大が1件でもあれば判定は「要修正」、0件なら「合格」。",
     ] + REVIEW_ACTION_RULES
     return lines
 
@@ -634,6 +683,9 @@ REVIEW_ACTION_RULES = [
     '  - **改善提案** → [軽微n]: 動作と必須の検証は満たしているが、保守性・可読性などを良くできるもの。改善提案だけなら判定は「合格」（これだけで「要修正」にしない）。',
     '- 判定: [重大n] が1件でもあれば「要修正」、0件なら「合格」。「重大」は完了を止めるという意味で、欠陥の影響度（高・中・低）とは別。',
     '- 修正必須には、次を書く: 対象（ファイル・関数・行、要求・受け入れ条件の ID）、成立条件（どの入力・状態・並行処理・権限で起きるか）、影響（期待との違いと、利用者・データ・安全性への影響）、確認した保証（上流の検証・DB の制約・呼び出し元・既存のテストが防いでいないか）、根拠（コードの経路・仕様・設計・実行結果）、最小の修正案。',
+    '- 証拠不足には、次を書く: 対象（必須の受け入れ条件・重要なリスクの ID）、内容（何の証拠が足りないか）、根拠（なぜ必須か）、提案（必要な検証）。',
+    '- 取り下げた指摘は「### 指摘」に残さない。ラベルは種類ごとに1からの連番にし、見出しの件数と項目の数を合わせる。',
+    '- エンジンは次の報告を受け付けず、書き直しを求める: 対応区分の欠落・不明な値・複数の値、対応区分とラベルの矛盾、件数の不一致、ラベルの重複・番号の飛び、必要な欄の欠落・空、重大0件の「要修正」、重大のある「合格」。欄があることだけを確かめ、内容の正しさは保証しない。',
     '- 再現の実行は必須ではない（コードと仕様から立証できる欠陥がある）。ただし、確かめていない仮説を断定しない。',
     '#### 誤検知を減らす確認',
     '- 1つのファイルだけで判断せず、呼び出し元から検証・認可・DB の操作・戻り値まで、必要な範囲をたどる。',
@@ -645,7 +697,42 @@ REVIEW_ACTION_RULES = [
     '#### 見逃しを防ぐ確認（減らさない）',
     '- 認証・認可、機密情報、データ整合性、並行処理、SQL の組み立ては、これまでどおり確かめる。',
     '- 確信度で一律に指摘を落とさない。必須の証拠の不足を「改善提案」に下げて合格にしない。',
+    '- 検証・エスケープ・認可の関数や句は、定義されていることではなく、対象の値に実際に適用されているかを、利用者の入力から使われる箇所までたどって確かめる。',
+    '- コードに SQL があるときは、LIKE のワイルドカード（% と _）とエスケープ文字そのものの扱い、ESCAPE 句、プレースホルダー、DB・ORM 固有の意味（既定のエスケープ文字の有無、大文字小文字・照合順序、ORM の部分一致の関数がエスケープするか）を確かめる。条件ごと（題名・本文など）に、どの値が渡っているかを見る。SQL がなければ不要。',
 ]
+
+
+# 対応区分（報告に書く語 → 記録の値）。[重大n] は修正必須・証拠不足、[軽微n] は改善提案だけ
+ACTION_TYPES = {"修正必須": "fix_required", "証拠不足": "missing_evidence", "改善提案": "suggestion"}
+ACTION_SEVERITY = {"修正必須": "重大", "証拠不足": "重大", "改善提案": "軽微"}
+# 対応区分ごとに、指摘に書く欄（値が空でないこと）。欄があることだけを確かめる（内容の正しさは保証しない）
+ACTION_FIELDS = {"修正必須": ("対象", "成立条件", "影響", "根拠", "提案"),
+                 "証拠不足": ("対象", "内容", "根拠", "提案"),
+                 "改善提案": ()}
+_FIELD_HEAD = r"(?<![一-龥ぁ-んァ-ヶーA-Za-z0-9_])"
+
+
+def _field_present(text, name):
+    """「名前: 値」の欄があり、値が空でないか（値は次の「/」の手前まで）。"""
+    # 「根拠（補足）: 値」のように、欄の名前の後に括弧書きがあってもよい
+    m = re.search(_FIELD_HEAD + re.escape(name) + r"\s*(?:[（(][^）)]{0,80}[）)])?\s*\**\s*[:：]\s*\**\s*([^/／]*)",
+                  text)
+    return bool(m and m.group(1).strip(" *`…・-"))
+
+
+def _action_of(text):
+    """指摘の対応区分。戻り値: (報告の語 or None, 問題 or None)。"""
+    vals = re.findall(r"対応区分\s*\**\s*[:：]\s*\**\s*([^/／\s*`]*)", text)
+    if not vals:
+        return None, "対応区分がない"
+    if len(vals) > 1:
+        return None, "対応区分が複数ある"
+    v = vals[0].strip()
+    if re.search(r"[|｜・、,，]", v) or sum(1 for k in ACTION_TYPES if k in v) > 1:
+        return None, f"対応区分「{v}」に複数の値がある（1つだけ書く）"
+    if v not in ACTION_TYPES:
+        return None, f"対応区分「{v or '（空）'}」は不正（修正必須・証拠不足・改善提案のどれか）"
+    return v, None
 
 
 def parse_review(text):
@@ -662,7 +749,7 @@ def parse_review(text):
     m = re.search(r"重大な指摘\s*[:：]\s*\**\s*(\d+)", t)
     head_block = int(m.group(1)) if m else None
     m = re.search(r"軽微な指摘\s*[:：]\s*\**\s*(\d+)", t)
-    head_minor = int(m.group(1)) if m else 0
+    head_minor = int(m.group(1)) if m else None
     # 指摘は「### 指摘」の節（見出しが「指摘」だけのもの）の中だけを読む。前回の指摘への言及や、
     # 「確認したこと」に書いたラベルを、今回の指摘として数えない
     fsec = exact_section(t, "指摘")
@@ -671,8 +758,9 @@ def parse_review(text):
     for ln in (fsec or "").splitlines():
         mm = re.match(r"^\s*(?:[-*・]|\d+[.)．])?\s*\**\s*[\[［【]\s*(重大|軽微)\s*(\d+)\s*[\]］】]\**\s*(.*)", ln)
         if mm:
-            cur = {"severity": mm.group(1), "label": f"{mm.group(1)}{mm.group(2)}", "text": mm.group(3).strip()}
-            c = re.search(r"区分\s*[:：]\s*(実装|テスト|仕様|設計)", ln)
+            cur = {"severity": mm.group(1), "label": f"{mm.group(1)}{mm.group(2)}", "num": int(mm.group(2)),
+                   "text": mm.group(3).strip()}
+            c = re.search(r"(?<!対応)区分\s*[:：]\s*(実装|テスト|仕様|設計)", ln)
             cur["category"] = c.group(1) if c else "実装"
             tg = re.search(r"対象\s*[:：]\s*([^/／]+)", ln)
             cur["targets"] = [x.strip() for x in re.split(r"[,、\s]+", tg.group(1)) if x.strip()] if tg else []
@@ -685,6 +773,7 @@ def parse_review(text):
     # 「### 指摘」の節の中では、書き方の揺れに関係なく「重大n」のラベルを数える（安全側）
     labels_anywhere = set(re.findall(r"[\[［【]\s*重大\s*(\d+)\s*[\]］】]", fsec or ""))
     blocking_entries = max(sum(1 for f in findings if f["severity"] == "重大"), len(labels_anywhere))
+    minor_entries = sum(1 for f in findings if f["severity"] == "軽微")
     errors = []
     if fsec is None:
         errors.append("「### 指摘」の節がない（指摘がなければ「- なし」と書く）")
@@ -696,14 +785,42 @@ def parse_review(text):
         errors.append("判定の行が複数あり、値が一致しない")
     if head_block is None:
         errors.append("「重大な指摘: <数>」の行がない")
+    if head_minor is None:
+        errors.append("「軽微な指摘: <数>」の行がない")
     blocking = max(head_block or 0, blocking_entries)
     if head_block is not None and head_block != blocking_entries:
         errors.append(f"重大な指摘の数（{head_block}）と [重大n] の項目数（{blocking_entries}）が一致しない")
-    minor = max(head_minor, sum(1 for f in findings if f["severity"] == "軽微"))
+    if head_minor is not None and head_minor != minor_entries:
+        errors.append(f"軽微な指摘の数（{head_minor}）と [軽微n] の項目数（{minor_entries}）が一致しない")
+    minor = max(head_minor or 0, minor_entries)
+    # ラベルの重複・番号の飛び（[重大1] が2回、[重大1]・[重大3] など）
+    for sev in ("重大", "軽微"):
+        nums = [f["num"] for f in findings if f["severity"] == sev]
+        dups = sorted({n for n in nums if nums.count(n) > 1})
+        if dups:
+            errors.append("指摘のラベルが重複している: " + "、".join(f"[{sev}{n}]" for n in dups))
+        elif nums and sorted(nums) != list(range(1, len(nums) + 1)):
+            errors.append(f"[{sev}n] の番号が1からの連番になっていない（" + "、".join(str(n) for n in nums) + "）")
+    # 対応区分: 欠落・不明・複数・ラベルとの矛盾・必要な欄の欠落（自動で補正せず、書き直しを求める）
+    for f in findings:
+        act, why = _action_of(f["text"])
+        f["action_type"] = ACTION_TYPES.get(act)
+        if why:
+            errors.append(f"[{f['label']}] の{why}")
+            continue
+        if ACTION_SEVERITY[act] != f["severity"]:
+            want = "修正必須・証拠不足" if f["severity"] == "重大" else "改善提案"
+            errors.append(f"[{f['label']}] の対応区分「{act}」はラベルと矛盾している"
+                          f"（[{f['severity']}n] は{want}。{act}なら [{ACTION_SEVERITY[act]}n] にする）")
+            continue
+        lack = [k for k in ACTION_FIELDS[act] if not _field_present(f["text"], k)]
+        if lack:
+            errors.append(f"[{f['label']}]（{act}）に必要な欄がない・空: " + "、".join(lack))
+    # 判定と重大な指摘の数を完全に対応させる（重大1件以上 ⇔ 要修正、0件 ⇔ 合格）
     if verdict == "合格" and blocking > 0:
         errors.append(f"判定「合格」と重大な指摘 {blocking} 件が矛盾している（重大があれば「要修正」）")
-    if verdict == "要修正" and not findings:
-        errors.append("判定「要修正」なのに指摘が1件もない（何を直すのかを [重大n] / [軽微n] で書く）")
+    if verdict == "要修正" and blocking == 0:
+        errors.append("判定「要修正」なのに重大な指摘が0件（改善提案だけなら「合格」。直すべきものは [重大n] で書く）")
     passed = verdict == "合格" and blocking == 0 and not errors
     return {"verdict": verdict, "raw_verdict": raw_verdict, "blocking": blocking, "minor": minor,
             "findings": findings, "missing_risks": missing, "passed": passed}, errors
@@ -787,8 +904,19 @@ def validate(role, ctx, entry, message):
         if unbound:
             errs.append("実行方法が未設定の検証（bind）: " + "、".join(unbound))
     elif role == "reviewer":
-        _rec, perrs = parse_review(message)
+        rec, perrs = parse_review(message)
         errs += perrs
+        # 証拠不足は、どの受け入れ条件・重要なリスクのための証拠かを対象に書く（その run にある ID）
+        ev_ids = [a["id"] for r in s["requirements"] for a in r.get("acceptance", [])]
+        ev_ids += [k["id"] for r in s["requirements"] for k in r.get("risks", [])]
+        for f in rec["findings"]:
+            if f.get("action_type") != "missing_evidence":
+                continue
+            tg = re.search(r"対象\s*[:：]\s*([^/／]*)", f["text"])
+            tgt = tg.group(1) if tg else ""
+            if ev_ids and not any(re.search(rf"(?<![A-Za-z0-9_.-]){re.escape(i)}(?![0-9])", tgt) for i in ev_ids):
+                errs.append(f"[{f['label']}]（証拠不足）の対象に、受け入れ条件・リスクの ID がない"
+                            "（どの受け入れ条件・リスクのための証拠かを書く）")
         sec = section(message, "受け入れ条件ごとの検証の妥当性")
         if sec is None:
             errs.append("「### 受け入れ条件ごとの検証の妥当性」の節がない")
@@ -949,7 +1077,9 @@ def on_subagent_start(payload, project, state, spath):
     entry = {"role": role, "since": now_iso(), "epoch": time.time(), "start_seq": state.get("seq", 0),
              "code_fp_start": ctx.code_fp, "gate_ok_at_start": gate_ok, "blocks": 0,
              "impl_hash_start": doc_hash(ctx.rd, "impl") if role == "implementer" else None,
-             "fix": {"kind": kind[0], "ref": kind[1], "labels": [f["label"] for f in items if not f.get("info")]} if kind else None,
+             "fix": {"kind": kind[0], "ref": kind[1], "labels": [f["label"] for f in items if not f.get("info")],
+                     "actions": {f["label"]: f["action_type"] for f in items
+                                 if not f.get("info") and f.get("action_type")}} if kind else None,
              "test_signals": signals, "web_app": web, "role_fp": sel["fp"], "role_trigger": rrec["trigger"],
              "cf_fp": CF.record_fp(state) if role == "reviewer" else None}
     state["agents"]["running"][aid] = entry

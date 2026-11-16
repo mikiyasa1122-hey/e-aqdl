@@ -1,0 +1,28 @@
+{
+ "case": "AUTH-04",
+ "rep": 2,
+ "judge_cost_usd": 0.0612143,
+ "judge_raw": "## 判定\n\n**重大1**: `transfer_notes` が `to_user` の組織を検査していない点を指摘しています。埋め込み欠陥の箇所・原因・影響（他組織の利用者にメモが渡り、情報が流出する）と一致するため、matches_defect です。\n\n**重大2**: コードの欠陥ではなく、テストの不足を述べているだけなので、test_gap です。\n\n**軽微1**: `search_notes` でタグ検査が `_validate` と重複しているという保守性の提案で、欠陥の主張ではないため、style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transfer_notes が移し先 to_user の org_id を検査せず、他組織の利用者へメモが渡るという埋め込み欠陥の原因・影響を正確に指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足（AC・リスクの未検証）だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検査の重複を共通化する保守性の提案で、欠陥ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（移し先の組織の未検査）を同じ箇所・原因・影響で捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transfer_notes が移し先 to_user の org_id を検査せず、他組織の利用者へメモが渡るという埋め込み欠陥の原因・影響を正確に指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足（AC・リスクの未検証）だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検査の重複を共通化する保守性の提案で、欠陥ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（移し先の組織の未検査）を同じ箇所・原因・影響で捉えている。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "EXC-01",
+ "rep": 1,
+ "sec": 33.5,
+ "exit": 0,
+ "cost_usd": 0.13579529999999998,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20295,
+  "cache_read_input_tokens": 117093,
+  "output_tokens": 4289,
+  "output_tokens_details": {
+   "thinking_tokens": 585
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20295,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2898,
+    "cache_read_input_tokens": 38144,
+    "cache_creation_input_tokens": 2383,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2383
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2e25bbfa\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1, notes/service.py:105-106 / 対応区分: 修正必須 / 内容: `get_note` は、見られないメモ（他組織・他人の非公開）に対して NotFound ではなく Forbidden を返す。 / 成立条件: 他組織の利用者、または他人の非公開メモを見に来た同組織の利用者が、存在するメモの ID を指定して呼ぶ。 / 影響: 存在しない ID は NotFound、存在する ID は Forbidden となり、メモの存在が分かる。仕様は存在を明かさないことを求めている（K1 の漏えい）。 / 根拠: 実行して確認した。組織2の利用者が組織1のメモ id=1 を `get_note` すると `Forbidden` になった。仕様 R2「どれも NotFound」に反する。`update_note` と `delete_note` は `_visible` で NotFound にしているので、実装が一貫していない。 / 提案: 105-106 行を `raise NotFound(f\"note {note_id}\")` にし、row が None の分岐と統合する。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py:14, 64, 152 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っているため、`$` が末尾の改行の直前にも一致する。`\"ab\\n\"` のように末尾に改行が付いたタグが検査を通る。 / 成立条件: タグ文字列の末尾が `\\n`（作成・更新・検索の絞り込みのどれでも）。 / 影響: R1 が「英小文字・数字・ハイフンの1〜20文字」と定めた規則が破られ、不正なタグが保存される。20文字＋改行も通る。 / 根拠: `create_note(c, u, 't', 'b', ['ab\\n'])` が成功し、note id が返ることを実行して確認した。share.py は同じ問題を `fullmatch` で避けているので、設計の意図とも不一致。 / 提案: `TAG_RE.fullmatch(t)` を使う（64、152 行）。\n- [重大3] 区分: テスト / 対象: AC1–AC10 全般、K1–K8 / 対応区分: 証拠不足 / 内容: テストは12件の正常系中心で、受け入れ条件の核心を確かめていない。次の検証がない。(a) 他組織・他人の非公開メモが NotFound になること（重大1がテストで検出されていない）。(b) タグ・題名・本文・page・per_page・sort の境界値と不正値。(c) LIKE の `%` `_` `\\` を普通の文字として検索すること。タグの OR 絞り込み。(d) 閲覧数の同時加算（別スレッド・別接続）。(e) update の Conflict（古い version、読み出しと書き込みの間の割り込み。hooks.before_write で再現可能）。(f) 非公開メモを管理者が操作したときの NotFound、他人の更新・削除の Forbidden。(g) create・delete・transfer の途中失敗によるロールバックと、その後も接続を使えること（AC10）。(h) 他組織への transfer が Forbidden になること。(i) api_key の伏せ字（8文字未満・境界）。(j) RateLimiter の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。(k) 共有リンクの期限ちょうど・形の崩れ。(l) ログと例外メッセージに本文・署名・鍵が出ないこと。 / 根拠: これらは仕様が明示する受け入れ条件・リスクであり、`test_export_audit` は鍵を一切検証していない。設計も hooks と hook を並行・障害の再現用に用意しているが、テストで使われていない。 / 提案: 上記 (a)〜(l) をテストとして追加する。各条件を外すと失敗する形にする（並行は hooks と hook で決定論的に再現する）。\n- [重大4] 区分: テスト / 対象: AC7, R7, K3 / 対応区分: 証拠不足 / 内容: RateLimiter の「ちょうど window 秒で新しい枠」と「複数スレッドから同時に呼んでも上限を超えない」の証拠がない。既存の `test_limit` は t=61 しか確かめず、t=60 の境界も並行も確かめていない。 / 根拠: AC7 が枠の境界と同時の呼び出しを明示している。コードは `now - start >= window` と Lock で実現しているように見えるが、検証がなく、境界の `>=` を `>` に変えても現状のテストは通る。 / 提案: `clock` を固定して t=window-ε で拒否・t=window で許可を確かめる。複数スレッドで limit 超過の `hit` を呼び、成功数がちょうど limit になることを確かめる。\n\n- [軽微1] 区分: 実装 / 対象: R4, notes/service.py:160-164 / 対応区分: 改善提案 / 内容: 可視性と権限の確認が、トランザクションの外で読んだ row で行われる。 / 提案: 現状は version の条件付き UPDATE と、transfer が version を上げることで、実害のある競合は Conflict になる。このため合否には影響しない。必要なら、トランザクション内で読み直して確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常作成と空題名だけで、不十分。タグの規則（重大2）・境界値・ロールバックの検証がない。実装にも欠陥がある。\n- AC2: 閲覧の可否も閲覧数の同時加算も未検証で、不十分。実装も NotFound の規則に違反している（重大1）。\n- AC3: 最小の一覧と検索だけで、不十分。範囲外・ワイルドカード・タグ OR・他人の非公開の除外が未検証。コードは ESCAPE とプレースホルダーを使っており、SQL のインジェクション対策は問題なし（実行はしていない）。\n- AC4: 所有者の更新と削除だけで、不十分。Conflict・Forbidden・管理者の扱いが未検証。\n- AC5: 正常系と非管理者だけで、不十分。他組織の拒否・失敗時の巻き戻しが未検証。\n- AC6: 鍵の伏せ字を確かめるテストがなく、空洞。コードは仕様どおりに見える。\n- AC7: 重大4のとおり、不十分。\n- AC8: 往復と改ざんだけで、不十分。期限ちょうど・形の崩れが未検証。\n- AC9: テストがなく、未検証。コードのログは ID だけを出しており、問題なさそうだが未確認。\n- AC10: テストがなく、未検証。transaction() は ROLLBACK を行っているが、確認はしていない。\n- エンジンが検出したテストの兆候: なし。skip・弱いアサーションは見つからなかった。\n\n### E2E の要否\n- 不要（HTTP・UI のないライブラリのため）。ただし、別スレッド・別接続でのファイル DB を使った同時実行テストは必要（重大3）。\n\n### 不足しているリスク\n- K1: get_note による存在の漏えい（重大1）と、そのテストの不足。\n- K3: 閲覧数の同時加算・更新の競合・RateLimiter の同時呼び出しの検証がない。\n- K4: ロールバックの検証がない。\n- K5・K7・K8: 検証がない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件がすべて通った。\n- 小さなスクリプトで、`create_note` が `['ab\\n']` のタグを受理することと、他組織の利用者の `get_note` が Forbidden になることを再現した。\n- spec.md・design.md・notes/*.py・tests/test_notes.py を読んだ。`gate` は実行していない。`$AQ trace` と `history` は呼んでいない。git 管理は未コミットの新規ファイルのみで、検証条件の弱体化は確認していない。",
+ "files_changed": [],
+ "valid": true
+}

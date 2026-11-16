@@ -339,8 +339,12 @@ def _problems(ctx, stage):
         elif "設計" in cats and d.get("registered_seq", 0) < rv["seq"]:
             out.append(P("review_fix", f"レビュー#{rv['n']} の重大な指摘（設計）が未対応", "design"))
         elif li["seq"] < rv["seq"]:
+            acts = [f.get("action_type") for f in rv.get("findings", []) if f.get("severity") == "重大"]
+            split = ""
+            if any(acts):  # 対応区分の記録がある（新しい形式の）レビューだけ、内訳を出す
+                split = (f"（実装の修正 {acts.count('fix_required')} 件・検証の追加 {acts.count('missing_evidence')} 件）")
             out.append(P("review_fix", f"レビュー#{rv['n']} が「{rv.get('verdict')}」（重大 {rv['blocking']} 件・"
-                         f"軽微 {rv.get('minor', 0)} 件）。指摘が未対応",
+                         f"軽微 {rv.get('minor', 0)} 件）{split}。指摘が未対応",
                          fix_route("implementer")))
         if out:
             return out

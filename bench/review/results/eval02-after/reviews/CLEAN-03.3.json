@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-03",
+ "rep": 3,
+ "sec": 41.5,
+ "exit": 0,
+ "cost_usd": 0.14998879999999998,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20970,
+  "cache_read_input_tokens": 117128,
+  "output_tokens": 5438,
+  "output_tokens_details": {
+   "thinking_tokens": 1094
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20970,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3661,
+    "cache_read_input_tokens": 38157,
+    "cache_creation_input_tokens": 3045,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3045
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8a9e0a9d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py:14,64,151 / 対応区分: 修正必須 / 内容: タグの検査に `re.compile(r\"^[a-z0-9-]{1,20}$\")` と `.match` を使っている。`$` は末尾の改行の手前にも一致するため、`\"abc\\n\"` が有効なタグとして通る。仕様は「英小文字・数字・ハイフンの1〜20文字」のみ。share.py の LINK_RE は fullmatch で同じ問題を避けているが、TAG_RE にはその対策がない / 成立条件: tags に末尾が改行のタグ（`\"abc\\n\"`）を渡す。create・update・search のすべてで起きる / 影響: 不正なタグが保存され、仕様の入力検証を破る。`\"abc\"` と `\"abc\\n\"` が別のタグとして共存する / 根拠: `python3 -c \"re.match(r'^[a-z0-9-]{1,20}$','abc\\n')\"` が True を返すことを実行して確認した。_validate（service.py:64）と search_notes（service.py:151）が同じ TAG_RE.match を使う。上流の検証や DB の制約はない（note_tags.tag は TEXT NOT NULL のみ） / 提案: `TAG_RE.fullmatch` に変えるか、`\\Z` を使う\n- [重大2] 区分: 実装 / 対象: R4, K1, K3, notes/service.py:158-193 / 対応区分: 修正必須 / 内容: update_note と delete_note は、認可（_visible・_can_modify）をトランザクションの外で読んだ行で判定している。トランザクション内では version（update のみ）しか再検査しない。delete_note は認可を再検査しない。ほかに transfer・delete・private の変更を再検査する箇所もない / 成立条件: 作成者 A が delete_note を呼び、認可判定を通した直後に、管理者の transfer_notes が走ってメモの所有者が B に移る。その後 A の DELETE が実行される / 影響: すでに所有者でなくなった A が、B のメモを削除できる。仕様 R4 の「作成者と同じ組織の管理者だけ」に反する。K1・K3 に該当する / 根拠: delete_note は `_row` と `_can_modify` を `with transaction` の前で行い（184-187行）、トランザクション内は `DELETE ... WHERE id = ?` だけで owner を条件にしていない（189-191行）。update_note は transfer が version を +1 するので、古い version を渡した呼び出しは Conflict になる。ただし呼び出し側が transfer 後の最新 version を再取得して渡した場合は、認可の根拠が古いまま通る可能性がある（こちらは未確認） / 提案: BEGIN IMMEDIATE の後に行を読み直して _visible と _can_modify を再検査する。または DELETE の WHERE に owner_id や org_id の条件を足し、rowcount を確認する\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC10, K1, K2, K3, K4, K6, K7, K8） / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件の正常系の確認が中心で、受け入れ条件の中核を確かめていない。次の検証がまったくない。(a) 他の組織・他人の非公開メモが NotFound になること（K1）。(b) 閲覧数の同時加算。(c) LIKE の `%`・`_`・`\\` が普通の文字として扱われること（K2）。(d) 1・2文字目などの境界値（題名100文字、タグ5個・20文字、per_page 0・51、page 0、sort 不正）。(e) 更新の Conflict と、読み出しから書き込みの間の競合。(f) hooks.before_write による途中失敗のロールバック（create・delete・transfer、K4・AC1・AC5・AC10）。(g) 管理者の Forbidden（組織違い・非公開メモの NotFound）。(h) api_key の伏せ字（末尾4文字・8文字未満、AC6）。(i) RateLimiter の枠の境界ちょうど（window 秒）と複数スレッドの同時呼び出し（AC7）。(j) 共有リンクの期限ちょうど・形の崩れ・署名の改ざん（AC8）。(k) R9 の機密がログに出ないこと。設計が用意した hooks と RateLimiter.hook が一度も使われていない / 根拠: これらは仕様の受け入れ条件そのもので、重大な欠陥（K1・K2・K3・K4・K7・K8）を防ぐ唯一の手段。例外は test_transfer_requires_admin、test_tampered、test_limit の一部だけで、いずれも1経路しか見ていない。AC4 の「他の組織・他人の非公開メモ・管理者」の拒否はまったく検証されていない / 提案: 上の (a)〜(k) を、決定論的なテスト（hooks と hook で競合を再現。sleep は使わない）として追加する。認可・LIKE のエスケープ・version 条件・WHERE の条件を外すと落ちることを確かめる\n- [重大4] 区分: 実装 / 対象: R8, K8, notes/share.py:11,29-33 / 対応区分: 修正必須 / 内容: リンクを int 変換してから署名を検証するため、先頭に 0 を付けた note_id・期限（例: `007.0001…`）も、元のリンクと同じ署名で有効になる。リンクの形は「10進の数字だけ」と定めているだけで、同じ意味のリンクの表記が複数通る / 成立条件: 正規の `7.1060.<sig>` に対して `07.1060.<sig>`、`7.01060.<sig>` を渡す / 影響: 署名は検証を通るが、文字列として正規でないリンクが受理される。リンクの完全一致で失効やブロックリストを作ると回避される。改ざん・形の崩れは Forbidden とする仕様の趣旨に反する / 根拠: LINK_RE が `[0-9]{1,18}` で、int() の結果に対して署名を計算している。HMAC 自体は note_id と期限の値に束縛されているので、署名を偽造できるわけではない。影響は表記の揺れだけで、緩いセキュリティ上の欠陥にとどまる / 提案: 再構成した `f\"{note_id}.{expires}\"` と元の文字列が一致するか確認し、一致しなければ Forbidden にする\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで不十分。他の境界値、タグの規則、トランザクションの途中失敗の巻き戻しを見ていない。タグ検査にも欠陥がある（重大1）\n- AC2: 同じ組織の閲覧と閲覧数の増加しか見ていない。他の組織・他人の非公開・同時閲覧がなく不十分\n- AC3: 一覧は1ページ目だけ、検索は日本語の部分一致1件だけ。`%`・`_`・ESCAPE・タグ OR・範囲外の入力・他人の非公開の除外を見ていない。不十分\n- AC4: 所有者の更新・削除のみ。Conflict、Forbidden、管理者、他の組織、非公開、更新時の入力検証、削除の失敗時の巻き戻しがなく不十分\n- AC5: transfer の件数と管理者以外の拒否だけ。別の組織・途中失敗の巻き戻しがなく不十分\n- AC6: 監査ログの伏せ字を確かめていない（action と actor 名のみ）。不十分\n- AC7: 上限と枠の再開しか見ていない。ちょうど window 秒の境界と複数スレッドがなく不十分\n- AC8: 正常系と1種類の改ざんのみ。期限ちょうど・形の崩れ・非文字列がなく不十分\n- AC9: ログ・例外への機密の出力を確かめるテストがなく、未検証\n- AC10: 例外の後の接続の再利用を確かめるテストがなく、未検証\n- エンジンが検出したテストの兆候はなし。skip・.only・アサーションなしのテストは見つからなかった。12件は通るが、リスクを確かめる内容ではない\n### E2E の要否\n- 不要（HTTP・UI のないライブラリ。ただし SQLite に対する並行・途中失敗の統合テストは必須で、重大3のとおり）\n### 不足しているリスク\n- K1: 認可の経路（他の組織・他人の非公開）を確かめる検証がない\n- K2: LIKE のエスケープ（`%`・`_`・`\\`）の検証がない。コードは ESCAPE とプレースホルダーを正しく使っているのを読んで確認したが、テストで保証されていない\n- K3: 閲覧数・更新・RateLimiter の同時実行を再現するテストがない\n- K4: 途中失敗のロールバックのテストがない\n- K5/K7: 伏せ字（末尾4文字・8文字未満）の検証がない\n- K6: 組織をまたぐ移管の拒否の検証がない\n- K8: 期限の境界ちょうどと形の崩れの検証がない\n### 確認したこと\n- `python3 -m unittest discover -s . -t .` → 12件、OK。出力は変更していない\n- `python3 -c \"re.match(r'^[a-z0-9-]{1,20}$','abc\\n')\"` → True（重大1を再現）\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。LIKE の ESCAPE・プレースホルダー・ORDER BY の許可リスト（SORT_COLUMNS）は問題なし。RateLimiter の枠の境界（`>=`）と HMAC の定数時間比較は妥当\n- `trace` と `history` は実行していない。ファイルの変更もしていない",
+ "files_changed": [],
+ "valid": true
+}

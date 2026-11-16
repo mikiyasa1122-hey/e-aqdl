@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-07",
+ "rep": 3,
+ "sec": 34.6,
+ "exit": 0,
+ "cost_usd": 0.1094623,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13874,
+  "cache_read_input_tokens": 122003,
+  "output_tokens": 4175,
+  "output_tokens_details": {
+   "thinking_tokens": 1111
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13874,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2613,
+    "cache_read_input_tokens": 36842,
+    "cache_creation_input_tokens": 3900,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3900
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d524f16c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE`（`^[a-z0-9-]{1,20}$`）を `re.match` で使っているため、末尾に改行のあるタグ（例 `\"abc\\n\"`）を通してしまう。Python の `$` は末尾の改行の直前にも一致する。 / 成立条件: `create_note`、`update_note`、`search_notes` の `tags` に `\"abc\\n\"` や `\"a\"*20+\"\\n\"` を渡す。 / 影響: 英小文字・数字・ハイフン以外の文字を含むタグが保存される。20文字制限も21文字目の改行で破れる。仕様の入力規則違反。 / 根拠: notes/service.py:14 の `TAG_RE`、:56-58、:132-133 の `TAG_RE.match`。実行して `bool(TAG_RE.match('abc\\n'))` が True になることを確認した。share.py は同じ理由で `fullmatch` を使っており、service 側だけ対策が漏れている。 / 提案: `TAG_RE.fullmatch(t)` に変える（`\\Z` でも可）。改行つきタグが ValidationError になるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC7, AC9, AC10, K1, K3, K4, K6 / 対応区分: 証拠不足 / 内容: tests/test_notes.py（12件）は正常系の確認が中心で、仕様が求める異常系・境界値・並行・失敗時の巻き戻しを確かめるテストがない。足りない検証は次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること（get、list、search、update、delete）。(b) 管理者が非公開メモを扱えないこと、他人による更新・削除が Forbidden になること。(c) 古い version での Conflict と、`hooks.before_write` を使った競合の再現。(d) `hooks.before_write` で途中失敗させたときの create、delete、transfer の全巻き戻しと、その後の接続の再利用（K4、AC10）。(e) 閲覧数の同時加算（K3）。(f) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッド（`hook` 利用）。(g) 共有リンクの期限ちょうど、形の崩れ、署名の改ざん。(h) ログ・例外・監査出力に本文・署名・api_key が出ないこと。(i) 異組織への移管の Forbidden。 / 根拠: これらは受け入れ条件の中心で、漏えい（K1）、更新の消失（K3）、不整合（K4）に対応する必須の検証である。差し込み口 `hooks` と `RateLimiter.hook` は設計で用意されているのに、テストが一度も使っていない。現状のテストは、認可や排他の条件を外しても通る。 / 提案: 上の (a)〜(i) を unittest で追加する。並行系は sleep ではなく hook で順序を固定する。\n- [重大3] 区分: テスト / 対象: AC3, AC6, K2, K7 / 対応区分: 証拠不足 / 内容: SQL の安全性とマスキングの検証がない。必要なのは次の4点。(a) `%`、`_`、`\\` を含む検索語が文字どおり部分一致すること。(b) 題名・本文の両方で、`'` 等を含む入力が SQL として働かないこと。(c) タグの OR 絞り込み、page・per_page・sort の範囲外の拒否（0、51、bool、不正な sort）。(d) api_key のマスクで、8文字未満と8文字以上、ちょうど8文字の境界。 / 根拠: 実装には ESCAPE 句とプレースホルダーがあるが、検証が空洞なので回帰を検出できない。K2 と K7 は重要リスク。 / 提案: 上記の境界値テストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` で、可視性・権限の確認がトランザクションの外にある。確認後に移管や削除が入ると、確認時と異なる状態に書き込む余地がある。更新は version 条件で守られる。削除は対象が既に無くても監査ログを書く。 / 提案: トランザクション内で再確認するか、DELETE の rowcount が0なら NotFound にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名の拒否だけで不十分。タグ規則・上限・本文長・巻き戻しがなく、実装にもタグの欠陥（重大1）がある。\n- AC2: 閲覧の正常系しかなく不十分。組織外・非公開の NotFound、同時加算がない。\n- AC3: 一覧と検索の正常系だけで不十分。`%`・`_`・範囲外・タグ OR・他人の非公開の除外がない。\n- AC4: 所有者による更新と削除だけで不十分。Conflict、Forbidden、管理者の扱い、削除の失敗がない。\n- AC5: 移管の正常系と非管理者の拒否だけで不十分。異組織、途中失敗の全巻き戻しがない。\n- AC6: 監査ログの action と actor の確認だけで、マスキングは未検証。\n- AC7: 枠の再開（61秒後）は見ているが、ちょうど window 秒の境界と複数スレッドは未検証で不十分。\n- AC8: 往復と改ざん1例だけで不十分。期限ちょうど、形の崩れ、署名の改ざん、期限の改ざんがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip や弱いアサーションの問題ではなく、検証の量と範囲が足りない。\n\n### E2E の要否\n- 不要（HTTP 層を持たないライブラリで、SQLite のインメモリ DB を使った単体・結合テストで足りる）。ただし、別接続・別スレッドでの並行テストは必要。\n\n### 不足しているリスク\n- K1: 認可の網羅テストがない。\n- K3: 閲覧数の同時加算と更新の競合が未検証。\n- K4: 途中失敗の巻き戻しが未検証。\n- K6: 異組織への移管が未検証。\n- K8: 期限・改ざん・形崩れの検証が薄い。\n- R9: 機密情報の非出力が未検証。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -B -m unittest discover -s tests`: 12件すべて成功。ただし内容は正常系が中心。\n- `TAG_RE.match('abc\\n')` が True になることを実行して確認した（重大1）。\n- `aqdlc history --since 0` を確認した。検証条件の弱体化の痕跡は見つからなかった（bind のみ）。\n- `gate` は実行していない。テストの出力もコードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

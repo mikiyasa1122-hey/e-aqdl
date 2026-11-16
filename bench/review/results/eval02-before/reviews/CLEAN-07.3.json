@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-07",
+ "rep": 3,
+ "sec": 29.1,
+ "exit": 0,
+ "cost_usd": 0.10247319999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13541,
+  "cache_read_input_tokens": 122032,
+  "output_tokens": 3609,
+  "output_tokens_details": {
+   "thinking_tokens": 873
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13541,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1990,
+    "cache_read_input_tokens": 38069,
+    "cache_creation_input_tokens": 1871,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1871
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d524f16c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py:158,208,294 / 対応区分: 修正必須 / 内容: TAG_RE が `^[a-z0-9-]{1,20}$` を `match` で使っており、`$` が末尾の改行の直前にも一致する。そのため `\"ab\\n\"` のような末尾が改行のタグが検査を通り、保存される。 / 成立条件: create_note・update_note・search_notes に tags=[\"ab\\n\"] を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが DB に入る。20文字のタグに改行を足した21文字も通る。 / 根拠: `python3 -I` で create_note(tags=['ab\\n']) が成功し、get_note の tags が ['ab\\n'] になった。上流・DB 側にタグの制約はない。share.py は同じ問題を避けるため fullmatch を使っており、こちらだけ漏れている。 / 提案: TAG_RE.fullmatch(t) に変える（3か所）。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件だけで、正常系を一部確かめるのみ。次の検証が1つもない。(a) 他の組織や他人の非公開メモが NotFound になること（K1）。(b) 管理者が非公開メモを扱えず、他人は Forbidden になること。(c) version 不一致と、読み出しから書き込みの間に更新が入った場合の Conflict（hooks.before_write を使う）。(d) 閲覧数の同時加算。(e) RateLimiter の枠の境界と、複数スレッドでの上限（RateLimiter.hook を使う）。(f) 作成・削除・移管の途中失敗でのロールバックと、失敗後に接続が使えること（K4, AC10）。(g) `%`・`_`・SQL 文字列を入れた検索語（K2）。(h) ページング・sort・タグの境界値。(i) 共有リンクの期限ちょうど・形の崩れ・改ざん（K8）。(j) ログ・例外に本文・署名・api_key が出ないこと（AC9）。 / 根拠: 設計書は並行実行と途中の失敗を hooks で再現できるように作ってあるが、テストはそれを使っていない。重要な要求の検証が空洞化している。重大1のタグの欠陥も、これらのテストがないために見逃された。 / 提案: 上の (a)〜(j) を、決定論的なテスト（sleep を使わない）で追加する。タグの末尾改行の拒否も含める。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否だけで不十分。タグの規則・個数・文字列そのもの・ロールバックの検証がなく、実際にタグの欠陥がある。\n- AC2: 作成後の閲覧だけで不十分。他の組織・非公開・存在しないメモの NotFound、閲覧数の同時加算の検証がない。\n- AC3: 一覧の1ページ目と検索の正常系だけで不十分。範囲外の入力、% と _、インジェクション、タグの OR、他人の非公開メモの除外の検証がない。\n- AC4: 作成者による更新・削除だけで不十分。Conflict、管理者・他人の場合、削除の途中失敗の検証がない。\n- AC5: 移管の正常系と管理者でない場合のみで不十分。他の組織への拒否と途中失敗時の巻き戻しの検証がない。\n- AC6: export_audit のテストはある（test_export_audit）。8文字未満・ちょうど8文字の境界を確かめているかは未確認で、軽く見た限りでは弱い。\n- AC7: test_limit は上限だけで不十分。枠の境界とスレッドの同時呼び出しの検証がない。\n- AC8: test_roundtrip と test_tampered だけで不十分。期限の境界、形の崩れ、末尾改行の検証がない。\n- AC9: 検証がない。\n- AC10: 検証がない。\n- エンジンが検出したテストの兆候: なし。history では、検証条件が弱められた形跡はなかった（bind の追加のみ）。\n### E2E の要否\n- 不要。ライブラリで UI・HTTP がなく、単体テストと並行テストで足りる。\n### 不足しているリスク\n- K1, K2, K3, K4, K6, K8, K5: 上の重大2のとおり、検証が不足している。\n- R4 の認可確認（_visible・_can_modify）は、更新の transaction の外で行っている。UPDATE の条件が version だけなので、移管などで所有者が変わった場合は、version が上がるため Conflict で防げる。実害は確認できず、未検証。\n### 確認したこと\n- spec.md・design.md・notes/*.py を全文読んだ。\n- `python3 -m unittest discover -s .`: 12件が成功した。\n- `python3 -I` でタグ `'ab\\n'` が作成でき、保存されることを再現した。\n- `$AQ history --since 0`: 検証条件の弱体化はなかった。\n- tests/test_notes.py のテスト名・使っている例外を grep で確認し、Conflict・Thread・hook の利用がないことを確かめた。",
+ "files_changed": [],
+ "valid": true
+}

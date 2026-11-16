@@ -1,0 +1,49 @@
+{
+ "case": "SQL-03",
+ "rep": 2,
+ "sec": 29.9,
+ "exit": 0,
+ "cost_usd": 0.10727289999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14106,
+  "cache_read_input_tokens": 122329,
+  "output_tokens": 3860,
+  "output_tokens_details": {
+   "thinking_tokens": 294
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14106,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3079,
+    "cache_read_input_tokens": 38571,
+    "cache_creation_input_tokens": 1942,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1942
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 86e2428c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `list_notes` が sort を検査していない。`notes/service.py` の `SORT_COLUMNS.get(sort, sort)` は、辞書にない値をそのまま ORDER BY の SQL 文字列に埋め込む。仕様は「sort は updated か title だけ。範囲外は ValidationError」「利用者の入力を SQL の文字列に埋め込まない」と定めており、両方に反する。 / 成立条件: `sort` に \"updated\" と \"title\" 以外の文字列を渡す。 / 影響: 任意の式を ORDER BY に注入できる。サブクエリで他の組織の列や非公開メモの内容を並び順から推測するなど、K1 と K2 の漏えいにつながる。 / 確認した保証: 上流に sort の検証はない。設計書の「SQL はプレースホルダー」にも反する。 / 根拠: 実行して確認した。`list_notes(c,u,sort=\"id\")` と `sort=\"(SELECT 1/0)\"` が ValidationError にならず、正常に結果を返した。 / 提案: `if sort not in SORT_COLUMNS: raise ValidationError(...)` を追加し、`.get` のフォールバックをやめる。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが正常系を一通り確かめる程度で、仕様が必須とする異常系・境界値・並行処理・失敗時の巻き戻しの検証がほぼない。足りないのは次の点。(a) R1 の境界値（題名100文字と101文字、空白だけの題名、タグ6個、不正なタグ、文字列のタグ）。(b) AC1 とAC10 の「失敗時に何も残らず、接続を使い続けられる」。`hooks.before_write(\"create:tags\")` が呼ばれても、これを使うテストがない。 (c) AC2 の他の組織・他人の非公開メモが NotFound になること、閲覧数の並行カウント。 (d) AC3 の `%` と `_` の扱い、per_page と page の範囲外、sort の不正値、タグ OR、他人の非公開メモが一覧・検索に出ないこと。 (e) AC4 の Conflict（古い version、読み出しと書き込みの間の更新）、Forbidden、管理者と非公開メモ、削除の失敗。 (f) AC5 の組織をまたぐ移管と途中失敗。 (g) AC6 の api_key を伏せる処理（8文字未満と8文字以上）。 (h) AC7 の枠の境界（ちょうど window 秒）と複数スレッド。 (i) AC8 の期限ちょうど、形の崩れたリンク、署名の改ざん。 (j) AC9 のログに本文・署名・api_key が出ないこと。 / 根拠: 12件のテストはすべて正常系か単純な拒否で、K1〜K8 のどれも確かめていない。重大1の sort の注入もテストで検出できていない。仕様は AC ごとに境界・同時実行・失敗時の状態を明示しており、これらは必須の検証である。 / 提案: 上記の各項目について、AC と K に対応するテストを追加する。並行実行と途中失敗は、設計書のとおり `hooks` と `RateLimiter.hook` を使って決定論的に再現する。sleep には頼らない。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` で、可視性と権限の確認がトランザクションの外にある。`update_note` は `_visible` と `_can_modify` を読み出した行で判定し、`BEGIN IMMEDIATE` の中では version 以外を再確認しない。`delete_note` は version すら確認しない。 / 成立条件: 確認の後、書き込みの前に、メモが他の利用者へ移管される、または非公開に変更される。そのとき呼び出し側は確認時点の状態を前提に書き込む。 / 影響: `update_note` は version が一致していれば、確認時点から状態が変わっていても更新してしまう。例えば移管の後は、元の作成者ではなくなっているのに更新できる。`delete_note` は version 不一致を検出できない。`transfer_notes` は version を +1 するので update 側は Conflict になる。ただし呼び出し側が渡した version が移管後の値である場合は通る。確実に起きるとは言い切れず、一部は未確認。 / 確認した保証: `get_note` は同様の再確認を transaction 内で行っており、設計の意図とも矛盾する。 / 根拠: `notes/service.py` の `update_note`、`delete_note`。 / 提案: `BEGIN IMMEDIATE` の中で `_row` を取り直し、`_visible` と `_can_modify` を再判定してから書き込む。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `search_notes` が tags の検査を `_validate` と別に重複して書いている。保守性の問題で、動作は仕様どおり。 / 提案: タグ検査を共通の関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけを確かめている。境界値、タグの規則、失敗時に何も残らないことを確かめておらず不十分。\n- AC2: 自分のメモの閲覧だけを確かめている。他の組織・非公開メモの NotFound と閲覧数の並行カウントがなく不十分。\n- AC3: 一覧の1ページ目と単純な検索だけで、sort の不正値・% と _・範囲外・タグ OR・非公開の除外がなく不十分。実際に注入の欠陥を見逃している。\n- AC4: 作成者による更新と削除の正常系だけ。Conflict、Forbidden、削除の失敗がなく不十分。\n- AC5: 管理者による移管の正常系と、管理者以外の拒否だけ。組織をまたぐ移管と途中失敗がなく不十分。\n- AC6: 監査ログの action と actor だけを確かめ、api_key を伏せる処理を確かめていないため不十分。\n- AC7: 回数制限と枠の更新は確かめている。ちょうど window 秒の境界とスレッドの並行がなく不十分。\n- AC8: 往復と、note_id を書き換えた改ざんの1件だけ。期限の境界と形の崩れがなく不十分。\n- AC9: テストがなく不十分。\n- AC10: テストがなく不十分。\n- エンジンが検出したテストの兆候はなし。skip・only・アサーションなしのファイルはなかった。\n### E2E の要否\n- 不要（HTTP のないライブラリで、SQLite を使った単体・結合テストで足りる）。ただし上記の異常系・並行のテストは必須。\n### 不足しているリスク\n- K1: sort の注入と、更新・削除の確認から書き込みまでの間の状態変化（重大1、重大3）。\n- K2: sort 経由の SQL 注入。テストなし。\n- K3・K4・K5・K6・K7・K8: テストがなく、未検証（重大2）。\n### 確認したこと\n- `python3 -m unittest discover -s tests` は 12 件 OK。ただし内容は上記のとおり薄い。\n- `list_notes` に `sort=\"id\"` と `sort=\"(SELECT 1/0)\"` を渡すと、どちらも例外にならず結果を返すことを実行して確認した。\n- `aqdlc.py history --since 0` を確認した。検証条件が弱められた形跡はなく、unit の check が1件追加されただけだった。\n- ソース（db・service・ratelimit・share・errors）を通読した。ratelimit と share、および `transaction()` は仕様に合っていると判断した。",
+ "files_changed": [],
+ "valid": true
+}

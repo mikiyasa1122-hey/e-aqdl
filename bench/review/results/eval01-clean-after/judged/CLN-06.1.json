@@ -1,0 +1,18 @@
+{
+ "case": "CLN-06",
+ "rep": 1,
+ "judge_cost_usd": 0.11315220000000001,
+ "judge_raw": "## 判定\n\n指摘は [軽微1] の1件だけです。\n\n**[軽微1]** は、`export_audit` が audit と users を INNER JOIN しているため、actor の利用者行がない監査行が出力から落ちる、という指摘です。コードの JOIN はそのとおりです。ただし `db` モジュールには利用者の削除機能がありません。`audit.actor_id` は常に既存の users 行を指します。仕様書にも、利用者を削除する要件や、actor 不明の行を出す要件はありません。報告自身も「現在は実害なし」「将来の提案」と書いています。成立する入力や状態がないので、欠陥の主張ではなく、保守性の提案（style）です。\n\nこのケースは欠陥なしで、リファクタ（`_Window` クラス化）で挙動も変わっていません。報告の「合格」は妥当です。`matches_defect` は使えないので、`defect_detected` は n/a です。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"INNER JOIN で actor 行がない監査行が落ちるのは、利用者削除機能がない現状では起きず、将来の改善提案にとどまる。\"}],\n  \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、報告は合格とし、実害のない保守性の提案を1件出しただけで、誤検出はない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "INNER JOIN で actor 行がない監査行が落ちるのは、利用者削除機能がない現状では起きず、将来の改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、報告は合格とし、実害のない保守性の提案を1件出しただけで、誤検出はない。"
+ }
+}

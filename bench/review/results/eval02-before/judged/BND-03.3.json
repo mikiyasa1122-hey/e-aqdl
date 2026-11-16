@@ -1,0 +1,38 @@
+{
+ "case": "BND-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0657583,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込み欠陥そのものです。`ratelimit.py` の `hit` で `now - start > self.window` と比較しているため、ちょうど window 秒後が枠の中と数えられます。原因・影響とも一致し、実行での再現も示されています。\n- **重大2**: 実在する別の欠陥です。`TAG_RE` を `re.match` で使うと、`$` が末尾の改行の前にも一致します。そのため \"abc\\n\" のようなタグが通り、R1 の規則に反します。\n- **重大3**: テストの不足だけを述べた指摘で、コードの欠陥の主張ではありません。\n- **重大4**: 誤検知と判断します。報告者自身が再現を確認しておらず、成立する経路は狭いと認めています。`update_note` の UPDATE は `WHERE id = ? AND version = ?` で守られており、`transfer_notes` は version を進めます。旧 version の呼び出しは Conflict になるため、仕様の規則は守られています。\n- **軽微1**: 好みの範囲の提案で、欠陥の主張としては弱いため style とします。仕様のリンク形式は「10進の数字だけ」で、先頭ゼロの禁止は定めていません。署名は int 化した値で計算されるため、実害もありません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"ratelimit.py の hit が > で比較しており、ちょうど window 秒後が枠の中と数えられるという埋め込み欠陥そのものを、実行で再現して指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の re.match と $ の組み合わせで末尾改行付きタグが通るのは実在する欠陥で、R1 のタグ規則に反する。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを述べた指摘で、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"false_positive\", \"reason\": \"UPDATE が WHERE version = ? で守られ、transfer が version を進めるため、古い権限で通る経路は成立せず、報告者も再現を確認していない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロを許す点は仕様が禁じておらず、署名は int 化した値で計算されるため、欠陥ではなく改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（ratelimit.py の枠境界の > 比較）を原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "ratelimit.py の hit が > で比較しており、ちょうど window 秒後が枠の中と数えられるという埋め込み欠陥そのものを、実行で再現して指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の re.match と $ の組み合わせで末尾改行付きタグが通るのは実在する欠陥で、R1 のタグ規則に反する。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを述べた指摘で、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "false_positive",
+    "reason": "UPDATE が WHERE version = ? で守られ、transfer が version を進めるため、古い権限で通る経路は成立せず、報告者も再現を確認していない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロを許す点は仕様が禁じておらず、署名は int 化した値で計算されるため、欠陥ではなく改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（ratelimit.py の枠境界の > 比較）を原因・影響とも正しく指摘している。"
+ }
+}

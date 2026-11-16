@@ -1,0 +1,49 @@
+{
+ "case": "TX-03",
+ "rep": 1,
+ "sec": 35.7,
+ "exit": 0,
+ "cost_usd": 0.1399926,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20473,
+  "cache_read_input_tokens": 117146,
+  "output_tokens": 4637,
+  "output_tokens_details": {
+   "thinking_tokens": 765
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20473,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3061,
+    "cache_read_input_tokens": 38167,
+    "cache_creation_input_tokens": 2538,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2538
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 62accf30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R10, AC1, K4 (notes/service.py:85-93 create_note) / 対応区分: 修正必須 / 内容: 作成が2つのトランザクションに分かれている。1つ目でメモ本体を COMMIT し、2つ目でタグと監査ログを書く。 / 成立条件: タグ・監査ログの書き込みで例外が起きる、または `hooks.before_write(\"create:tags\")` で例外が出る。 / 影響: メモ本体だけが残り、タグも監査ログもない不整合な状態になる。R1「途中で失敗したら何も残さない」と AC1 に違反する。 / 根拠: 実行で再現した。フックで例外を出した後の `notes` の件数は 2 のままで、失敗した作成の行が残っていた。コードの経路は service.py:85 の `with transaction` が 91 行目の前に閉じていることだった。 / 提案: INSERT notes・INSERT note_tags・_audit を1つの `with transaction(conn):` にまとめる。フックはその中に置く。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 (notes/service.py:14 TAG_RE、64・151 行目) / 対応区分: 修正必須 / 内容: `^[a-z0-9-]{1,20}$` を `re.match` で使っている。Python の `$` は末尾の改行の直前にも一致するため、`\"ab\\n\"` が通る。 / 成立条件: 作成・更新・検索の tags に、末尾が改行のタグを渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」の規則を破るタグが保存される。検索のタグ絞り込みにも通る。 / 根拠: 実行で `create_note(..., ['ab\\n'])` が成功した。share.py は `fullmatch` で同じ問題を避けているが、service.py は適用していない。 / 提案: `TAG_RE.fullmatch(t)` に変える。または `\\Z` を使う。作成・更新・検索の3か所すべてで直す。\n- [重大3] 区分: 実装 / 対象: R4, K3, AC4 (notes/service.py:159-169 update_note、182-192 delete_note) / 対応区分: 修正必須 / 内容: 権限の判定（_visible・_can_modify）がトランザクションの外にあり、権限を判定した行と、書き込む行が別の時点の状態になっている。 / 成立条件: 判定の後、書き込みの前に、管理者が transfer_notes でメモの owner を変える（owner_id を更新し、version も上げる）。または非公開に変わる。 / 影響: update_note は UPDATE の条件に version があるため、渡された version が古ければ Conflict になる。ただし、判定の後に所有者が変わっていて、呼び出し側が最新の version を渡していた場合は、旧所有者の権限で更新できてしまう。delete_note は WHERE に version も権限も入っておらず、権限を失った後でも削除できる。 / 確認した保証: テストにも設計にも、この順序を防ぐものはなかった。ただし、delete_note の経路は実行して再現していない（コードからの推論）。 / 提案: 行の読み出しと権限判定を `transaction(conn)`（BEGIN IMMEDIATE）の中で行う。delete も同様にする。\n- [重大4] 区分: テスト / 対象: AC2, AC4, AC5, AC7, AC10, K1, K3, K4 (tests/test_notes.py) / 対応区分: 証拠不足 / 内容: テストが12件しかなく、ほとんどが正常系だけである。次のものがない。他組織・他人の非公開メモが NotFound になること。Forbidden（管理者以外の更新・削除、組織またぎの移管）。Conflict（古い version）。閲覧数の同時加算。移管が途中で失敗したときの巻き戻し。RateLimiter の境界（ちょうど window 秒）と複数スレッド。例外の後に接続を使えること。 / 根拠: 設計書のテスト方針は、フックで並行実行と途中の失敗を再現するとしているが、フックを使うテストが1件もない。重大1の欠陥も、既存テストでは検出できなかった。 / 提案: 上記の項目ごとに、決定論的なテスト（フックと Barrier を使い、sleep に頼らない）を追加する。\n- [重大5] 区分: テスト / 対象: AC1, AC3, AC6, AC8, AC9, K2, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 入力検証の境界値（題名100/101文字、タグ5/6個、per_page 0/51、sort 不正）が確かめられていない。検索の % と _ をリテラルとして探すこと。api_key 伏せ字（8文字未満・8文字以上）。共有リンクの期限ちょうど・期限切れ・形の崩れ。ログと例外に本文・署名・api_key が出ないこと。 / 根拠: これらは仕様が明示した受け入れ条件であり、リスクの K2・K7・K8 に直結する。現在のテストは tampered と往復だけである。 / 提案: 上記の境界値と異常系のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 (notes/service.py:206 transfer_notes) / 対応区分: 改善提案 / 内容: 移管の UPDATE が updated_at を更新しない。 / 提案: 必要なら updated_at も更新する。仕様に明記はない。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空題名の拒否と正常な作成しか確かめておらず、失敗時に何も残らないこと、境界値、タグの規則は確かめていない。実装にも欠陥がある（重大1・2）。\n- AC2: 不十分。同じ組織内の閲覧しか確かめておらず、他組織・非公開の NotFound も同時閲覧の数え漏れも確かめていない。実装はコード上は妥当に見える（UPDATE views+1 は BEGIN IMMEDIATE の中）。\n- AC3: 不十分。一覧の1ページ目と単純な検索しかない。範囲外の拒否、LIKE の % と _、タグ OR は検証がない。実装は ESCAPE とプレースホルダーを使っており、コードとしては妥当である。\n- AC4: 不十分。所有者による更新・削除だけで、Conflict・Forbidden・管理者の挙動の検証がない。実装に重大3がある。\n- AC5: 不十分。正常系と管理者以外の Forbidden だけで、組織またぎの拒否と途中の失敗時の巻き戻しの検証がない。\n- AC6: 不十分。伏せ字の検証がなく、テストの api_key は actor_key を一度も確認していない。\n- AC7: 不十分。単一スレッドで枠の再開だけを確かめている。ちょうど window 秒の境界と同時呼び出しがない。コード上は Lock の中で判定しており妥当に見える。\n- AC8: 不十分。往復と改ざんだけで、期限ちょうど・期限切れ・形の崩れがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip・弱体化は見つからなかった。履歴の確認では、検証条件が弱められた痕跡は見つけていない（`history` は実行していない）。\n\n### E2E の要否\n- 不要。HTTP やUIのないライブラリである。ただし、フックと複数スレッド（別々の接続）による並行テストは必要（重大4）。\n\n### 不足しているリスク\n- K1・K3: 権限判定のあとに状態が変わる競合（重大3）。\n- K4: 作成の部分失敗（重大1）。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を通読した。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。12件が合格した。\n- 手元の再現スクリプトで、末尾が改行のタグが通ること（重大2）と、作成の途中失敗でメモ行が残ること（重大1）を確認した。\n- `aqdlc.py trace` と `history` は実行していない。gate も実行していない。",
+ "files_changed": [],
+ "valid": true
+}

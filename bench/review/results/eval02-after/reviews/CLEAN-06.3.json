@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-06",
+ "rep": 3,
+ "sec": 33.7,
+ "exit": 0,
+ "cost_usd": 0.11449050000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15723,
+  "cache_read_input_tokens": 122025,
+  "output_tokens": 3938,
+  "output_tokens_details": {
+   "thinking_tokens": 1227
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15723,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2435,
+    "cache_read_input_tokens": 36849,
+    "cache_creation_input_tokens": 5748,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5748
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f7150041\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC10, K1, K2, K3, K4, K6, K7, K8, R7, R8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件だけで、ほぼ正常系の確認に限られる。仕様が受け入れ条件・リスクとして求めている次の検証がない。\n  - 同時実行: 閲覧数の同時加算（AC2/K3）、RateLimiter の複数スレッド（AC7）、更新の Conflict（AC4）。\n  - 途中失敗のロールバック: `hooks.before_write`（設計の差し込み口）を使った create・delete・transfer の失敗（AC1/AC5/K4）、例外後の接続再利用（AC10）。\n  - 認可・漏えい: 他組織・他人の非公開メモが NotFound になること、管理者でも非公開は NotFound になること、他組織への移管が Forbidden になること（AC2/AC4/AC5/K1/K6）。\n  - SQL: `%`・`_`・`\\` を含む検索語と、SQL 文を含む入力（AC3/K2）。\n  - 境界値: 題名100/101文字、タグ5/6個、per_page 0/50/51、window ちょうどの枠の切り替え、期限ちょうどの共有リンク。\n  - 秘匿: api_key のマスク（AC6/K7）は、テストが `actor` しか見ておらず `actor_key` を確かめていない。\n  - 共有リンク: 改ざん・形の崩れ（AC8/K8）は、テストが改ざん1例だけ。\n  - ログ・例外に本文・署名・鍵が出ないこと（AC9/K5）。\n  - trace では V1〜V10・VK1〜VK8 がすべて unit に紐づいて「合格」だが、紐づいたテストは上の項目を確かめていない。\n  - 成立条件: 上記の挙動を変えても（例: `_visible` の組織条件や ESCAPE 句を外しても）12件はすべて通る。\n  - 影響: 認可・SQL・並行性の規則が退行しても検出されない。\n  - 根拠: tests/test_notes.py の全90行。hooks / RateLimiter.hook / threading の使用はなく、`assertRaises` は Forbidden/NotFound/ValidationError を各1〜2例だけ確かめている。\n  - 提案: 上の各項目について、決定論的なテストを追加する。並行は hook と threading.Barrier で作る。ファイルDB（一時フォルダ）と複数接続で、閲覧数の同時加算と RateLimiter の上限を確かめる。ロールバックは hook で例外を起こして確かめる。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:11 / 対応区分: 改善提案 / 内容: LINK_RE が先頭ゼロの数字（例: `007.…`）を通し、int 化した値で署名を計算するため、正規の形と異なる表記の同一リンクが有効になる。署名の偽造にはならないが、形の厳密さを求めるなら `0|[1-9][0-9]*` に絞る。 / 提案: 正規表現の見直し（任意）。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と空題名の拒否だけで、不十分。境界値・タグ検査・ロールバックの検証がない（実装は spec どおりに見える）。\n- AC2: 閲覧数・見え方・同時閲覧のテストがなく、不十分。\n- AC3: 一覧と部分一致の正常系1例ずつだけで、不十分。範囲外・ワイルドカード・タグ OR・注入のテストがない。実装は ESCAPE とプレースホルダーを使っていた。\n- AC4: 所有者の更新と削除だけで、不十分。Conflict・Forbidden・非公開・更新時の検証・削除の失敗のテストがない。\n- AC5: 正常系と非管理者の拒否だけで、不十分。他組織・全部か何もしないかのテストがない。\n- AC6: `actor_key` を確かめておらず、検証なし。\n- AC7: 上限と窓の再開の1例だけで、不十分。ちょうど window 秒の境界とスレッド同時のテストがない。\n- AC8: 往復と改ざん1例だけで、不十分。期限ちょうど・形の崩れ・期限切れのテストがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- 機械検出の兆候: なし（skip・.only なし）。テストの改ざん・弱体化の形跡も、history から見つからなかった。\n\n### E2E の要否\n- 不要（HTTP なしのライブラリで、SQLite の結合は単体テストで足りる）。ただし、ファイルDBと複数スレッドを使う並行テストは必要。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションと LIKE ワイルドカードのテストがない。\n- K3: 同時の更新・閲覧・呼び出しのテストがない。\n- K4: 途中失敗によるロールバックのテストがない。\n- K5: 機密情報の露出のテストがない。\n- K6: 移管で組織の外に渡る・一部だけ移ることのテストがない。\n- K7: api_key のマスクのテストがない。\n- K8: 期限切れ・形の崩れた共有リンクのテストがない。\n\n### 確認したこと\n- spec.md・design.md・notes/*.py の全文を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK だった。\n- `$AQ history --since 0` と `$AQ trace` で、検証条件の弱体化がないことと、V*/VK* がすべて unit に紐づいていることを確認した。\n- 実装のコード読みでは、認可・ESCAPE 句・プレースホルダー・BEGIN IMMEDIATE・楽観的ロックの条件・秘匿の扱いに、立証できる欠陥は見つからなかった。ただし、上のテスト不足のため、実行による裏付けはない。",
+ "files_changed": [],
+ "valid": true
+}

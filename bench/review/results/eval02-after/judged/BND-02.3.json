@@ -1,0 +1,23 @@
+{
+ "case": "BND-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0577663,
+ "judge_raw": "**重大1**: 埋め込んだ欠陥そのものです。`list_notes` の `page < 0` を指摘していて、箇所は同じです。原因は下限の比較が 0 を許すことで、`< 1` が正しいという指摘も一致します。影響は「ValidationError にならず `page: 0` で結果が返る」という内容です。正解データの影響は「負の OFFSET になる」なので表現は違います。ただ、page=0 が受け付けられるという欠陥の本体は同じです。\n\n**重大2**: コードの欠陥の指摘ではなく、テストが少ないことの指摘です。page=0 の見逃しにも触れていますが、test_gap に分類します。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の page < 0 という下限比較が page=0 を通す点を、同じ箇所・同じ原因で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストが少なく異常系・境界・並行が未検証だという、テスト不足だけの指摘である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が page=0 を受け付ける欠陥を、箇所・原因とも正しく特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の page < 0 という下限比較が page=0 を通す点を、同じ箇所・同じ原因で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストが少なく異常系・境界・並行が未検証だという、テスト不足だけの指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が page=0 を受け付ける欠陥を、箇所・原因とも正しく特定している。"
+ }
+}

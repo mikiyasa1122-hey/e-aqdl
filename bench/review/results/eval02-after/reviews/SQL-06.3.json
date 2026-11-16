@@ -1,0 +1,49 @@
+{
+ "case": "SQL-06",
+ "rep": 3,
+ "sec": 38.1,
+ "exit": 0,
+ "cost_usd": 0.11950899999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14191,
+  "cache_read_input_tokens": 123690,
+  "output_tokens": 5036,
+  "output_tokens_details": {
+   "thinking_tokens": 844
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14191,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3383,
+    "cache_read_input_tokens": 38112,
+    "cache_creation_input_tokens": 2943,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2943
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7b81bfe0\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2, notes/service.py:141-143 / 対応区分: 修正必須 / 内容: 検索の LIKE に ESCAPE 句がない。`_like_escape` は `%`、`_`、`\\` の前に `\\` を付けるが、SQLite の LIKE には既定のエスケープ文字がない。`\\` はただの文字として扱われる。そのため `%` や `_` を普通の文字として部分一致で探す、という仕様どおりに動かない。設計書の「LIKE は ESCAPE」にも反する。 / 成立条件: 検索語に `%`、`_`、`\\` を含めるだけで起きる（title と body の両方）。 / 影響: 題名「50% off」のメモを「50%」で検索しても 0 件になる。「a_b」を検索しても 0 件で、題名「a_b」のメモも見つからない。検索語が `%` や `_` のときも同じく 0 件になる。検索が仕様どおりに使えない。 / 確認した保証: 上流の検証や DB の制約はなく、既存のテストもこの経路を通っていない。 / 根拠: 実際に実行した。題名が「50% off」「a_b」「axb」の 3 件を作って検索すると、検索語 `%`、`50%`、`a_b` のすべてが `[]` を返した。service.py:141 の SQL に ESCAPE がなく、143 でエスケープした値を渡している。 / 提案: `title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'` にする。`%`、`_`、`\\` を含む検索語のテストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4, notes/service.py:14, 64, 151 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っている。Python の `$` は末尾の改行の直前にも一致するので、`\"abc\\n\"` が通る。仕様は英小文字・数字・ハイフンだけである。 / 成立条件: 作成・更新・検索のタグに末尾が `\\n` の文字列を渡す。 / 影響: 不正なタグが保存される。実際に note_tags に `'abc\\n'` が入った。 / 確認した保証: 他の層に二重の検証はない。 / 根拠: `create_note(..., tags=['abc\\n'])` が成功し、`note_tags` に `abc\\n` が入った（実行して確認）。 / 提案: `TAG_RE.fullmatch` に変えるか、パターンを `\\Z` で閉じる。末尾が改行のタグを拒否するテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは 12 件で、ほぼ正常系の 1 件ずつしかない。次の検証がない。\n  - 見え方・認可: 他の組織、他人の非公開メモ、存在しないメモが NotFound になること（K1）。更新・削除の Forbidden。\n  - 閲覧数: 同時閲覧で数え漏れがないこと（K3）。\n  - 更新・削除: version の競合と、読み出しから書き込みの間の競合。\n  - 失敗時の巻き戻し: 作成・削除・移管の途中失敗でロールバックすること（K4）。例外の後も接続が使えること（AC10）。\n  - 入力検証・一覧: 題名・本文・タグの境界値。page・per_page・sort の範囲外。タグ OR 絞り込み。`%`・`_` の検索（K2）。\n  - 移管: 組織をまたぐ移管の拒否（K6）。\n  - 監査ログ: api_key の伏せ字（K7）。AC6 は `actor_key` を一度も検証していない。\n  - 機密情報: ログと例外に本文・署名・api_key が出ないこと（AC9）。\n  - 制限・共有リンク: RateLimiter の枠の境界ちょうどと並行呼び出し（AC7）。共有リンクの期限ちょうど、形の崩れ、改行を含むリンク（AC8）。\n  重大1と重大2の欠陥は、この検証不足のために見逃された。 / 根拠: 上記は仕様の受け入れ条件・リスクそのものである。設計書も、フックで並行・途中失敗を再現するとしているが、テストは使っていない。 / 提案: AC ごとに異常系・境界値のテストを追加する。並行は `hooks.before_write` と `RateLimiter.hook` で決定論的に再現し、sleep に頼らない。伏せ字は 8 文字未満・ちょうど 8 文字・長い鍵を確かめる。\n- [軽微1] 区分: 実装 / 対象: R1, notes/service.py:57-60 / 対応区分: 改善提案 / 内容: `title.strip()` で空白だけを判定している。仕様の「題名 1〜100 文字」と合っているので動作上は問題ない。ただ `private` の型検証がなく、真偽値以外でも通る。 / 提案: 必要なら `private` を bool に限定する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。タグの形・個数、重複除去、本文の上限、ロールバックを確かめておらず不十分。タグ末尾の改行の欠陥も見逃している。\n- AC2: 同じ利用者の閲覧しか確かめていない。他の組織・非公開・NotFound・同時閲覧の数え漏れを確かめておらず不十分。コードを読むと `UPDATE views = views + 1` を BEGIN IMMEDIATE の中で行っており、実装は妥当に見える。ただし未検証。\n- AC3: 一覧は 1 ページ目の件数だけ。検索は通常語 1 件だけで、`%`・`_` を含む検索は一度も試されていない。そのため重大1の欠陥を見逃した。範囲外の入力、タグ OR、他人の非公開メモの除外もなく不十分。\n- AC4: 作成者による更新と削除の正常系だけ。Conflict、Forbidden、管理者、非公開メモ、タグの検証、削除の失敗伝播がなく不十分。\n- AC5: 正常系と非管理者の拒否だけ。組織をまたぐ移管と、途中失敗時に元のままになることがなく不十分。\n- AC6: `actor_key` の伏せ字を確かめていない。action と actor だけで、空洞である。\n- AC7: 基本の超過と、枠の経過後の復帰だけ。枠のちょうど境界と並行呼び出しがなく不十分。実装は Lock で守られ、`>=` の境界も正しく見える。\n- AC8: 正常系と改ざんだけ。期限ちょうど、期限切れ、形の崩れ、改行を含むリンクがなく不十分。実装は fullmatch と compare_digest を使っており妥当に見える。\n- AC9: 検証なし。ログのメッセージを読むと ID だけで、本文・署名・鍵は出していない。\n- AC10: 検証なし。transaction() は ROLLBACK して再送出しており、実装は妥当に見える。\n- エンジンが検出したテストの兆候: なし。skip・弱体化は見つかっていない。ただし検証そのものが薄い。\n\n### E2E の要否\n- 不要（HTTP のないライブラリで、unittest の結合テストが実運用に近い）。ただし上記の異常系・並行のテストは必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: `%`・`_`・`\\` と ESCAPE の検証がない。実際に欠陥があった。\n- K3: 閲覧・更新・RateLimiter の並行の検証がない。\n- K4: 途中失敗のロールバックの検証がない。\n- K5, K7: 伏せ字とログの検証がない。\n- K6: 組織をまたぐ移管の検証がない。\n- K8: 期限ちょうどと形の崩れの検証がない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` は 12 件すべて OK だった。\n- 検索の挙動を実行して確認した。題名「50% off」「a_b」「axb」を作り、`%`、`50%`、`a_b` で検索したところ、すべて `[]` だった（ESCAPE 句がないため）。\n- タグ `'abc\\n'` を実行して確認した。作成が成功し、note_tags に保存された。\n- git status では notes/ と tests/ が未追跡で、テストの改ざんを見る差分はない。依存関係のインストールや gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

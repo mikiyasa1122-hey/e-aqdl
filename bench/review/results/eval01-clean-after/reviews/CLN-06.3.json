@@ -1,0 +1,49 @@
+{
+ "case": "CLN-06",
+ "rep": 3,
+ "sec": 28.1,
+ "exit": 0,
+ "cost_usd": 0.11351100000000001,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17051,
+  "cache_read_input_tokens": 125210,
+  "output_tokens": 3277,
+  "output_tokens_details": {
+   "thinking_tokens": 951
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17051,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1734,
+    "cache_read_input_tokens": 39311,
+    "cache_creation_input_tokens": 4687,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4687
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 8e643ace\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py:335` の `LINK_RE` が先頭ゼロ付きの数字（例 `007.…`）を受け付ける。署名は `int` に直した値に対して計算するので、`7.…` と同じ署名で `007.…` も通る。仕様の「10進の数字だけ」は満たしており、期限・署名の検証は破られない。 / 提案: 正規形（先頭ゼロなし）だけを受け付けるか、`make_link` が作ったリンクとの完全一致も確認する。\n- [軽微2] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `list_notes` の `COUNT` と本体の `SELECT` が別々の文で、1つのスナップショットにまとまっていない。同時書き込みがあると `total` と `items` が少しずれることがある。仕様は一貫性まで求めていない。 / 提案: 必要になったら両方を1つの読み取りトランザクションで実行する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証は妥当と判断した。`service.py` の `_validate` と `transaction` を確認した。`before_write(\"create:tags\")` でタグ挿入の途中に失敗させる再現もある。\n- AC2: 検証は妥当。非公開・他組織・存在しないメモがすべて NotFound になることを `subTest` で見ている。確認後に非公開へ変わる競合、`hooks` による割り込み、別々の接続を使う 4 スレッドで 40 回閲覧して閲覧数が 40 になるテストがある。\n- AC3: 実装を `service.py:182-221` で確認した。`ESCAPE`、プレースホルダー、タグの検査が入っている。`tests/test_ac3_list_search.py` は内容を精査しておらず、63 件が通ったことだけ確認した。\n- AC4: 実装は妥当。`UPDATE ... WHERE version` と `rowcount` で Conflict を判定し、認可は同じトランザクション内で読み直した行に対して行っている。K3・K4 の検証も `tests/test_ac4_update_delete.py` にある。\n- AC5: 実装は妥当。管理者の役割と 3 者の組織一致を確認し、`before_write(\"transfer:i\")` で途中失敗を再現するテストがある。\n- AC6: 検証は妥当。8 文字未満はすべて伏せ、8 文字以上は末尾 4 文字だけ残す実装を確認した。\n- AC7: 検証は妥当。枠の境界は 159.999 秒と 160 秒で確かめている。20 スレッドを Barrier で揃えて同時に呼ぶテストと、`hook` で割り込ませる決定論的なテストがある。sleep には頼っていない。\n- AC8: 検証は妥当。期限ちょうど（`>=`）、`fullmatch`、`hmac.compare_digest` の使い方を確認した。\n- AC9: ログ・例外メッセージに本文・署名・api_key が入らないことをコードで確認した。\n- AC10: 検証は妥当。`transaction` は `BaseException` で ROLLBACK し、ROLLBACK 自体が失敗しても元の例外を隠さない。\n- K2（SQL インジェクション）: 条件ごとに値がプレースホルダーで渡っている。f 文字列で埋め込んでいるのは、固定の辞書 `SORT_COLUMNS` の値と `?` の個数だけ。`%`、`_`、`\\` はエスケープされている。\n- 検証条件の改ざん: `history` に弱体化の形跡はなく、バインド操作だけだった。エンジンが検出したテストの兆候もなかった。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、SQLite を実際に使う結合テスト（ファイル DB と複数スレッド）が検証の中心にあるため。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/*.py` の全ソースを追った。\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件すべて成功した。\n- `aqdlc.py history --since 0` を実行し、検証条件の弱体化がないことを確認した。\n- `tests/test_ac7_ratelimit.py` と `tests/test_ac2_view.py` を精読し、並行実行のテストが決定論的であることを確認した。他の AC のテストファイルの中身は精査しておらず、成功件数と実装側の確認で判断している。",
+ "files_changed": [],
+ "valid": true
+}

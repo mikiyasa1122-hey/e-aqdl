@@ -1,0 +1,28 @@
+{
+ "case": "BND-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0622463,
+ "judge_raw": "重大1は、埋め込み欠陥そのものを指摘しています。箇所は `list_notes` の page 検査で、原因は `page < 0` が 0 を通すことです。影響は page=0 で OFFSET が負になることで、これも一致しています。行番号は 112 と書かれていますが、実際は 120 行目です。ただし箇所の関数名とコード断片は正しいので、判定には影響しません。\n\n重大2は、コードの欠陥ではなく、テストの不足だけを指摘しています。\n\n軽微1は、削除時に認可の判定をトランザクションの外で行う点への改善提案です。削除は存在しない行への DELETE が無害に終わるだけで、仕様違反や実害のあるバグとは言えません。したがって style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の `page < 0` が page=0 を通し、OFFSET が負になるという埋め込み欠陥の原因と影響を正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"コードの欠陥ではなく、テストの不足だけを指摘している。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"削除時の認可を transaction 内で再読込する堅牢化の提案で、仕様違反や実害のあるバグの主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が page=0 の受け入れという埋め込み欠陥を、箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の `page < 0` が page=0 を通し、OFFSET が負になるという埋め込み欠陥の原因と影響を正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "コードの欠陥ではなく、テストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "削除時の認可を transaction 内で再読込する堅牢化の提案で、仕様違反や実害のあるバグの主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が page=0 の受け入れという埋め込み欠陥を、箇所・原因・影響とも正確に捉えている。"
+ }
+}

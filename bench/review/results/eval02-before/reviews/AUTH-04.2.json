@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-04",
+ "rep": 2,
+ "sec": 30.4,
+ "exit": 0,
+ "cost_usd": 0.1045833,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13379,
+  "cache_read_input_tokens": 120113,
+  "output_tokens": 3904,
+  "output_tokens_details": {
+   "thinking_tokens": 807
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13379,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2821,
+    "cache_read_input_tokens": 36372,
+    "cache_creation_input_tokens": 3409,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3409
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 5fdd8e32\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K6, K1 / 対応区分: 修正必須 / 内容: `transfer_notes` が移す先（to_user）の組織を検査していない。検査しているのは管理者の role と from_user の org_id だけである。仕様は「移す元・移す先・管理者がすべて同じ組織のときだけ（それ以外は Forbidden）」と定めている。 / 成立条件: 組織 A の管理者が、組織 A の利用者のメモを、組織 B の利用者（to_user）に移す呼び出し。 / 影響: メモ（非公開のものを含む）の owner_id が他組織の利用者に変わる。メモの org_id は A のままで、移された B の利用者は `_can_modify` により更新・削除できる。組織の外にメモが渡る K6 の漏えいが起きる。 / 確認した保証: 呼び出し元の検証は対象外（仕様の「利用者の dict は呼び出し側が確かめてから渡す」）なので、org_id の突き合わせは service の責務である。DB に組織の整合性を保つ制約はない（`notes.owner_id` は `users(id)` を参照するだけ）。既存テストにも防ぐものはない。 / 根拠: notes/service.py の `transfer_notes`（`from_user[\"org_id\"] != admin[\"org_id\"]` の検査だけがある）。 / 提案: `to_user[\"org_id\"] != admin[\"org_id\"]` のときも、トランザクションの前に Forbidden を投げる。移す先が DB に存在し、同じ組織であることも確かめる。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC2, AC4, AC5, AC7, K2, K3, K4, K6, K8） / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほぼ正常系だけである。重要なリスクを確かめるテストがない。足りないのは次のとおり。(a) 別組織・他人の非公開メモが NotFound になること、一覧・検索に出ないこと（K1）。(b) 管理者でも非公開メモは NotFound になること、Forbidden になること。(c) version の不一致による Conflict、および `hooks.before_write` を使った読み出しから書き込みの間の競合。(d) 閲覧数の同時加算を、別接続・別スレッドで確かめるテスト。(e) `hooks` で途中の失敗を起こし、create・delete・transfer が丸ごとロールバックされること、例外の後も接続が使えること（K4, AC10）。(f) LIKE の `%` と `_`、SQL インジェクション文字列、page・per_page・sort の境界値、タグの検査（K2）。(g) RateLimiter の枠の境界（ちょうど window 秒）と、複数スレッドの同時呼び出し。(h) 共有リンクの期限ちょうど、署名・形の崩れ、改行を含むリンク（K8）。(i) 異組織への移管（重大1を検出できるテスト）。(j) 監査ログの api_key の伏せ字（8文字未満・末尾4文字。AC6, K7）。(k) ログ・例外のメッセージに本文・署名・api_key が出ないこと（AC9）。 / 根拠: これらは仕様の受け入れ条件と重要なリスクそのものである。テストがなければ、重大1のような欠陥を現状のテストでは検出できない（実際に全部通過している）。設計が用意した差し込み口の `hooks.before_write` と `RateLimiter.hook` は、どのテストからも使われていない。 / 提案: 上記 (a)〜(k) を、決定論的なテスト（差し込み口と `threading.Barrier` を使い、sleep に頼らない）で追加する。\n- [軽微1] 区分: 実装 / 対象: R3, `search_notes` / 対応区分: 改善提案 / 内容: タグの検査が `_validate` と重複して書かれている。 / 提案: タグの検査を共通の関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系と空題名の拒否だけを確認している。本文・タグの上限、重複タグの保存、失敗時のロールバックは未確認で、不十分。\n- AC2: 作成者本人の閲覧だけを確認している。他組織・非公開・存在しない場合の NotFound、閲覧数の同時加算は未確認で、不十分。\n- AC3: 一覧の1ページ目と単純な検索だけを確認している。範囲外の拒否、`%` と `_`、タグの OR、インジェクションは未確認で、不十分。\n- AC4: 所有者による更新・削除の正常系だけを確認している。Conflict、Forbidden、競合、更新時の検証は未確認で、不十分。\n- AC5: 同じ組織内の正常系と、管理者以外の拒否だけを確認している。異組織の拒否（重大1）、途中で失敗したときの巻き戻しは未確認で、不十分。\n- AC6: 監査ログの action と actor だけを確認している。api_key の伏せ字は未確認で、不十分。\n- AC7: 枠を超えたときの拒否と、枠が更新されることだけを確認している。ちょうど window 秒の境界と同時の呼び出しは未確認で、不十分。\n- AC8: 往復と、note_id を書き換えた場合だけを確認している。期限の境界、署名の改ざん、形の崩れたリンクは未確認で、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- 機械的に検出したテストの兆候はなかった（skip・`.only`・アサーションなし）。\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリなので、service 層の統合テストで足りる）。ただし、別接続・別スレッドの並行テストは必要。\n### 不足しているリスク\n- K1: 別組織・他人の非公開メモの漏えいを確かめる検証がない。\n- K2: SQL インジェクション・LIKE エスケープの検証がない。\n- K3: 同時の閲覧・更新・RateLimiter 呼び出しの検証がない。\n- K4: 途中で失敗したときの整合性の検証がない。\n- K5, K7: api_key とログ・例外メッセージの機密情報の検証がない。\n- K6: 異組織への移管が実装でも検証でも漏れている（重大1）。\n- K8: 共有リンクの期限・改ざん・形の崩れの検証がない。\n### 確認したこと\n- spec.md・design.md と notes/*.py を全部読み、承認済みの仕様と突き合わせた。SQL はプレースホルダーを使っており、LIKE は ESCAPE されている。`transaction()` は例外時に ROLLBACK する。更新は version 付きの UPDATE と rowcount で判定している。閲覧数は `views = views + 1` で加算している。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。ただし上記のとおり、正常系が中心。\n- `aqdlc.py history --since 0` の末尾を確認した。実装担当による `bind` の記録が並んでいたが、検証条件を弱める変更は見つからなかった。\n- テストを実行した際、リポジトリのファイルは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

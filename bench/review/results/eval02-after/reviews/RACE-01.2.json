@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 2,
+ "sec": 48.1,
+ "exit": 0,
+ "cost_usd": 0.1301292,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13473,
+  "cache_read_input_tokens": 122012,
+  "output_tokens": 6402,
+  "output_tokens_details": {
+   "thinking_tokens": 727
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13473,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 5276,
+    "cache_read_input_tokens": 36869,
+    "cache_creation_input_tokens": 3474,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3474
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` の UPDATE 文の条件に version が入っていない（`notes/service.py` の update_note、`WHERE id = ?` だけ）。version の確認はトランザクションの外で、読んだ row に対して行っている。そのため rowcount の判定が常に 1 になり、Conflict を検出できない。設計書の「UPDATE の条件に version を入れて rowcount で判定する」にも反する。 / 成立条件: 2つの接続 A・B が同じ version=1 を読む。A が更新して version=2 になる。その後 B が、version チェックを通った後に `BEGIN IMMEDIATE` へ進む（`hooks.before_write(\"update\")` の位置がこの隙間にあたる）。B の UPDATE は id だけで一致するので A の更新を上書きする。 / 影響: 後から書いた側が先の更新を消す。仕様が禁じる動作である。 / 根拠: service.py の update_note で、チェックは `if row[\"version\"] != version`（トランザクション外）、UPDATE は `WHERE id = ?`。確認した保証: UPDATE の条件にも、トランザクション内の再読込にも version はなく、他にこの競合を防ぐ経路はない。 / 提案: UPDATE を `WHERE id = ? AND version = ?`（version は呼び出し側が渡した値）にして、rowcount が 1 でなければ Conflict にする。あわせて、トランザクション内で `_visible` と `_can_modify` を再確認する。\n- [重大2] 区分: 実装 / 対象: R4, R1, K4 / 対応区分: 修正必須 / 内容: `update_note` が、トランザクション外で読んだ row を使って認可を判定している。さらに、トランザクション内で実行する `_validate` の対象は、外で読んだ古い title と body である。 / 成立条件: 読み出しから BEGIN IMMEDIATE までの間に、他の接続がメモの所有者を移管するか、メモを削除する。または title / body だけを更新し、非公開に切り替わる。 / 影響: 以下のように、更新後の状態に対して認可が通る。移管されて作成者でなくなった元の所有者が、そのまま更新できる。メモを削除された後に呼ぶと、UPDATE の rowcount が 0 で Conflict になり、NotFound にならない（存在を明かさない規則との整合が取れない）。 / 根拠: service.py の update_note 内で `_row` を呼んだ後、transaction の外で `_visible` と `_can_modify` を判定している。transaction 内で再確認していない。確認した保証: transfer_notes は version を上げる。しかし UPDATE が version を見ないため、検出されない。 / 提案: BEGIN IMMEDIATE の後に `_row` を読み直し、`_visible` → `_can_modify` → version の順で判定する。削除のときも同じ。`delete_note` も同様に、認可をトランザクション外で判定している。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` は 12 件で、ほぼ正常系だけである。次の検証がない。（a）他の組織・他人の非公開メモが NotFound になること（K1）。（b）管理者の更新・削除が許可されること、他人が Forbidden になること。（c）Conflict（古い version）の検証（K3・R4）。（d）LIKE の `%`・`_`・`\\` と SQL インジェクション文字列の検証（K2）。（e）閲覧数の同時加算（K3）。（f）失敗時のロールバック（`hooks.before_write` による途中失敗。K4・AC1・AC5・AC10）。（g）api_key の伏せ字（AC6・K7。`test_export_audit` は api_key を見ていない）。（h）R7 の枠の境界（ちょうど window 秒）とスレッドの同時呼び出し。（i）R8 の期限の境界・形の崩れたリンク・R9 のログ。（j）各入力検証の境界値（題名 100/101 文字、タグ 5/6 個、per_page 0/51 など）。 / 根拠: これらは受け入れ条件・リスクで必須と定められており、設計書が差し込み口（hooks・RateLimiter.hook）を用意しているのに使っていない。現状のテストは、重大1・2の欠陥があっても全件通る。 / 提案: 上記 (a)〜(j) を unittest で追加する。並行系は差し込み口で決定論的に再現する。更新競合は、`hooks.before_write(\"update\")` の中で別の接続から更新を入れて Conflict を期待するテストにする。\n- [重大4] 区分: 実装 / 対象: R5, AC5, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` は、移管先・移管元が実在する利用者かを確認していない（仕様では dict を信用してよい範囲）。ただし移管後のメモの更新日時（updated_at）を更新していないため、一覧の updated 順が実際の変更を反映しない。かつ監査ログの対象は件数だけである。また、非公開メモも移管するが、移管先の権限の確認や仕様上の根拠が示されていない。これを重大とするかは未確認である。以下は「仕様違反」とは断定しない。 / 成立条件: （確認できていない仮説のため、この項目は重大から取り下げる）\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id は先頭に 0 を付けても（例: `007.…`）署名が一致して通る。署名の対象は整数に正規化した値だからである。仕様違反ではないが、同じメモに対する有効なリンクの文字列が複数できる。 / 提案: 先頭 0 を拒否するか、元の文字列のまま署名する。\n\n注: 上の [重大4] は私の確認が足りず、取り下げるべき項目である。エンジンの件数チェックに合わせて、正しい件数を下に書き直す。\n\n## レビュー結果（訂正版・これが最終）\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` の UPDATE 文の条件に version が入っていない（`notes/service.py` の update_note、`WHERE id = ?` だけ）。version の確認はトランザクションの外で、読んだ row に対して行っている。そのため rowcount の判定が常に 1 になり、Conflict を検出できない。設計書の「UPDATE の条件に version を入れて rowcount で判定する」にも反する。 / 成立条件: 2つの接続 A・B が同じ version=1 を読む。A が更新して version=2 になる。その後 B が、version チェックを通った後に `BEGIN IMMEDIATE` へ進む（`hooks.before_write(\"update\")` の位置がこの隙間にあたる）。B の UPDATE は id だけで一致するので A の更新を上書きする。 / 影響: 後から書いた側が先の更新を消す。仕様が禁じる動作である。 / 根拠: service.py の update_note で、チェックは `if row[\"version\"] != version`（トランザクション外）、UPDATE は `WHERE id = ?`。確認した保証: UPDATE の条件にも、トランザクション内の再読込にも version はなく、他にこの競合を防ぐ経路はない。 / 提案: UPDATE を `WHERE id = ? AND version = ?`（version は呼び出し側が渡した値）にして、rowcount が 1 でなければ Conflict にする。\n- [重大2] 区分: 実装 / 対象: R4, K1, K4 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` が、トランザクション外で読んだ row を使って認可（`_visible`・`_can_modify`）を判定している。トランザクション内では再確認していない。 / 成立条件: 読み出しから BEGIN IMMEDIATE までの間に、他の接続がメモを移管（所有者の変更）するか、削除する。 / 影響: 移管されて作成者でなくなった元の所有者が、そのまま更新・削除できる。削除済みのメモに対しては、NotFound ではなく Conflict になる場合がある。また delete は、削除の時点で権限があるかを確かめない。 / 根拠: service.py の update_note・delete_note で、`_row` の後に transaction の外で判定している。確認した保証: delete_note の DELETE も、権限を判定する条件を持たない。update_note は重大1のとおり version を見ない。 / 提案: BEGIN IMMEDIATE の後に `_row` を読み直し、`_visible` → `_can_modify` → version の順で判定する。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` は 12 件で、ほぼ正常系だけである。次の検証がない。（a）他の組織・他人の非公開メモが NotFound になること（K1）。（b）管理者の更新・削除の許可と、他人の Forbidden。（c）Conflict の検証（R4・K3）。（d）LIKE の `%`・`_`・`\\` と SQL インジェクション文字列（K2）。（e）閲覧数の同時加算（K3）。（f）失敗時のロールバック（`hooks.before_write` による途中失敗。K4・AC1・AC5・AC10）。（g）api_key の伏せ字（AC6・K7。`test_export_audit` は api_key を見ていない）。（h）R7 の枠の境界と、スレッドの同時呼び出し。（i）R8 の期限の境界・形の崩れたリンクと、R9 のログ。（j）入力検証の境界値（題名 100/101 文字、タグ 5/6 個、per_page 0/51 など）。 / 根拠: これらは受け入れ条件・リスクで必須と定められており、設計書が差し込み口を用意しているのに使っていない。現状のテストは、重大1・2の欠陥があっても全件通る。 / 提案: 上記 (a)〜(j) を unittest で追加する。更新競合は `hooks.before_write(\"update\")` の中で別の接続から更新を入れて、Conflict を期待するテストにする。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id は先頭に 0 を付けても（例: `007.…`）署名が一致して通る。署名の対象は整数に正規化した値だからである。仕様違反ではないが、同じメモに対する有効なリンクの文字列が複数できる。 / 提案: 先頭 0 を拒否するか、元の文字列のまま署名する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。境界値・タグの検査・途中失敗で何も残らないことを確かめていない。\n- AC2: 閲覧の正常系はあるが、不可視のメモが NotFound になること、閲覧数の加算、同時閲覧を確かめておらず不十分。\n- AC3: `test_list_first_page` と `test_search` だけで不十分。範囲外の拒否、LIKE の特殊文字、タグの OR、他人の非公開メモの除外がない。実装は ESCAPE とプレースホルダーを使っており、コード上は妥当だが、未検証。\n- AC4: owner の更新・削除の正常系だけで不十分。Conflict・Forbidden・管理者・非公開メモがない。実装にも重大1・2の欠陥がある。\n- AC5: `test_transfer` は件数だけを確かめている。組織の外への移管、途中失敗、元のままの確認がなく不十分。`test_transfer_requires_admin` は管理者以外の拒否だけである。\n- AC6: `test_export_audit` は api_key の伏せ字を確かめておらず、空洞。実装は末尾4文字・8文字未満の扱いが仕様どおりに見えるが、未検証。\n- AC7: 上限と次の枠への切り替え（61 秒後）だけで不十分。ちょうど window 秒の境界とスレッドの同時呼び出しがない。実装は lock で保護され、`>=` で境界を扱っており妥当に見える。\n- AC8: 往復と改ざん（note_id の置換）だけで不十分。期限ちょうど・期限切れ・形の崩れたリンクがない。\n- AC9: ログ・例外への機密情報の出力を確かめるテストがなく、空洞。実装を読むかぎりでは本文・署名・api_key は出していない。\n- AC10: 例外の後に接続を使えることを確かめるテストがなく、空洞。\n- エンジンが検出したテストの兆候: なし。skip・.only もなし。\n### E2E の要否\n- 不要（ライブラリで、HTTP・UI がない。SQLite を使う単体・統合テストで十分）。ただし別の接続・スレッドを使う並行系のテストは必要。\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの検証がない。\n- K2: LIKE の特殊文字とインジェクションの検証がない。\n- K3: 同時の更新・閲覧・呼び出しを確かめる検証がなく、更新は実装にも欠陥がある（重大1）。\n- K4: 途中失敗のロールバックの検証がない。\n- K5・K7: api_key の伏せ字とログの検証がない。\n- K6: 組織をまたぐ移管の検証がない。\n- K8: 期限切れ・形の崩れたリンクの検証がない。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`（db・errors・ratelimit・service・share）、`tests/test_notes.py` を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が全件 OK だった。\n- `$AQ history --since 0` で、検証条件が弱められた形跡がないことを確認した（bind の記録のみ）。\n- 重大1・2 はコードを読んで立証した。再現の実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

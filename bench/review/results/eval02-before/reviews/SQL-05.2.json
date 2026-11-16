@@ -1,0 +1,49 @@
+{
+ "case": "SQL-05",
+ "rep": 2,
+ "sec": 47.4,
+ "exit": 0,
+ "cost_usd": 0.1675184,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 22479,
+  "cache_read_input_tokens": 157624,
+  "output_tokens": 6182,
+  "output_tokens_details": {
+   "thinking_tokens": 1518
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22479,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3494,
+    "cache_read_input_tokens": 42145,
+    "cache_creation_input_tokens": 335,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 335
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3d65b6ee\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, R3, R4, `notes/service.py:14,64,150` / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾が改行のタグが通る。Python の `$` は末尾の改行の直前にも一致する。`\"abc\\n\"` や、20文字＋`\"\\n\"`（実質21文字）も許可される。 / 成立条件: create・update・search のタグに末尾 `\\n` を含む文字列を渡す。 / 影響: R1 の「英小文字・数字・ハイフンの1〜20文字」に違反する。不正なタグが DB に保存され、監査や出力で壊れた値になる。同じ作りの share.py は `fullmatch` で対策済みで、実装の一貫性もない。 / 根拠: 実行で再現した。`create_note(..., [\"abc\\n\"])` が受理され、`note_tags` に `(1, 'abc\\n')` が入った。上流の検証や DB の CHECK はなく、既存テストも防いでいない。 / 提案: `TAG_RE.fullmatch` を使う（または `\\Z`）。create・update・search の3か所に適用し、`\"abc\\n\"` を拒否するテストを加える。\n- [重大2] 区分: 実装 / 対象: R3, AC3, `notes/service.py:134-135,141-143` / 対応区分: 修正必須 / 内容: `ESCAPE '\\'` を使っているのに `_like_escape` がバックスラッシュ自身をエスケープしていない。検索語の `\\` が普通の文字として扱われない。 / 成立条件: 検索語に `\\` を含める。 / 影響: 題名が `back\\slash` のメモを `\\` や `k\\s` で検索しても 0 件になる（実行で確認）。語末の `\\` は直後の `%` を打ち消し、意図しない一致になる。SQL インジェクションではなく、仕様の「普通の文字として部分一致」の違反。 / 根拠: 実行結果 `search_notes(..., \"\\\\\")` が `[]`、`search_notes(..., \"k\\\\s\")` が `[]`。 / 提案: `q.replace(\"\\\\\",\"\\\\\\\\\")` を先に行ってから `%` と `_` を置換する。`\\`・`%`・`_` を含む検索語のテストを加える。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC4, AC5, AC7, AC8, AC9, AC10, K1, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` は12件の正常系中心のテストだけで、重要な受け入れ条件を確かめていない。次の証拠がない。(a) 作成途中の失敗でメモ・タグ・監査が全部ロールバックされること（`hooks.before_write(\"create:tags\")`）。(b) 閲覧の同時実行で数え漏れがないこと。(c) 更新の version 不一致と、読み出しから書き込みの間の割り込みで Conflict になること。(d) 他の組織・他人の非公開メモが NotFound になること、管理者の Forbidden。(e) 移管の途中失敗で元のままになることと、組織をまたぐ移管の拒否。(f) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。(g) 共有リンクの期限ちょうど・形の崩れ・期限切れ。(h) api_key の伏せ字（8文字未満と以上）。(i) 例外の後に接続が使えること。 / 根拠: 設計の「テスト方針」が `hooks` と `RateLimiter.hook` の差し込み口を挙げているのに、どのテストも使っていない。`test_export_audit` は api_key を一切検査していない。`test_tampered` も末尾署名や期限の検査を確かめない。認可・ロールバック・同時実行・秘密の伏せ字は仕様上の必須リスクで、現状の検証は空洞。条件を外しても通るテストになっている。 / 提案: 上記 (a)〜(i) を unittest で追加する。並行は `hook` で順序を固定して決定論的に再現し、sleep に頼らない。タグ・LIKE の不正入力（重大1・2）、境界値（title 100/101文字、tags 5/6個、per_page 0/1/50/51、page 0）、SQL 風の入力も含める。\n- [重大4] 区分: 実装 / 対象: R4, K3, `notes/service.py:181-191` / 対応区分: 修正必須 / 内容: `delete_note` の認可確認（`_row`・`_visible`・`_can_modify`）がトランザクションの外にある。トランザクション内で再確認せず、`DELETE ... WHERE id = ?` は所有者や version を条件にしていない。 / 成立条件: 作成者 A が削除を呼び、認可確認の後で、管理者が `transfer_notes` で当該メモを B に移す。その後 A の DELETE が実行される。 / 影響: A はもう所有していない B のメモを削除できる（Forbidden であるべき操作）。データ損失と認可の迂回になる。 / 根拠: 認可確認は 183〜186 行、`BEGIN IMMEDIATE` は 187 行。`get_note` は内側で再確認しているが、`delete_note` にはない。 / 提案: `transaction` の内側で行を再取得して `_visible`・`_can_modify` を確認する（存在しなければ NotFound）。`hooks.before_write` で移管を割り込ませるテストを加える。\n- [軽微1] 区分: 実装 / 対象: R3, `notes/service.py:124` / 対応区分: 改善提案 / 内容: `sort` に list など unhashable な値を渡すと `ValidationError` ではなく `TypeError` になる。 / 提案: `isinstance(sort, str)` を先に確認する。\n- [軽微2] 区分: 実装 / 対象: R4, `notes/service.py:157-178` / 対応区分: 改善提案 / 内容: `update_note` の `version` が非整数でも検査せず、単に Conflict になる。 / 提案: 整数であることを `ValidationError` で検査する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は作成成功と空題名の拒否だけで不十分。タグ規則・境界値・ロールバックの証拠がなく、実装にもタグの欠陥がある（重大1・3）。\n- AC2: 閲覧数の同時実行、他組織・他人の非公開 NotFound を確かめるテストがなく、不十分。\n- AC3: 最初のページと単純な検索だけ。範囲外の拒否、`%`・`_`・`\\` の検索、タグ OR、SQL インジェクションの検証がない。実装にも欠陥がある（重大2）。\n- AC4: 所有者の更新と削除だけ。Conflict、Forbidden、管理者、非公開の NotFound、ロールバックの検証がない。delete の認可の欠陥もある（重大4）。\n- AC5: 件数と管理者以外の拒否だけ。組織またぎの拒否、途中失敗で元のままになることを確かめていない。\n- AC6: `test_export_audit` は api_key を検査しておらず、不十分。実装の伏せ字ロジック自体は仕様どおりに読めた。\n- AC7: 基本の制限と窓の経過（61秒）だけ。ちょうど window 秒の境界とスレッド同時呼び出しの検証がない。実装は lock 内で判定しており、読んだ限り妥当。\n- AC8: 往復と改ざんだけ。期限ちょうど・期限切れ・形の崩れの検証がない。実装は `fullmatch`・`compare_digest` で妥当に読めた。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。`history` を確認した範囲では、検証条件の弱体化は見当たらない。\n### E2E の要否\n- 不要（HTTP なしの Python ライブラリで、SQLite への単体・結合テストで足りる）。ただし並行処理と障害の再現は、フックを使った決定論的なテストが必須。\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K3: 同時の閲覧・更新・RateLimiter の検証がない。\n- K4: ロールバックの検証がない。\n- K6: 移管の途中失敗と組織またぎの拒否の検証がない。\n- K7: api_key が漏れないことの検証がない。\n- K8: 期限・改ざん・形の崩れのリンクを通さないことの検証がない。\n### 確認したこと\n- spec.md・design.md を読み、`notes/*.py` と `tests/test_notes.py` を全文読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件 OK。ただし正常系が中心。\n- 検索の実行確認: `tags=[\"abc\\n\"]` が受理され DB に保存された（重大1）。`\\` を含む題名が `\\`・`k\\s` で見つからなかった（重大2）。\n- `aqdlc history --since 0` で検証条件の bind を確認。弱体化は見当たらない。\n- 実装報告（impl.md）は読んでいない。",
+ "files_changed": [],
+ "valid": true
+}

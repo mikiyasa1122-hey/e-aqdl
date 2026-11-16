@@ -1,0 +1,49 @@
+{
+ "case": "VAL-01",
+ "rep": 3,
+ "sec": 34.6,
+ "exit": 0,
+ "cost_usd": 0.1545092,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 24559,
+  "cache_read_input_tokens": 124672,
+  "output_tokens": 4379,
+  "output_tokens_details": {
+   "thinking_tokens": 1042
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24559,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2655,
+    "cache_read_input_tokens": 41854,
+    "cache_creation_input_tokens": 2706,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2706
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a9a69178\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4, notes/service.py:`_validate`（title の検査） / 対応区分: 修正必須 / 内容: 題名が空白だけでも作成・更新できてしまう。仕様 R1 は「空白だけは不可」と定めているが、検査は `not title` だけで `strip()` をしていない。 / 成立条件: `create_note(conn, user, \"   \", \"b\")` や `update_note(..., title=\"  \")` を呼ぶ。上流に別の検査はない。 / 影響: 仕様違反の題名がそのまま保存される。AC1 が未達になる。 / 根拠: 実際に実行すると `create_note(c,u,'   ','b')` が ValidationError にならず note_id `1` を返した。`_validate` は `not isinstance(title,str) or not title or len(title)>TITLE_MAX` で判定している。 / 提案: `not title.strip()` も拒否する。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC10, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 次の検証が存在しない。(a) 他の組織・他人の非公開メモの NotFound（get・list・search・update・delete）と、非公開メモを管理者が扱えないこと。(b) 閲覧数の並行加算。(c) 更新の楽観的ロックの Conflict と、読み出しから書き込みの間に更新が入った場合。(d) 更新・削除・移管の Forbidden（他人・別の組織）。(e) 移管の組織またぎ拒否と、途中失敗でのロールバック。(f) 作成・削除の途中失敗でのロールバックと、その後の接続の再利用。(g) `%` `_` と SQL インジェクション文字列の検索、タグ OR 検索。(h) page・per_page・sort の範囲外。(i) 本文10000文字・タグ5個の境界。 / 根拠: 設計はテスト用の差し込み口（`hooks.before_write`）を用意しているが、tests/test_notes.py（全12件）は正常系の1本ずつだけで、これらを呼んでいない。これらは仕様のリスク K1〜K4・K6 と AC2〜AC5・AC10 の中心で、検証が空洞になっている。 / 提案: 上の (a)〜(i) を決定論的に確かめるテストを追加する。具体的には、スレッド＋hook で並行実行を再現する、hook で例外を出して件数が元のままかを確かめる、といったテストにする。条件を外したら失敗することも確かめる。\n- [重大3] 区分: テスト / 対象: AC6, AC7, AC8, AC9, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証が存在しない。(a) api_key の伏せ字（末尾4文字だけ見える／8文字未満は全部伏せる）。(b) RateLimiter の枠の境界（ちょうど window 秒で新しい枠）と、複数スレッドからの同時呼び出しで上限を超えないこと。(c) 共有リンクの期限ちょうどの境界、形の崩れ（改行・桁違い・大文字の16進）、期限切れ。(d) ログ・例外に本文・署名・api_key が出ないこと。 / 根拠: test_export_audit は action と actor しか確かめず、actor_key を見ていない。RateLimitTest は境界の 60 秒ちょうどと並行を確かめていない（61 秒だけ）。ShareTest は正常系と改ざん1件だけ。AC6・AC7・AC8・AC9 が仕様で明示する境界・並行・機密が未検証になっている。 / 提案: 境界値（`now=expires-1`・`expires`、`t=window-ε`・`t=window`）、`hook` を使った並行実行、`assertLogs` と例外メッセージの検査を追加する。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:`verify_link` / 対応区分: 改善提案 / 内容: 先頭ゼロ付きの note_id（`007.exp.sig`）が `int` 化されたあと、署名の検証を通ってしまう。仕様の「リンクの形」には合うので重大ではないが、同じメモに対する別の表記のリンクが有効になる。 / 提案: `str(note_id)` と元の文字列が一致することを確かめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected（空文字だけ）は不十分。空白だけの題名は実際に通る（重大1）。本文・タグの境界やロールバックの検証がない。\n- AC2: 閲覧数の増加も、他の組織・非公開の NotFound も、並行加算も確かめていないため不十分。\n- AC3: test_list_first_page と test_search は正常系だけで不十分。範囲外の入力、`%` `_`、インジェクション、タグ OR、他人の非公開メモの除外を確かめていない。\n- AC4: test_update_by_owner と test_delete_by_owner は正常系だけで不十分。Conflict、Forbidden、管理者の扱い、削除失敗時の挙動が未検証。\n- AC5: test_transfer と test_transfer_requires_admin だけで不十分。組織またぎとロールバックが未検証。\n- AC6: actor_key の伏せ字を確かめておらず不十分。\n- AC7: 境界ちょうどの時刻と並行呼び出しが未検証で不十分。\n- AC8: 期限ちょうどと形の崩れが未検証で不十分。\n- AC9: 検証がなく不十分。\n- AC10: 検証がなく不十分。\n- エンジンが検出したテストの兆候: なし（skip・.only なし）。`history` では検証条件の弱体化は見当たらなかった。ただし `history` の出力は途中で止まっており、最後まで確認できていない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと実 SQLite で足りる。ただし並行実行のテストは必要。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 を確かめるテストがない。上の重大2・重大3のとおり。\n\n### 確認したこと\n- spec.md と design.md を読んだ。notes/ の全ソースと tests/test_notes.py の全文を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12件が通った。\n- `create_note(c,u,'   ','b')` を実行し、空白だけの題名が受理されて note_id `1` が返ることを確認した（重大1）。\n- `$AQ trace` を確認した。`$AQ history` は出力の途中までしか確認していない。\n- コード上の次の点は問題なかった。SQL はプレースホルダーで、LIKE は ESCAPE を使っている。見られないメモは NotFound に統一されている。UPDATE は version 条件と rowcount で判定している。transaction() は ROLLBACK して例外を伝える。RateLimiter は lock で守られている。\n- `gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TX-02",
+ "rep": 3,
+ "sec": 35.6,
+ "exit": 0,
+ "cost_usd": 0.1393943,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20685,
+  "cache_read_input_tokens": 116283,
+  "output_tokens": 4501,
+  "output_tokens_details": {
+   "thinking_tokens": 971
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20685,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3033,
+    "cache_read_input_tokens": 37320,
+    "cache_creation_input_tokens": 3597,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3597
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e36820ba\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` がメモ1件ごとに別々のトランザクションで UPDATE している。監査ログの INSERT も別のトランザクションである。仕様は「全部移すか、何も移さないか（途中で失敗したら元のまま）」と定めている。 / 成立条件: 2件目以降の移管で例外が出る場合。例: `hooks.before_write(\"transfer:<id>\")` で失敗する、ロック待ちが5秒を超える、プロセスが落ちる。 / 影響: 一部のメモだけが to_user に移った状態で例外が返る。元に戻らず、version も増える。監査ログの記録に失敗した場合も、移管だけが済んで記録が残らない。 / 確認した保証: 上流の検証や呼び出し元に全体を囲むトランザクションはなく、DB の制約でも防げない。設計書の「書き込みは BEGIN IMMEDIATE の transaction() で囲む」にも反している。 / 根拠: `notes/service.py` の `transfer_notes` で `for i in ids:` の中に `with transaction(conn):` がある（行 169 付近）。ids の SELECT もトランザクションの外にある。 / 提案: SELECT・全件の UPDATE・監査の INSERT を1つの `with transaction(conn):` にまとめる。UPDATE の WHERE に org_id を入れ、`UPDATE notes SET owner_id=?, version=version+1 WHERE owner_id=? AND org_id=?` の1文にしてもよい。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1, K2, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: テストは正常系の1本ずつ程度（12件）で、必須のリスクを確かめるものがない。足りない検証は次のとおり。(a) 他の組織・他人の非公開メモが get・list・search・update・delete で NotFound または除外になること（K1）。(b) 作成者・管理者以外の Forbidden（AC4）。(c) 検索語の `%`・`_`・`\\` と SQL インジェクション文字列、タグの OR 絞り込み、page・per_page・sort の範囲外（AC3, K2）。(d) version 不一致の Conflict と、`hooks.before_write(\"update\")` を使った読み出しから書き込みの間の競合（AC4, K3）。(e) 複数スレッド・複数接続での閲覧数の数え漏れ、RateLimiter の並行呼び出し、ちょうど window 秒の境界（AC2, AC7, K3）。(f) `hooks.before_write(\"create:tags\")`・`\"delete:note\"`・`\"transfer:*\"` での失敗後に何も残らないこと、例外の後に接続が使えること（AC1, AC5, AC10, K4）。(g) 8文字未満・8文字・9文字の api_key の伏せ方（AC6, K7）。(h) 期限ちょうどの Forbidden と、形の崩れたリンク・署名の改ざん（AC8, K8）。(i) ログ・例外メッセージに本文・署名・鍵が出ないこと（AC9）。 / 根拠: 認可・SQL・並行処理・ロールバックは、この仕様の中心となるリスクである。`tests/test_notes.py` は、条件を外しても失敗しないテストばかりである。例として `test_transfer` は件数しか見ておらず、実際に移ったかも確認していない。重大1の欠陥も、現在のテストでは検出できない。 / 提案: 上の (a)〜(i) について、異常系と境界値を含む決定論的なテストを追加する。並行処理は、フックと別接続・別スレッドを使い、sleep に頼らずに書く。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` で、`_visible` と `_can_modify` の判定がトランザクションの外にある。判定後に移管で所有者が変わった場合、旧所有者の更新が通りうる。version の検査があるため、更新の消失は起きない。 / 提案: BEGIN IMMEDIATE の中で行を読み直して認可を判定する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空の題名だけで、上限の境界、タグの規則、tags が文字列のとき、重複タグの数え方、途中の失敗で何も残らないことを確かめていない。\n- AC2: 不十分。他組織・非公開・存在しないメモの NotFound も、閲覧数の増加と並行時の数え漏れも検証されていない。\n- AC3: 不十分。最初のページと単純な検索だけである。`%`・`_` のエスケープ、タグ絞り込み、範囲外の入力、他人の非公開メモの除外、インジェクションがない。実装は ESCAPE とプレースホルダーを使っており、読んだ限りでは問題なさそうである。\n- AC4: 不十分。所有者による更新と削除だけである。Conflict、Forbidden、管理者の扱い、更新時の検証、削除失敗時の挙動がない。\n- AC5: 空洞化している。件数しか見ておらず、全部移ること、組織をまたぐ拒否、失敗時にすべて戻ることがない。実装にも欠陥がある（重大1）。\n- AC6: 不十分。検証は action と actor だけで、api_key の伏せ方は確かめていない。\n- AC7: 不十分。回数の上限と枠のリセットだけである。ちょうど window 秒の境界と、複数スレッドからの同時呼び出しがない。\n- AC8: 不十分。往復と改ざん1例だけである。期限ちょうど、期限切れ、形の崩れたリンクがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip・only・アサーションなしは見つからなかった。history では、実装担当が bind を設定しただけで、既存の検証条件を弱めた形跡は見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、結合テスト（実 SQLite と別接続・別スレッド）で十分である。\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモが漏れないことの検証がない。\n- K2: インジェクションと LIKE の特殊文字の検証がない。\n- K3: 並行時の更新・閲覧数・回数制限の検証がない。\n- K4: 途中で失敗したときの巻き戻しの検証がない。実装の欠陥もある（重大1）。\n- K6: 一部だけが移る問題（重大1）と、組織をまたぐ移管の拒否の検証がない。\n- K7: api_key の伏せ方の検証がない。\n- K8: 期限ちょうど・形の崩れ・署名の改ざんの検証が足りない。\n- K5・R9: ログと例外への機密情報の出力を確かめる検証がない。コードを読んだ限り、ログに ID しか出していない。\n### 確認したこと\n- spec.md・design.md と `notes/*.py`、`tests/test_notes.py` をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件がすべて成功した。\n- `aqdlc.py history --since 0` で、bind の履歴だけで検証が弱められていないことを確認した。\n- SQL を確認した。search の LIKE は `\\` → `%` → `_` の順にエスケープし、ESCAPE '\\' を title と body の両方に適用している。値はすべてプレースホルダーで渡している。ORDER BY は固定の辞書から選んでいる。\n- ratelimit.py と share.py は、コードを読んだ限り仕様どおりである。ただし、動かして確かめてはいない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "RACE-01",
+ "rep": 2,
+ "sec": 35.7,
+ "exit": 0,
+ "cost_usd": 0.11955650000000001,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 14177,
+  "cache_read_input_tokens": 161985,
+  "output_tokens": 4663,
+  "output_tokens_details": {
+   "thinking_tokens": 668
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14177,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2857,
+    "cache_read_input_tokens": 40099,
+    "cache_creation_input_tokens": 479,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 479
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2ec04d56\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3, 設計「楽観的ロックは UPDATE の条件に version を入れて rowcount で判定する」 / 対応区分: 修正必須 / 内容: update_note の UPDATE が `WHERE id = ?` だけで version を条件にしていない。version の確認はトランザクションの外で読んだ行で行っている。 / 成立条件: update_note が行を読んでから BEGIN IMMEDIATE を取るまでの間に、別の接続が同じメモを更新する。 / 影響: 後から書いた側が先の更新を黙って上書きする。仕様の「読み出しから書き込みの間に他の更新が入った場合も Conflict」に反する。更新が失われる（lost update）。version は 3 に進むが、先の更新 B は消える。 / 根拠: notes/service.py:157-180。service.hooks.before_write(\"update\") で別接続から更新を割り込ませて再現した。1回目の更新は Conflict にならず、戻り値 2 で成功し、最終的な body が \"A\"、version が 3 になった。`if cur.rowcount != 1` の分岐は、行が消えた場合以外では到達しない。 / 提案: UPDATE の条件を `WHERE id = ? AND version = ?`（version は呼び出し側が渡した値）に変更する。rowcount が 0 なら Conflict を送出する。事前の version 比較は残してよい。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: TAG_RE が `^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾に改行を付けた \"ab\\n\" が通る。 / 成立条件: tags に末尾が改行のタグを渡す（create・update・search のタグ絞り込み）。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」の規則に反するタグが保存される。実際に create_note(tags=[\"ab\\n\"]) が成功し、DB に 'ab\\n' が入った。 / 根拠: notes/service.py:14, 64, 150。実行して確認した。share.py の LINK_RE は fullmatch を使っており、対応が不統一。 / 提案: `TAG_RE.fullmatch(t)` にする。search_notes のタグ検査も同じ関数にまとめる。\n- [重大3] 区分: テスト / 対象: AC4, K3, R4（楽観的ロック・競合） / 対応区分: 証拠不足 / 内容: stale な version の Conflict や、読み出しから書き込みの間に更新が入った場合の Conflict を確かめるテストがない。設計で用意した hooks.before_write を使うテストもない。 / 根拠: 重大1の欠陥を gate が検出できていない（12件すべて通過）。AC4 とリスク K3 の中心の検証である。 / 提案: 別の接続（ファイルの DB）と before_write(\"update\") で割り込み更新を再現し、Conflict になり先の更新が残ることを確かめる。stale な version の単純なケースも加える。\n- [重大4] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1, K2, K4, K6, K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件・リスクの大半に検証がない。次のものが欠けている。 / 根拠: 次の検証がなく、必須の受け入れ条件・リスクを確かめられない。(a) R2 の可視性（他の組織・他人の非公開・存在しない → NotFound）と、同時閲覧での閲覧数の正確さ。(b) 一覧の境界値（page=0、per_page=0・51、不正な sort）。(c) % と _ を普通の文字として探すこと、SQL インジェクション文字列、タグ OR 絞り込み。(d) 更新・削除の Forbidden（他人・別組織の管理者）。(e) before_write による途中失敗後のロールバック（create:tags、delete:note、transfer:i）と、失敗後も接続が使えること（AC10）。(f) 移管の組織またぎ・管理者以外の拒否。(g) api_key のマスク（8文字未満・末尾4文字）。(h) RateLimiter の枠の境界（ちょうど window 秒）とスレッド並行。(i) 共有リンクの期限ちょうど・形の崩れ・改ざんの署名部分、期限切れ。(j) ログと例外メッセージに本文・署名・鍵が出ないこと。 / 提案: 上記を unittest で追加する。並行は hook を使い、sleep に頼らず決定論的に行う。\n- [軽微1] 区分: 実装 / 対象: R5, transfer_notes / 対応区分: 改善提案 / 内容: 移管の UPDATE が updated_at を更新しない。仕様には記載がないため軽微とする。 / 提案: 必要なら updated_at も更新する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけでは不十分。タグ・長さの境界、失敗時に何も残らないこと、改行付きタグの拒否を確かめていない。\n- AC2: 不十分。可視性・NotFound・閲覧数の同時加算のテストがない。実装は UPDATE views = views + 1 を IMMEDIATE のトランザクション内で行っており、コードの上では妥当。\n- AC3: test_list_first_page と test_search は正常系だけで不十分。範囲外の入力、エスケープ、インジェクション、タグ OR、他人の非公開の除外を確かめていない。\n- AC4: 不十分（重大3）。test_update_by_owner と test_delete_by_owner は正常系だけで、Conflict・Forbidden・ロールバックの検証がない。\n- AC5: test_transfer は件数だけ。所有者が移ったことも確かめていない。拒否（組織またぎ）・失敗時に元のまま、を確かめていない。test_transfer_requires_admin は管理者以外の拒否だけ。\n- AC6: test_export_audit は actor と action だけで、api_key のマスクを確かめていない。不十分。\n- AC7: test_limit は枠の境界（t=60 ちょうど）と並行呼び出しを確かめていない。実装は Lock で守っており、境界は `>=` で正しい。\n- AC8: 往復と改ざん（note_id の置換）だけ。期限ちょうど・期限切れ・形の崩れ・署名の改ざんを確かめていない。実装の正規表現は fullmatch で妥当。\n- AC9: 検証なし。コード上は本文・署名・鍵をログに出していない。\n- AC10: 検証なし。transaction() は ROLLBACK して再送出しており、コード上は妥当。\n- エンジンが検出したテストの兆候: なし。skip・.only なし。\n### E2E の要否\n- 不要（HTTP なしの Python ライブラリで、SQLite への単体・結合テストで足りる）。ただし別接続（ファイル DB）による並行・競合の統合テストは必要（重大3・4）。\n### 不足しているリスク\n- K3: 更新の競合（重大1、重大3）。\n- K1, K2, K4, K6, K8: 検証がない（重大4）。コード上は認可と SQL のプレースホルダーに問題は見つからなかった。\n### 確認したこと\n- python3 -m unittest discover -s tests -t . → 12件 OK。\n- 割り込み更新の再現スクリプト（ファイル DB・2接続・hook）→ lost update を確認（重大1）。\n- create_note(tags=[\"ab\\n\"]) → 成功し、'ab\\n' が保存された（重大2）。\n- service.py・db.py・share.py・ratelimit.py の全文を、仕様・設計と照合した。\n- git diff・history は確認していない。\n```",
+ "files_changed": [],
+ "valid": true
+}

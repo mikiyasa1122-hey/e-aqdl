@@ -1,0 +1,49 @@
+{
+ "case": "CLN-10",
+ "rep": 3,
+ "sec": 25.6,
+ "exit": 0,
+ "cost_usd": 0.1376229,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23336,
+  "cache_read_input_tokens": 132929,
+  "output_tokens": 3097,
+  "output_tokens_details": {
+   "thinking_tokens": 916
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23336,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1611,
+    "cache_read_input_tokens": 42528,
+    "cache_creation_input_tokens": 7756,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7756
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c8b1a97a\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R5, notes/service.py transfer_notes / 対応区分: 改善提案 / 内容: 移管で notes.version を +1 している。仕様に明記はなく、移管前の version を持つ他の呼び出し側の更新を Conflict にする（楽観的ロックとしては安全側の動作）。 / 提案: 仕様か設計に、移管で version が上がることを一言書く。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界、重複タグ、文字列のタグ、末尾の改行、途中の失敗（hook で再現）、監査ログが同じ操作で記録されることを確かめており妥当。K4 もこれで確認できる。\n- AC2: 他組織・他人の非公開・存在しないメモがすべて NotFound になること、NotFound では閲覧数が増えないこと、確認後に見えなくなった場合の扱い、割り込みと複数スレッドの閲覧数を確かめており妥当。実装は BEGIN IMMEDIATE と `views = views + 1` で数え漏れを防いでいる。K1・K3 もこれで確認できる。\n- AC3: 範囲外の page・per_page・sort（bool・文字列・巨大な page を含む）、組織と非公開の範囲、`%` `_` `\\` を普通の文字として扱うこと、タグの OR 絞り込み、インジェクション文字列を確かめており妥当。SQL はプレースホルダーで、LIKE は題名・本文の両方に同じエスケープ済みパターンと ESCAPE 句を適用している。K2 もこれで確認できる。\n- AC4: 作成者と管理者の権限、非公開メモ、古い version の Conflict、読み出しから書き込みの間に入った更新の Conflict、書き込みトランザクション内での認可の再確認、更新時の検証、削除の巻き戻し（例外が伝わること）を確かめており妥当。\n- AC5: 管理者だけ、同じ組織だけ、途中で失敗したら何も移らないことを確かめており妥当。K6 もこれで確認できる。\n- AC6: 末尾4文字以外を伏せることと、8文字未満の鍵をすべて伏せることを確かめており妥当。他組織のログが含まれないことも確認している（K7）。\n- AC7: 枠の境界（159.999 は拒否、160.0 で新しい枠）、拒否された呼び出しが枠を延ばさないこと、20 スレッドでの上限、hook による割り込みの直列化を確かめており妥当。sleep には頼っておらず、Barrier とイベントを使っている。\n- AC8: 往復、期限の境界、改ざん、形の崩れたリンクを確かめており妥当。実装は fullmatch と compare_digest を使っている（K8）。\n- AC9・AC10: ログと例外メッセージに本文・署名・api_key が出ないこと、各種の失敗の後も接続を使えること、ROLLBACK が失敗しても元の例外を隠さないことを確かめており妥当。K5 もこれで確認できる。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。\n### E2E の要否\n- 不要。HTTP や UI のない標準ライブラリだけの Python ライブラリで、並行実行と途中の失敗は、別々の接続とスレッドによるテストと hook で決定論的に再現できている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md、design.md、notes/*.py 全体、tests の主要ファイルを読み、仕様・設計との整合を確認した。\n- `python3 -m unittest discover -s tests -t .`（バイトコード出力なし）を実行し、63 件がすべて通った。\n- `aqdlc trace` を確認し、全受け入れ条件・リスクが gate で合格していた。\n- `aqdlc history` の検証条件の変更は、新規追加のみで弱体化はなかった（出力は途中で切れているため、先頭 41 件までの確認）。\n- 利用者の入力から SQL・認可・検証までをたどり、未適用の箇所はなかった。",
+ "files_changed": [],
+ "valid": true
+}

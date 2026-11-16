@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-06",
+ "rep": 3,
+ "sec": 38.8,
+ "exit": 0,
+ "cost_usd": 0.1218834,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15545,
+  "cache_read_input_tokens": 120174,
+  "output_tokens": 4767,
+  "output_tokens_details": {
+   "thinking_tokens": 1280
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15545,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3437,
+    "cache_read_input_tokens": 36408,
+    "cache_creation_input_tokens": 5542,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5542
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f7150041\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC4, AC5, AC1, K1, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 認可・隔離・競合・ロールバックを確かめる検証がない。tests/test_notes.py は正常系 12 件だけである。他組織・他人の非公開メモの NotFound（get/list/search/update/delete）、非作成者や管理者の Forbidden、version 不一致と更新の競合による Conflict、閲覧数の同時加算、`hooks.before_write` を使った途中失敗後に何も残らないことの確認（create・delete・transfer）、transfer の組織またぎの拒否と全件ロールバックを検証するテストは 1 件もない。`test_transfer_requires_admin` が見ているのは role だけである。`hooks` の差し込み口は定義されているが、テストから一度も使われていない。 / 根拠: これらは AC1・AC2・AC4・AC5 の中心の規則で、K1・K3・K4・K6 の対策そのものである。認可条件や UPDATE の `version` 条件を外しても、現状のテストは全部通る。 / 提案: 他組織・他人の非公開メモの NotFound、Forbidden、古い version と更新の競合による Conflict の各テストを追加する。2 本の接続（ファイル DB と 2 スレッド）で `hooks.before_write` を使い、数え漏れと更新の取りこぼしを決定論的に再現する。create・delete・transfer の途中で例外を起こし、行数が元のままであることを確認する。\n- [重大2] 区分: テスト / 対象: AC3, K2, AC1 / 対応区分: 証拠不足 / 内容: 入力検証と SQL インジェクションの検証がない。タイトル・本文・タグ（6 個以上、重複を数える、不正文字、文字列そのもの）の境界、page・per_page・sort の範囲外、検索語の `%` `_` を普通の文字として扱うこと、タグの OR 絞り込み、`'` を含む入力をテストしていない。 / 根拠: AC3 と K2（SQL インジェクション）は仕様で必須である。コードは ESCAPE とプレースホルダーを使っているが、それを確かめる証拠がない。`ESCAPE` の処理を外しても現状のテストは通る。 / 提案: 境界値と異常系の ValidationError、`%`・`_`・`'` を含む検索語、タグの OR 検索、タイトルが 100 文字と 101 文字のときの挙動を確かめるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC6, AC7, AC8, AC9, AC10, K5, K7, K8, K3 / 対応区分: 証拠不足 / 内容: 次の検証がいずれもない。AC6・K7: api_key のマスク（末尾 4 文字、8 文字未満の鍵はすべて伏せる）。AC7: 枠の境界（ちょうど window 秒）と 2 スレッドの同時呼び出し（`RateLimiter.hook` が未使用）。AC8・K8: 期限ちょうどの無効、形の崩れた・改行を含むリンク、署名の改ざん（現状は note_id の書き換え 1 件だけ）。AC9・K5: ログと例外メッセージに本文・署名・api_key が出ないこと。AC10: 例外の後に同じ接続を再利用できること。`test_export_audit` は action と actor しか見ておらず、`actor_key` を確認していない。 / 根拠: いずれも受け入れ条件・リスクとして必須の項目である。マスク処理を外したり `>=` を `>` にしたりしても、現状のテストは通る。 / 提案: 各境界値と異常系のテストを追加する。9 文字・8 文字・7 文字の鍵でマスクを確かめる。`assertLogs` と例外の文字列で機密情報の不在を確かめる。例外の後に create・get が成功することを確かめる。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `list_notes(page=10**30)` では SQLite への OFFSET が int64 を超え、ValidationError ではなく OverflowError が出る。 / 提案: page に上限を設けるか、OverflowError を ValidationError に変換する。\n- [軽微2] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` の `_visible` と `_can_modify` の判定は、トランザクションの外で行われる。更新は version 条件で守られているが、削除は判定後にメモが移管されても通る（権限は判定時点のもの）。 / 提案: 削除でも、トランザクション内で再取得して判定するか、`owner_id` を DELETE の条件に含める。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空タイトルの拒否だけを確かめている。タグ・本文・長さの境界、失敗時に何も残らないこと、更新時の検証は未確認で、不十分。\n- AC2: V2 は同じ利用者が閲覧できることだけを確かめている。隔離（他組織・他人の非公開メモ・存在しない ID）と閲覧数の加算、同時閲覧の検証がなく、不十分。\n- AC3: V3 は一覧と検索の正常系だけを確かめている。範囲外の入力、`%` と `_`、タグの OR、SQL インジェクションの検証がなく、不十分。\n- AC4: V4 は作成者の更新・削除だけを確かめている。Forbidden、NotFound、Conflict、削除の失敗時の伝播の検証がなく、不十分。\n- AC5: V5 は件数が 2 であることしか見ていない。移管先の確認、組織またぎの拒否、途中失敗でのロールバックの検証がなく、不十分。\n- AC6: V6 は api_key を確認しておらず、不十分。\n- AC7: V7 は基本の上限と枠のリセット（61 秒後）だけを確かめている。ちょうど window 秒の境界と同時呼び出しの検証がなく、不十分。\n- AC8: V8 は正常系と note_id の書き換えだけを確かめている。期限の境界、形の崩れ、署名の改ざんの検証がなく、不十分。\n- AC9: 検証がなく、不十分。\n- AC10: 検証がなく、不十分。\n- エンジンが検出したテストの兆候: なし。skip・弱いアサーションは見つかっていない。ただし、tests/test_notes.py の 12 件はどれも正常系である。\n- 検証条件の改ざん・弱体化: `history` で確認した範囲では、bind が記録されているだけで弱体化は見当たらない。\n\n### E2E の要否\n- 不要。UI や HTTP を持たないライブラリである。ただし、2 本の接続による並行実行の統合テスト（ファイル DB）は必要。\n\n### 不足しているリスク\n- K1: 隔離のテストがない。\n- K2: インジェクションのテストがない。\n- K3: 閲覧数の並行実行、更新の競合、RateLimiter の同時呼び出しのテストがない。\n- K4: ロールバックのテストがない。\n- K5: ログに機密情報が出ないことのテストがない。\n- K6: 組織をまたぐ移管を拒否するテストがない。\n- K7: マスクのテストがない。\n- K8: 期限・形・署名の改ざんのテストが不足している。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が成功した。\n- `notes/*.py` を全部読み、仕様・設計と照合した。認可（`_visible` と `_can_modify`）、プレースホルダー、LIKE の ESCAPE、`transaction()` の ROLLBACK、`UPDATE ... WHERE version` による楽観的ロック、RateLimiter のロック、共有リンクの `fullmatch` と `compare_digest` は、実装としては妥当に見える。ただし、これらを確かめるテストがない。\n- `aqdlc trace` と `aqdlc history --since 0` を実行した。すべて「合格・反証未実施」で、テストの弱体化の履歴はなかった。",
+ "files_changed": [],
+ "valid": true
+}

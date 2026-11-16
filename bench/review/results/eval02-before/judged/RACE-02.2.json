@@ -1,0 +1,28 @@
+{
+ "case": "RACE-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0625463,
+ "judge_raw": "[重大1] は、埋め込んだ欠陥そのものです。`get_note` が閲覧数をトランザクションの外で読み、`views + 1` を書き戻しています。原子的な加算ではないため、同時に閲覧されると数え漏れが起きます。箇所・原因・影響のすべてが一致します。\n\n[重大2] は、テストの不足だけを指摘しています。コード自体の欠陥の主張ではありません。\n\n[軽微1] は、`update_note` と `delete_note` の認可判定が `BEGIN IMMEDIATE` の外にあることを指摘しています。次の理由で false_positive と判断しました。\n- `update_note` は version 条件で Conflict になると、報告自身も認めています。\n- `delete_note` は、判定後に所有者が変わる場合を考えています。しかし `transfer_notes` は version を上げるだけです。削除の権限は作成者か同じ組織の管理者で、移管は同じ組織の中だけです。そのため、削除が通っても組織外への漏えいは起きません。\n- 仕様の要求（読み出しから書き込みの間の更新で Conflict になること）は update の version 条件で満たされています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が views をトランザクション外で読み出して +1 を書き戻しており、同時閲覧で数え漏れが起きるという埋め込み欠陥そのもの。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"false_positive\", \"reason\": \"update は version 条件で Conflict になり、delete も同じ組織内の権限判定であるため、仕様に反する欠陥にはならない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 が、閲覧数の読み出しと書き戻しの競合という埋め込み欠陥を、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が views をトランザクション外で読み出して +1 を書き戻しており、同時閲覧で数え漏れが起きるという埋め込み欠陥そのもの。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "false_positive",
+    "reason": "update は version 条件で Conflict になり、delete も同じ組織内の権限判定であるため、仕様に反する欠陥にはならない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 が、閲覧数の読み出しと書き戻しの競合という埋め込み欠陥を、箇所・原因・影響とも正しく指摘している。"
+ }
+}

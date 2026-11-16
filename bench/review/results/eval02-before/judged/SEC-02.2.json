@@ -1,0 +1,33 @@
+{
+ "case": "SEC-02",
+ "rep": 2,
+ "judge_cost_usd": 0.0639763,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `export_audit` が `actor_key` に api_key をそのまま返している点を指摘しています。箇所・原因・影響のすべてが埋め込んだ欠陥と一致するため、matches_defect です。\n- **重大2**: 欠陥の指摘ではなく、テストが不足しているという指摘です。そのため test_gap です。\n- **軽微1**: `delete_note` で存在確認が transaction の外にあり、別接続で先に削除されると 0 件削除でも監査ログを書く、という指摘です。コードを読むと実在する競合で、仕様の R4 と K4 の趣旨に反するため、real_other です。\n- **軽微2**: 先頭ゼロ付きの note_id が同じ署名で通る、という指摘です。リンクの表現が一意でなくなるだけで、仕様の違反ではありません。レビュー担当自身も仕様に反しないと認めています。したがって style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が actor_key に api_key を伏せずそのまま返しており、箇所・原因・影響が埋め込んだ欠陥と一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note の存在確認が transaction の外にあるため、別接続で先に削除されると 0 件削除でも監査ログ delete を書く。コードに実在する競合である。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭ゼロ付き note_id のリンク表現が一意でなくなるだけで、仕様には反さず、欠陥ではなく堅牢化の提案である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が export_audit で api_key が伏せられていない欠陥を、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が actor_key に api_key を伏せずそのまま返しており、箇所・原因・影響が埋め込んだ欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note の存在確認が transaction の外にあるため、別接続で先に削除されると 0 件削除でも監査ログ delete を書く。コードに実在する競合である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭ゼロ付き note_id のリンク表現が一意でなくなるだけで、仕様には反さず、欠陥ではなく堅牢化の提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が export_audit で api_key が伏せられていない欠陥を、箇所・原因・影響とも正しく指摘している。"
+ }
+}

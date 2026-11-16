@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 3,
+ "sec": 32.5,
+ "exit": 0,
+ "cost_usd": 0.1382005,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21523,
+  "cache_read_input_tokens": 117025,
+  "output_tokens": 4039,
+  "output_tokens_details": {
+   "thinking_tokens": 684
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21523,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2881,
+    "cache_read_input_tokens": 38033,
+    "cache_creation_input_tokens": 3491,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3491
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3（notes/service.py:112 `list_notes`）/ 対応区分: 修正必須 / 内容: page の検査が `page < 0` で、page=0 を通してしまう。仕様は「page は1以上、範囲外は ValidationError」。 / 成立条件: `list_notes(conn, user, page=0)` を呼ぶ。 / 影響: ValidationError にならず、OFFSET が負の値（-per_page）になる。SQLite は負の OFFSET を 0 として扱うので、page=0 が page=1 と同じ結果になる。返る `page` も 0 のままで、入力検証の仕様違反。 / 確認した保証: 上流の検証も DB の制約も、他の層での防止もない。実行して確認した。`python3 -c` で `page=0` を呼ぶと、`{'items': [...], 'total': 1, 'page': 0, ...}` が返った（例外なし）。 / 根拠: notes/service.py の `if not isinstance(page, int) or page < 0:`。 / 提案: `page < 1` に直す。page=0 と負数が ValidationError になるテストも追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC2, AC4, AC5, AC7, AC10, K1, K2, K3, K4, K6）/ 対応区分: 証拠不足 / 内容: tests/test_notes.py は 12 件の正常系中心のテストだけである。仕様が必須とするリスク・境界・異常系を確かめる検証がない。足りないものは次のとおり。(a) 他組織・他人の非公開メモが NotFound になること（get / list / search / update / delete）。(b) 同時の閲覧で閲覧数が漏れないこと、同時の更新で Conflict になること。`hooks.before_write` は用意されているが、テストから使われていない。(c) 作成・削除・移管の途中で失敗したときのロールバックと、例外後に接続が使えること。(d) 移管で他組織が Forbidden になること、途中失敗で元のままになること。(e) RateLimiter の「ちょうど window 秒」の境界と、複数スレッドからの同時呼び出し。(f) 共有リンクの期限ちょうどの境界、形の崩れたリンク、署名の改ざん。(g) 検索での `%` `_` と SQL インジェクション文字列。(h) タグ・題名・本文・per_page の境界値。(i) api_key の伏せ字（8文字未満・ちょうど8文字）。(j) ログや例外に本文・署名・鍵が出ないこと。(k) 異常系である ValidationError・Forbidden・Conflict・NotFound はほとんど試されていない。 / 根拠: 仕様が各 AC・リスクで境界・同時・失敗時の挙動を明記している。trace では全 V が「合格」でも、実体は上のとおり空洞である。重大1のバグ（page=0）も、このテストでは検出できなかった。 / 提案: 上の (a)〜(k) を決定論的なテストとして追加する。同時実行は `hooks.before_write` と `RateLimiter.hook`、clock の差し込みで再現し、sleep に頼らない。\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py `update_note` / `delete_note`）/ 対応区分: 改善提案 / 内容: 認可（NotFound / Forbidden の判定）はトランザクションの外で読んだ行で行われる。更新は version 条件で守られているが、削除は version を見ない。 / 提案: 削除も transaction 内で再読込してから認可を判定すると、より堅い。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空題名の拒否だけを確かめている。タグ・本文・題名の境界値と、失敗時に何も残らないこと（K4）が確かめられておらず、不十分。\n- AC2: V2 は作成者本人の get しかなく、他組織・非公開・閲覧数の同時加算（K1・K3）が未検証で不十分。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで、page=0 の欠陥も見逃している。`%` `_`、タグの OR、sort・per_page の範囲外、K2 の SQL インジェクションが未検証で不十分。\n- AC4: V4 は所有者による更新と削除の正常系だけ。Conflict、管理者・他人の Forbidden、非公開の NotFound、更新の入力検証が未検証で不十分。\n- AC5: V5 は正常な移管と非管理者の拒否だけ。他組織の Forbidden と途中失敗時の元通り（K6）が未検証で不十分。\n- AC6: V6 は action と actor しか見ておらず、api_key の伏せ字を一度も検査していないので空洞。\n- AC7: V7 は単一スレッドの超過と窓の再開だけ。ちょうど window 秒の境界と、複数スレッドの同時呼び出しが未検証で不十分。\n- AC8: V8 は往復と改ざん（note_id の書き換え）だけ。期限ちょうど、期限切れ、形の崩れたリンクが未検証で不十分。\n- AC9: V9 に、ログや出力に機密情報が出ないことを確かめるテストはなく、空洞。\n- AC10: V10 に、例外後に接続を再利用できることを確かめるテストはなく、空洞。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしのテストは見つからなかった）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite のインメモリ接続と別スレッド・別接続を使った unit / 統合テストで十分に確かめられる。ただし上記の同時実行テストは必須。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションを確かめるテストがない。\n- K3: 同時の更新・閲覧・呼び出しを確かめるテストがない。\n- K4: ロールバックを確かめるテストがない。\n- K5: 機密情報の露出を確かめるテストがない。\n- K6: 移管で組織の外に渡る・一部だけ移ることを確かめるテストがない。\n- K7: 監査ログからの api_key 漏れを確かめるテストがない。\n- K8: 期限切れ・改ざん・形の崩れたリンクを確かめるテストが不足している。\n- 並行処理（K3）は検証していないので、未検証である。実装の構造（BEGIN IMMEDIATE、version 条件付き UPDATE、ロック付きの RateLimiter）は妥当に見える。\n\n### 確認したこと\n- spec.md と design.md を読み、notes/*.py と tests/test_notes.py を全行読んだ。\n- `python3 -B -m unittest discover -s tests -t .` で 12 件が OK だった。\n- `list_notes(page=0)` を実行し、例外なしで結果が返ることを確認した（重大1）。\n- `aqdlc history --since 0` では bind のみで、検証条件の弱体化は見られなかった。ただしテスト自体が薄い。\n- `git status` は作業ツリーが未追跡のみで、既存テストの改ざんはない。\n- 実装コードの確認結果は次のとおり。SQL はプレースホルダーを使っており、LIKE は ESCAPE されている。共有リンクの検証は fullmatch と compare_digest を使っている。RateLimiter の境界は `>= window` で仕様どおり。api_key の伏せ字は仕様どおり。",
+ "files_changed": [],
+ "valid": true
+}

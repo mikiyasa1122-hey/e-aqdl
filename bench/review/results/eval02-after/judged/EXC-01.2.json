@@ -1,0 +1,43 @@
+{
+ "case": "EXC-01",
+ "rep": 2,
+ "judge_cost_usd": 0.06756430000000001,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込み欠陥そのものです。`get_note` は見えないメモに Forbidden を返し、存在しないメモの NotFound と区別できます。報告はこの原因と、例外の型から他組織・他人の非公開メモの存在を推測できる影響を、行番号つきで正しく挙げています。\n\n**重大2**: テストの不足だけを指摘しています。\n\n**重大3**: `update_note` と `delete_note` は権限確認を取引の外で行います。`delete_note` は取引内で再確認せず、`DELETE` が id だけを条件にしているため、権限確認と取引開始の間に所有者や公開設定が変わると、変更前の権限で削除できます。コード経路に根拠のある実在の TOCTOU（確認時点と使用時点のずれ）で、埋め込み欠陥とは別物です。ただし `update_note` は version の Conflict で実質防がれるため、実害は主に `delete_note` に限られます。\n\n**重大4**: RateLimiter のテスト不足だけを指摘しています。\n\n**軽微1**: `transfer_notes` が `updated_at` を更新しないことへの指摘です。仕様に記載がなく、本人も「確認が必要」としているため、欠陥の主張というより確認事項です。\n\n**軽微2**: 検索のタグ検証が重複しているという保守性の提案です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し NotFound と区別できる、という埋め込み欠陥の原因と影響を同じ箇所で正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note が取引内で可視性・権限を再確認せず、id だけで DELETE するため TOCTOU が成立する実在の欠陥で、埋め込み欠陥とは別である。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter の境界・並行のテスト不足だけを指摘している。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"updated_at を更新するかは仕様にない確認事項で、欠陥の主張ではない。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"検証の重複という保守性の提案である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥の箇所・原因・影響をすべて正しく捉えており、重大3は別の実在する欠陥である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し NotFound と区別できる、という埋め込み欠陥の原因と影響を同じ箇所で正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note が取引内で可視性・権限を再確認せず、id だけで DELETE するため TOCTOU が成立する実在の欠陥で、埋め込み欠陥とは別である。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter の境界・並行のテスト不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "updated_at を更新するかは仕様にない確認事項で、欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "検証の重複という保守性の提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥の箇所・原因・影響をすべて正しく捉えており、重大3は別の実在する欠陥である。"
+ }
+}

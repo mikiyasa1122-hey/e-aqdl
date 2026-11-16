@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-02",
+ "rep": 3,
+ "judge_cost_usd": 0.0671683,
+ "judge_raw": "**分類の根拠**\n\nこのケースは欠陥なしで、変更内容は入力検証の順番の入れ替え（タグを先に）だけです。`_validate` の順序入れ替えで振る舞いは変わっていません。そのため `matches_defect` は使いません。\n\n- **重大1**: `TAG_RE` は `$` と `.match` の組み合わせなので、末尾が改行のタグ（`\"ab\\n\"`）を通します。仕様の「英小文字・数字・ハイフン」に反する実在のバグで、実行で確認したとも書かれています。埋め込んだ変更とは無関係なので `real_other` です。\n- **重大2〜4**: テストが足りないという指摘だけで、コードの欠陥の主張ではありません。`test_gap` です。\n- **軽微1**: `page=10**30` を渡すと、OFFSET が SQLite の整数範囲を超えて `OverflowError` になります。仕様は範囲外の入力に `ValidationError` を求めているので、実在する欠陥です。ただし仕様に page の上限は明記されていないため、影響は小さい指摘です。`real_other` です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match により末尾改行のタグが通る実在のバグで、埋め込んだ順序変更とは無関係。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"巻き戻しや境界値のテスト不足の指摘のみで、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"同時実行・競合・隠蔽のテスト不足の指摘のみ。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"ワイルドカード・期限境界・伏せ字などのテスト不足の指摘のみ。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"巨大な page で ValidationError ではなく OverflowError になるのは実在の挙動で、仕様の「範囲外は ValidationError」に反する。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、重大1と軽微1は埋め込んだ変更と無関係な実在のバグ、重大2〜4はテスト不足の指摘。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match により末尾改行のタグが通る実在のバグで、埋め込んだ順序変更とは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "巻き戻しや境界値のテスト不足の指摘のみで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "同時実行・競合・隠蔽のテスト不足の指摘のみ。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "ワイルドカード・期限境界・伏せ字などのテスト不足の指摘のみ。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "巨大な page で ValidationError ではなく OverflowError になるのは実在の挙動で、仕様の「範囲外は ValidationError」に反する。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、重大1と軽微1は埋め込んだ変更と無関係な実在のバグ、重大2〜4はテスト不足の指摘。"
+ }
+}

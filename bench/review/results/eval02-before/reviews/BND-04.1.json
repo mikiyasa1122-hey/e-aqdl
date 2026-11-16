@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 1,
+ "sec": 37.3,
+ "exit": 0,
+ "cost_usd": 0.14873000000000003,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 20990,
+  "cache_read_input_tokens": 156300,
+  "output_tokens": 4912,
+  "output_tokens_details": {
+   "thinking_tokens": 1112
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20990,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2863,
+    "cache_read_input_tokens": 40814,
+    "cache_creation_input_tokens": 177,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 177
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 共有リンクが期限の時刻ちょうどでも有効と判定される。仕様は「期限の時刻ちょうど以降は無効」。 / 成立条件: now == expires で verify_link を呼ぶ。 / 影響: 期限切れのリンクが1秒分だけ通る。 / 根拠: notes/share.py:36 が `now > expires` で判定している（docstring は「ちょうどを含む」と書いているが、コードと一致しない）。実行: make_link(now=100, ttl=10) を now=110 で検証すると note_id 1 が返り、Forbidden にならなかった。 / 提案: `>=` に変更し、境界（expires-1 で有効、expires と expires+1 で Forbidden）のテストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, AC1, K2 / 対応区分: 修正必須 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` を `match` で行っている。Python では `$` が末尾の改行の直前にも一致するため、\"ab\\n\" のような改行付きのタグを通す。 / 成立条件: 末尾に改行を含むタグを create_note・update_note・search_notes に渡す。 / 影響: R1 の規則（英小文字・数字・ハイフンの1〜20文字）に反するタグが保存される。20文字ちょうどのタグに改行が付くと21文字になる。 / 根拠: notes/service.py:14 の TAG_RE と、service.py:64・151 の `TAG_RE.match`。実行: `TAG_RE.match(\"ab\\n\")` が真を返した。share.py は同じ問題を避けるために fullmatch を使っており、同じ規則が揃っていない。 / 提案: `TAG_RE.fullmatch` を使う。末尾に改行のあるタグが ValidationError になるテストを追加する。\n- [重大3] 区分: テスト / 対象: AC1, AC4, AC5, K4, K6 / 対応区分: 証拠不足 / 内容: トランザクションの巻き戻しを確かめる検証がない。hooks.before_write（create:tags、delete:note、transfer:*）で途中に失敗させ、何も残らないことを確認するテストがなく、transfer の部分的な移管や、他の組織への移管を拒否するテストもない。 / 根拠: R1・R4・R5 は「失敗時に何も残さない」ことを要求し、K4・K6 は重要なリスクである。設計書は、差し込み口をこの検証のために用意したと書いている。tests/test_notes.py には、このテストが1件もない。 / 提案: 各 hook で例外を起こし、notes・note_tags・audit の件数と owner_id が元のままであることを確認する。続けて同じ接続で操作できること（AC10）も確認する。\n- [重大4] 区分: テスト / 対象: AC2, AC3, AC4, AC6, AC7, AC9, AC10, K1, K2, K3, K5, K7 / 対応区分: 証拠不足 / 内容: 正常系が中心のテストが12件あるだけで、次の検証がない。(a) 他の組織・他人の非公開メモが NotFound になること（get・list・search・update・delete）。(b) 更新・削除の Forbidden と、古い version による Conflict。(c) 閲覧数の同時加算（スレッド＋別接続）。(d) 一覧・検索の境界値（page=0、per_page=51、sort の不正値、% と _、SQL の特殊文字、タグの OR）。(e) api_key の伏せ字（アサーションが一切ない）。(f) RateLimiter の枠の境界（ちょうど window 秒）と同時呼び出し。(g) 期限の境界。(h) ログに本文・署名・api_key が出ないこと。(i) 例外の後の接続の再利用。 / 根拠: これらは受け入れ条件そのもの、または K1〜K8 の重要なリスクである。現在のテストは、条件を外しても通る。重大1・2の欠陥も、これらのテストが無いために見つからなかった。 / 提案: 上記を、決定論的な差し込み口（hooks・RateLimiter.hook・clock）と、Barrier を使うスレッドで検証するテストとして追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: update_note と delete_note は、権限の確認（service.py:158-162, 183-186）をトランザクションの外で行っている。version の条件で更新の競合は防がれるが、delete_note には version がなく、確認後に transfer で所有者が変わっても、古い権限判定で削除される。 / 提案: 権限の確認をトランザクションの内側（BEGIN IMMEDIATE の後）に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名とタグ1個の作成だけを確認している。タグの数・形式・重複、本文の長さ、失敗時の巻き戻しがない。不十分で、実装にも欠陥がある（重大2）。\n- AC2: 作成者本人の閲覧だけを確認している。他の組織・非公開の NotFound、閲覧数の増加と同時の数え漏れの検証がなく、不十分。\n- AC3: 正常系の一覧・検索が各1件ずつあり、境界値・拒否・LIKE のエスケープ・タグの OR・SQL インジェクションがない。不十分。\n- AC4: 本人による更新・削除だけで、Forbidden・Conflict・同時の更新・削除の失敗がない。不十分。\n- AC5: 件数と管理者以外の拒否だけで、組織をまたぐ移管の拒否と巻き戻しがない。不十分。\n- AC6: export_audit にアサーションがなく、実装は読み取る限り仕様どおりだが、検証としては不十分。\n- AC7: 上限と枠のリセット（61秒）だけを確認している。ちょうど window 秒の境界と、スレッドによる同時呼び出しがない。不十分。実装（>= window）は読み取る限り妥当。\n- AC8: 往復と改ざんだけで、期限の境界・期限切れ・形の崩れがない。不十分で、実装にも欠陥がある（重大1）。\n- AC9: 検証なし。実装を読む限りログには ID だけを出しているが、未検証。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなし）。tests/test_notes.py の弱体化の痕跡は確認していない（history は読んでいない。テストファイルは未追跡）。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、SQLite のテスト用データベースを使う結合テストで足りる）。ただし、スレッドと別接続を使った並行のテストは必要（重大4）。\n\n### 不足しているリスク\n- K1: 組織・非公開の漏えいを確かめるテストがない。\n- K3: 閲覧数・更新・RateLimiter の同時実行のテストがない。\n- K4・K6: 途中の失敗で何も残らないことの検証がない。\n- K5・K7: api_key の伏せ字と、ログに機密情報が出ないことの検証がない。\n- K8: 期限の境界の検証がない（実装にも欠陥がある）。\n\n### 確認したこと\n- spec.md・design.md と、notes/ の全ソースを読み、仕様・設計との整合を確認した。\n- `python3 -m unittest discover -s tests -t .`: 12件がすべて成功した（ただし上記のとおり、検証が薄い）。\n- 実行して確かめた: share.verify_link は now == expires でも note_id を返す。`TAG_RE.match(\"ab\\n\")` は真になる。\n- 実行していない: `$AQ trace`・`$AQ history`・`git diff`。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

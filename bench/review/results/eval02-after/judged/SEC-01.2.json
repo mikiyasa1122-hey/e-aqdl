@@ -1,0 +1,48 @@
+{
+ "case": "SEC-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0659883,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- 重大1: 埋め込んだ欠陥そのものです。箇所は create_note のログ出力で、原因（本文をログに含める）も影響（本文がログに残る）も一致します。\n- 重大2〜6: いずれもテストの不足だけを指摘しています。コードの欠陥の主張ではないため test_gap です。\n- 軽微1: 認可判定がトランザクションの外にある点の指摘です。update は version で Conflict になり安全だと、報告自身が認めています。delete は、移管と競合しても、仕様上 admin か owner なら削除できます。移管で owner が変わっても同じ組織の admin は削除でき、元の owner だった者が権限を失う程度の差です。実害は薄く、改善提案に近いので style とします。\n\n欠陥は重大1で検出されています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"create_note がメモ本文をログに出す、埋め込んだ欠陥そのものを箇所・原因・影響まで正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"機密情報がログに出ないことを確かめるテストがない、というテスト不足の指摘。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"非表示メモ・閲覧数・LIKE・範囲外などの異常系テストの不足の指摘。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"ロールバック・境界値・Conflict・Forbidden などのテスト不足の指摘。\"},\n  {\"label\": \"重大5\", \"class\": \"test_gap\", \"reason\": \"同時実行のテストがないという指摘。\"},\n  {\"label\": \"重大6\", \"class\": \"test_gap\", \"reason\": \"api_key の伏せ字・枠の境界・共有リンクの検証テストの不足の指摘。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"認可判定をトランザクション内で再確認する改善提案で、報告自身も update は安全と認めており、欠陥の主張としては弱い。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（本文のログ出力）を正確に指摘しており、残りはテスト不足と改善提案である。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "create_note がメモ本文をログに出す、埋め込んだ欠陥そのものを箇所・原因・影響まで正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "機密情報がログに出ないことを確かめるテストがない、というテスト不足の指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "非表示メモ・閲覧数・LIKE・範囲外などの異常系テストの不足の指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "ロールバック・境界値・Conflict・Forbidden などのテスト不足の指摘。"
+   },
+   {
+    "label": "重大5",
+    "class": "test_gap",
+    "reason": "同時実行のテストがないという指摘。"
+   },
+   {
+    "label": "重大6",
+    "class": "test_gap",
+    "reason": "api_key の伏せ字・枠の境界・共有リンクの検証テストの不足の指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "認可判定をトランザクション内で再確認する改善提案で、報告自身も update は安全と認めており、欠陥の主張としては弱い。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（本文のログ出力）を正確に指摘しており、残りはテスト不足と改善提案である。"
+ }
+}

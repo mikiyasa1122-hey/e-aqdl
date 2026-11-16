@@ -1,0 +1,49 @@
+{
+ "case": "CLN-05",
+ "rep": 1,
+ "sec": 26.7,
+ "exit": 0,
+ "cost_usd": 0.13412200000000002,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22739,
+  "cache_read_input_tokens": 116200,
+  "output_tokens": 3153,
+  "output_tokens_details": {
+   "thinking_tokens": 931
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22739,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1739,
+    "cache_read_input_tokens": 37426,
+    "cache_creation_input_tokens": 5664,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5664
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fba595\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `notes/share.py:11` の `LINK_RE` は `007.…` のように先頭ゼロ付きの数字を許す。署名は `int` に直した値に対して計算するため、`7.<期限>.<署名>` の署名がそのまま `007.<期限>.<署名>` でも通る。仕様の「10進の数字だけ」には反しておらず、別のメモや期限を通すこともないので、機能上の害はない。 / 提案: 先頭ゼロを禁止するか、`str(int)` と元の文字列が一致することを確認して、リンクの表現を1通りに固定する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `tests/test_ac1_create.py` が入力の境界、タグ、途中失敗時に何も残らないこと（`before_write` フック）を確かめており、妥当。`service.py:75-82` のトランザクションも設計どおり。\n- AC2・K1・K3: 非公開・他組織・存在しないメモがすべて NotFound になることを確かめている。確認後に非公開へ変えられた場合は、`hooks` で再現して確かめている。割り込みの閲覧は `hooks` で、別々の接続・別スレッドからの同時閲覧は一時 DB ファイルで 4 スレッド×10 回 = 40 件と数えて確かめている。`UPDATE views = views + 1` を `BEGIN IMMEDIATE` の中で行っており、妥当。\n- AC3・K2: 組織と非公開の範囲、sort・page・per_page の範囲外、巨大な page、% と _ のリテラル扱い、OR のタグ絞り込み、SQL 文字列を値として扱うことを確かめている。`ESCAPE '\\\\'` とバックスラッシュのエスケープ、プレースホルダーをコードで確認した。ORDER BY は固定の辞書から引いており、利用者の入力は入らない。妥当。\n- AC4・K3・K4: 作成者・管理者・非公開、古い version、読み書きの間の割り込み（`hooks`）、トランザクション内での認可の再確認、検証、削除の途中失敗とその伝播を確かめている。UPDATE の WHERE に version を入れて rowcount で判定しており、妥当。\n- AC5・K6: 管理者だけ、組織をまたぐ移管は拒否、途中失敗で何も移らないこと、version の加算を確かめており、妥当。\n- AC6・K7: 鍵が 8 文字未満・ちょうど 8 文字・それ以上のときの伏せ字をコードで確認した。`tests/test_ac6_audit.py` もあり、妥当。\n- AC7・K3: 枠の境界（159.999 と 160.0）、拒否した呼び出しが枠を延ばさないこと、Barrier による 20 スレッド同時でも許可は 5 件、ロック内への割り込みを確かめている。sleep には依存していない。妥当。\n- AC8・K8: 期限ちょうど、改ざん、形の崩れを確かめている。`fullmatch` と `compare_digest` を使っており、妥当。\n- AC9・K5: `tests/test_ac9_secrets.py` があり、コード上も、ログと例外にはメモの ID・作成者の ID・不正なタグ文字列しか出していない。妥当。\n- AC10・K4: 各種の失敗の後も接続が使え、ROLLBACK が失敗しても元の例外を隠さないことを確かめている。妥当。\n- エンジンが検出したテストの兆候: なし。`history` はすべて実装担当の `bind`（checks の追加）で、検証条件の弱体化は見当たらない。\n### E2E の要否\n- 不要。HTTP や UI を持たない標準ライブラリだけのライブラリで、並行・途中失敗・境界は単体テストで決定論的に再現されている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 63 件すべて成功。\n- `service.py`・`ratelimit.py`・`share.py`・`db.py` を、利用者の入力から SQL・認可・トランザクションまでたどって読んだ。LIKE のエスケープ、プレースホルダー、認可の再判定を確認した。\n- `$AQ history --since 0`: 検証条件の変更は `bind` の追加だけで、弱体化はなかった。",
+ "files_changed": [],
+ "valid": true
+}

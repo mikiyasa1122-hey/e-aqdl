@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 2,
+ "sec": 31.9,
+ "exit": 0,
+ "cost_usd": 0.1133208,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15149,
+  "cache_read_input_tokens": 121888,
+  "output_tokens": 4052,
+  "output_tokens_details": {
+   "thinking_tokens": 844
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15149,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2520,
+    "cache_read_input_tokens": 37676,
+    "cache_creation_input_tokens": 3881,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3881
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: 共有リンクの期限の境界が仕様と逆になっている。仕様は「期限の時刻ちょうど以降は無効」だが、`verify_link` は `now > expires` のときだけ拒否するので、now == expires のリンクが有効になる。 / 成立条件: `verify_link(secret, link, now=expires)` を呼ぶ。 / 影響: 期限切れのリンクが1秒分だけ通る（K8）。 / 根拠: notes/share.py:35 の `if int(...) > expires`。`make_link(\"s\",5,ttl_sec=10,now=100)` で作ったリンクを `now=110` で検証すると、実行結果は「at expiry ok: 5」で通った。docstring には「期限の時刻ちょうどを含む」とあるが、コードはそうなっていない。 / 提案: 比較を `>=` に直し、期限の1秒前は有効、ちょうど・1秒後は Forbidden になる境界テストを追加する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査に `TAG_RE = ^...$` と `re.match` を使っているため、末尾に改行を付けた \"abc\\n\" が通る。`$` が末尾の改行の手前にも一致するのが原因で、仕様は「英小文字・数字・ハイフンの1〜20文字」だけを許している。 / 成立条件: create・update・search のタグに \"x\\n\" のような文字列を渡す。 / 影響: 不正なタグが保存される。または、検索では不正なタグが ValidationError にならない。share.py は同じ理由で fullmatch を使っており、方針も揃っていない。 / 根拠: notes/service.py:14, 64, 150。`TAG_RE.match(\"abc\\n\")` の実行結果は True だった。 / 提案: `TAG_RE.fullmatch` を使うか、パターンを `\\Z` で終わらせる。改行・空白を含むタグの拒否テストを追加する。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、正常系が中心。仕様が必須としている次の検証がない。\n  - 拒否・境界: 題名・本文・タグの上限値、page・per_page・sort の範囲外、% と _ の検索、タグ OR\n  - 閲覧の制限: 他組織・他人の非公開メモが NotFound になること（K1）、非公開メモを管理者が扱えないこと\n  - 更新・削除: Conflict と更新の競合、削除の失敗が呼び出し側に伝わること\n  - 移管と監査: 組織をまたぐ移管（K6）、監査ログの api_key の伏せ字（AC6・K7。現状は action と actor しか見ていない）\n  - 同時実行: 閲覧数の同時加算、RateLimiter の枠の境界（t=60 ちょうど）と複数スレッド（AC7・K3）\n  - ロールバック: 途中失敗（hooks.before_write）での巻き戻しと、その後に接続が使えること（K4・AC10）\n  - 機密情報と SQL: ログ・例外に本文・署名・api_key が出ないこと（AC9・K5）、SQL インジェクション（K2）\n  - 共有リンク: 期限切れ・形の崩れ（AC8）\n\n  上の重大1・2は、これらの検証があれば検出できたはずの欠陥である。 / 根拠: 設計は hooks.before_write と RateLimiter.hook を並行・失敗の再現用に用意しているが、tests/test_notes.py はどちらも使っていない。「受け入れ条件ごとの検証の妥当性」の AC1〜AC10 は、これらが未検証であるため成立しない。 / 提案: 上記を unittest で追加する。並行系は hooks と RateLimiter.hook で決定論的に再現し、sleep に頼らない。DB は :memory: か一時ファイルを使う。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空の題名だけで、上限・タグ・失敗時に何も残らないことの検証がない。\n- AC2: 不十分。閲覧のテストは作成者本人が見る場合だけで、K1 の隠蔽と閲覧数の同時加算が未確認。\n- AC3: 不十分。ページ1の件数と単純な検索だけで、範囲外・% と _・タグ・SQL インジェクションが未確認。\n- AC4: 不十分。作成者による更新・削除の正常系だけで、Conflict・Forbidden・NotFound が未確認。\n- AC5: 不十分。正常系と非管理者の拒否だけで、組織をまたぐ場合と途中失敗の巻き戻しが未確認。\n- AC6: 不十分。api_key の伏せ字を確かめていない。\n- AC7: 不十分。枠の境界（ちょうど60秒）と複数スレッドが未確認。\n- AC8: 不十分。往復と改ざんだけで、期限の境界が未確認。そのため重大1を見逃している。\n- AC9: 未検証。\n- AC10: 未検証。\n- エンジンが検出したテストの兆候（skip・.only・アサーションなし）はない。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、unittest の統合テストで足りる）。\n### 不足しているリスク\n- K1〜K8（上記の検証が未実施）。特に K1・K3・K4・K6・K7 を検証する証拠がない。\n- 未確認（指摘にはしない）: update_note と delete_note は、認可の判定をトランザクションの外で行っている。version 条件と、transfer が version を上げることで、更新の競合は防がれている。\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。\n- `python3` による再現: 期限ちょうどで verify_link が成功した。TAG_RE.match(\"abc\\n\") が True だった。\n- `aqdlc.py history --since 0`（末尾のみ）: 検証条件の弱体化は見当たらない。\n- `git status`: 実装は未コミット（untracked）。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

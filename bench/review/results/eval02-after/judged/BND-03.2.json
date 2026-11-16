@@ -1,0 +1,33 @@
+{
+ "case": "BND-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0651663,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`ratelimit.py` の `hit()` で `now - start > self.window` と比較しており、ちょうど window 秒後が枠の中と数えられます。報告は原因（`>` を `>=` にすべき）と影響（本来許可すべき呼び出しが RateLimited になる）の両方を、再現付きで挙げています。\n- **重大2**: テストの不足だけを指摘しています。コードの欠陥の主張ではないため test_gap です。\n- **重大3**: 作成時の入力検証と失敗時のロールバックを確かめるテストがない、という指摘です。test_gap です。\n- **軽微1**: `delete_note` は存在確認がトランザクションの外にあり、他の接続が先に削除していても DELETE が0件のまま監査ログを残します。仕様 R4 の「読み出しから書き込みの間に他の更新が入った場合」の趣旨に沿う実在の競合で、コードを根拠に挙げています。ただし埋め込んだ欠陥ではないため real_other です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"ratelimit.py hit() の `>` 比較で、ちょうど window 秒後が枠の中と数えられるという原因と影響が、埋め込んだ欠陥と一致し、再現も付いている。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"作成時の入力検証の境界値とロールバックを確かめるテストの不足だけを指摘している。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"delete_note は存在確認が transaction の外にあるため、並行した削除で DELETE が0件でも監査ログを記録して NotFound にしない。実在する別の欠陥である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ境界の欠陥を、箇所・原因・影響まで正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "ratelimit.py hit() の `>` 比較で、ちょうど window 秒後が枠の中と数えられるという原因と影響が、埋め込んだ欠陥と一致し、再現も付いている。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "作成時の入力検証の境界値とロールバックを確かめるテストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "delete_note は存在確認が transaction の外にあるため、並行した削除で DELETE が0件でも監査ログを記録して NotFound にしない。実在する別の欠陥である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ境界の欠陥を、箇所・原因・影響まで正確に捉えている。"
+ }
+}

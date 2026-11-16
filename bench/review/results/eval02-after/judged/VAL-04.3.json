@@ -1,0 +1,33 @@
+{
+ "case": "VAL-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0606782,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `update_note` が `_validate(new_title, new_body, [])` と空リストを渡しており、更新時にタグを検査していません。これは埋め込んだ欠陥と箇所・原因・影響がすべて一致します。\n- **重大2**: `TAG_RE` を `.match` で使うと `$` が末尾の改行を許すため、`\"abc\\n\"` が通ります。仕様違反として実在するコードの欠陥ですが、埋め込んだ欠陥とは別物です。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: これもテストの不足だけを指摘しています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note が _validate に空リストを渡してタグを検査しておらず、埋め込んだ欠陥の箇所・原因・影響と一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match で使うため末尾改行付きのタグが通る。実在する仕様違反だが、埋め込んだ欠陥とは別である。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値・並行実行のテストが足りないという指摘で、コードの欠陥を主張していない。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"伏せ字・RateLimiter・共有リンク・機密情報の非出力のテスト不足だけを指摘している。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が update_note でタグが未検査になる欠陥を、根拠の再現つきで正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note が _validate に空リストを渡してタグを検査しておらず、埋め込んだ欠陥の箇所・原因・影響と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match で使うため末尾改行付きのタグが通る。実在する仕様違反だが、埋め込んだ欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "異常系・境界値・並行実行のテストが足りないという指摘で、コードの欠陥を主張していない。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "伏せ字・RateLimiter・共有リンク・機密情報の非出力のテスト不足だけを指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が update_note でタグが未検査になる欠陥を、根拠の再現つきで正確に指摘している。"
+ }
+}

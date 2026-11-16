@@ -1,0 +1,38 @@
+{
+ "case": "TX-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0637703,
+ "judge_raw": "各指摘の判定は次のとおりです。\n\n- **重大1**: `transaction()` が例外時に ROLLBACK しない点を、同じ箇所・同じ原因で指摘しています。影響（接続が開いたまま残る、以後の書き込みが失敗する、途中の変更が残る）も正解データと一致し、再現も確認済みです。したがって matches_defect です。\n- **重大2**: `TAG_RE.match` は `$` が末尾の改行にも一致するため、`\"abc\\n\"` を通します。仕様に反する実在のバグなので real_other です。\n- **重大3**: テストの不足だけを指摘しているので test_gap です。\n- **重大4**: 認可の確認を transaction の外の古い行で行っています。`delete_note` は DELETE が id だけを条件にしているため、移管の競合で元の所有者が削除できる余地があります。コードの経路から導いた実在の競合欠陥で、埋め込んだ欠陥とは別物です。したがって real_other です。\n- **軽微1**: タグ検査が重複しているという保守性の提案で、欠陥の主張ではないため style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transaction() が例外時に ROLLBACK せず、接続が開いたまま残る埋め込み欠陥を、原因・影響とも一致させて指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ により末尾改行付きのタグが通るのは実在のバグで、仕様違反である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"認可を transaction 外の古い行で判定しており、delete_note は移管後でも元の所有者が削除できる実在の競合欠陥である。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"検査の重複をまとめる保守性の提案である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（例外時に ROLLBACK しない）を正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transaction() が例外時に ROLLBACK せず、接続が開いたまま残る埋め込み欠陥を、原因・影響とも一致させて指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ により末尾改行付きのタグが通るのは実在のバグで、仕様違反である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "認可を transaction 外の古い行で判定しており、delete_note は移管後でも元の所有者が削除できる実在の競合欠陥である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "検査の重複をまとめる保守性の提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（例外時に ROLLBACK しない）を正確に捉えている。"
+ }
+}

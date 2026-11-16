@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-02",
+ "rep": 2,
+ "sec": 41.4,
+ "exit": 0,
+ "cost_usd": 0.124641,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15459,
+  "cache_read_input_tokens": 121890,
+  "output_tokens": 5060,
+  "output_tokens_details": {
+   "thinking_tokens": 1451
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15459,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3483,
+    "cache_read_input_tokens": 36801,
+    "cache_creation_input_tokens": 5513,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5513
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e3e2b821\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1〜AC5, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` は正常系の 1 件ずつしかなく、`service.py` の中心の規則を確かめるテストがない。確かめられていないのは次のとおり。\n  - 認可（K1・K6）: 他の組織・他人の非公開メモの NotFound、管理者でも非公開メモは NotFound、他人による更新・削除の Forbidden、組織をまたぐ移管の Forbidden。\n  - 更新・競合（K3）: 古い version での Conflict、読み出しと書き込みの間に更新が入った場合の Conflict。\n  - 閲覧数（K3）: 閲覧数の同時加算。\n  - 失敗時の巻き戻し（K4）: `hooks.before_write` による作成・削除・移管の途中失敗と、何も残らないこと。\n  - 入力検証と一覧（AC1・AC3）: 題名・本文・タグの境界値、tags に文字列を渡す場合、page・per_page・sort の範囲外、一覧に他人の非公開メモが入らないこと。\n  - 検索（K2）: `%` `_` `\\` を含む検索語、タグの OR 絞り込み。\n  / 根拠: 上記はすべて仕様の受け入れ条件とリスクで、設計書が差し込み口（`hooks.before_write`、`RateLimiter.hook`）を用意しているのに、テストが使っていない。たとえば `_visible` や `_can_modify` の条件を外しても 12 件すべて通る。検索の LIKE の ESCAPE も、`_like_escape` の呼び出しを外して `%` で全件が当たるようにしても検出できない。実装コード自体を読んだ範囲では欠陥は見つけていない（認可、ESCAPE 句、プレースホルダー、version 条件、トランザクションは設計どおり）。ただし K1〜K4・K6 は検証がないため、保証できていない。 / 提案: 上の各項目について、期待どおりに失敗するテストを追加する。検索語には `%` `_` `\\` を使う。巻き戻しは `hooks.before_write` で例外を起こして再現する。\n\n- [重大2] 区分: テスト / 対象: AC7, AC2, K3 / 対応区分: 証拠不足 / 内容: 並行の検証がない。RateLimiter は limit 回までの逐次呼び出しと、枠が過ぎた後の再開しか確かめていない。「枠の開始からちょうど window 秒で新しい枠になる」という境界（window - ε で拒否、window ちょうどで許可）、複数スレッドからの同時呼び出しで上限を超えないこと、複数の接続（別スレッド）から `get_note` を同時に呼んだときの `views` の数え漏れ、がどれも確認されていない。 / 根拠: R2・R7 が明示的に求める要件で、K3 のリスクそのものである。`threading.Lock` を外しても、閲覧の加算を `UPDATE ... views = views + 1` から読み出して書き戻す形に変えても、現行のテストは通る。 / 提案: `RateLimiter.hook` で他のスレッドを割り込ませるか、バリアで複数スレッドを同時に開始させる決定論的なテストを書く（sleep には頼らない）。`get_note` の同時加算は、ファイル DB に別々の接続を使い、N スレッドで閲覧して `views == N` を確かめる。\n\n- [重大3] 区分: テスト / 対象: AC6, AC8, AC9, AC10, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。\n  - 監査ログ（AC6・K7）: `export_audit` の api_key 伏せ字（末尾4文字の表示、8文字未満はすべて伏せる境界、member の Forbidden）。現行テストは action と actor しか見ていない。\n  - 共有リンク（AC8・K8）: 期限ちょうど以降の拒否（`now == expires` と `expires - 1`）、形の崩れたリンク（改行付き・全角数字・欠落・長さ違いの署名・非文字列）、別の secret での拒否。tampered テストの改ざんは note_id の 1 パターンだけである。\n  - 機密の露出（AC9・K5）: ログ・例外のメッセージに本文・署名・api_key が出ないこと（`caplog` 相当で確かめる）。\n  - 例外の後（AC10）: 例外の後に同じ接続でコミットできること。\n  / 根拠: 受け入れ条件に境界と異常系が明記されているが、1 件も確かめていない。たとえば `>=` を `>` に変える、伏せ字の処理を外す、ログに署名を出す、という変更をしても検出できない。 / 提案: 上記の境界値・異常系・ログ出力の検査・例外後の接続の再利用のテストを追加する。\n\n- [軽微1] 区分: 実装 / 対象: R4, delete_note / 対応区分: 改善提案 / 内容: `delete_note` は、認可の判定（`_row` と `_can_modify`）をトランザクションの外で行っている。判定の後・BEGIN の前に移管（owner が変わる）や別の削除が入ると、旧作成者が他人のメモを消せる、または既に消えたメモの削除が成功して監査ログが残る可能性がある。`update_note` は version 条件で防げている。 / 提案: トランザクション内で行を読み直して判定し、`DELETE` の rowcount が 1 でなければ NotFound にする。\n\n- [軽微2] 区分: 実装 / 対象: R8, verify_link / 対応区分: 改善提案 / 内容: リンクの note_id は `int()` で正規化してから署名を検証しているので、`007.<期限>.<署名>` のように先頭が 0 の別表記も有効になる。実害は小さい。 / 提案: 署名の対象を受け取った文字列のままにするか、`str(int)` と一致しないものを拒否する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系 1 件と空題名 1 件だけで不十分（境界値、タグの規則、巻き戻しがない）。\n- AC2: V2 は閲覧の正常系だけで不十分（他の組織・他人の非公開メモの NotFound、同時の閲覧数がない）。\n- AC3: V3 は一覧と検索の正常系だけで不十分（範囲外の拒否、非公開メモの除外、`%` `_` のエスケープ、タグ OR がない）。\n- AC4: V4 は作成者の更新・削除の成功だけで不十分（Forbidden、Conflict、検証、巻き戻しがない）。\n- AC5: V5 は成功と非管理者の拒否だけで不十分（組織またぎ、途中失敗時に元のままであることがない）。\n- AC6: V6 は伏せ字を一切確かめておらず不十分。\n- AC7: V7 は逐次だけで、境界とスレッドの検証がなく不十分。\n- AC8: V8 は往復と 1 種類の改ざんだけで、期限の境界と形の崩れがなく不十分。\n- AC9: V9 は該当するテストがなく不十分。\n- AC10: V10 は該当するテストがなく不十分。\n- リスク K1・K2・K3・K4・K5・K6・K7・K8: すべて検証が不十分または欠けている（理由は重大1〜3のとおり）。\n- エンジンが検出したテストの兆候: なし。skip・弱体化の兆候は見つからなかった（history は bind のみ）。ただしテストの量が要求に対して足りない。\n\n### E2E の要否\n- 不要（HTTP・UI がないライブラリで、unittest と実 SQLite で足りる）。ただしファイル DB を使った複数接続・複数スレッドの検証は必要。\n\n### 不足しているリスク\n- K1・K3・K4・K6: 認可、同時実行、巻き戻しの回帰を検出するテストがない。\n- K2: 検索語の `%` `_` `\\` の扱いを確かめるテストがない。\n- K5・K7・K8: 伏せ字、期限の境界、ログの検査がない。\n\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を通読した。認可、ESCAPE 句とプレースホルダー、トランザクション、RateLimiter、署名の検証を、入力から使われる箇所までたどった。\n- `python3 -m unittest discover` は 12 件すべて合格した。ただし正常系が中心である。\n- `aqdlc history --since 0` と `trace` を確認した。検証条件の弱体化は見つからず、反証テストは無効だった。",
+ "files_changed": [],
+ "valid": true
+}

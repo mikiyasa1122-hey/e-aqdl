@@ -1,0 +1,49 @@
+{
+ "case": "SQL-05",
+ "rep": 1,
+ "sec": 34.0,
+ "exit": 0,
+ "cost_usd": 0.132239,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19389,
+  "cache_read_input_tokens": 115370,
+  "output_tokens": 4313,
+  "output_tokens_details": {
+   "thinking_tokens": 999
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19389,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2846,
+    "cache_read_input_tokens": 36901,
+    "cache_creation_input_tokens": 2720,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2720
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 3d65b6ee\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `_like_escape`（notes/service.py の `_like_escape`、`search_notes` の LIKE 条件）が、エスケープ文字そのもの `\\` をエスケープしていない。`%` と `_` だけを置換している。そのため、検索語に `\\` を含むと、普通の文字として部分一致で探せない。 / 成立条件: 検索語に `\\` を含む場合。例えば本文が `a\\b x` のメモがあるとき、`search_notes(conn, user, \"a\\\\b\")` が 0 件になる。検索語が `\\` だけの場合、パターンは `%\\%` になる。SQLite はこれを「リテラルの `%`」と解釈する。 / 影響: 仕様の「% と _ も普通の文字として部分一致」の趣旨（ワイルドカードやエスケープ文字を特別扱いしない）に反する。`\\` を含むメモを検索で見つけられない。`\\` で検索すると、`%` を含む無関係なメモに当たる。 / 根拠: 一時インメモリ DB で再現した。`a\\b x` と `50% off` を登録し、`search_notes('a\\\\b')` は `[]`、`search_notes('\\\\')` も `[]` だった。パターン `%\\%` は `%` を含む文字列に一致するはずで、`\\` を含むメモは見つからない。上流の検証や DB の制約では防がれていない（q の検証は長さと空白だけ）。タイトル条件と本文条件のどちらも同じ `pattern` を使うため、両方に影響する。 / 提案: `_like_escape` で最初に `\\` を `\\\\` へ置換し、その後で `%` と `_` を置換する。`\\` を含む検索のテストも追加する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほとんどが正常系の確認にとどまる。リスクごとに必要な検証がほぼない。 / 根拠: 仕様がリスクとして挙げ、設計が `hooks.before_write` と `RateLimiter.hook` を用意している項目の検証が、次のとおり欠けている。\n  - K1: 他の組織・他人の非公開メモの get・一覧・検索・更新・削除で、NotFound または Forbidden になるか確かめるテストがない。\n  - K3: 閲覧数の同時加算、更新の同時競合、RateLimiter の同時呼び出しのテストがない。\n  - K4・AC10: 途中で失敗したときのロールバック（create・delete・transfer）と、その後に接続を使い続けられることのテストがない。\n  - AC4: Conflict（古い version、読み出しと書き込みの間の割り込み）のテストがない。\n  - K2・AC3: `%` `_` `\\` を含む検索語、タグの OR 絞り込み、page・per_page・sort の範囲外のテストがない。\n  - AC1: 題名・本文・タグの境界値、tags に文字列そのものを渡した場合のテストがない。\n  - AC6・K7: 鍵のマスクの検証が欠けている。\n  - AC7: 枠の境界（ちょうど window 秒）のテストがない。\n  - AC8: 期限ちょうど、形の崩れたリンク、署名違いのテストがない。\n  - R9: 例外やログに本文・署名・api_key が出ないことを確かめるテストがない。\n\n  これらはどれも必須の受け入れ条件またはリスクなので、検証がないままでは完了と判断できない。上記の重大1も、この検証があれば見つかった欠陥である。 / 提案: リスクごとに、次の検証を追加する。\n  - 他の組織・他人の非公開メモのアクセス拒否。\n  - `service.hooks` と `RateLimiter.hook` を使った、決定論的な並行・途中失敗のテスト。\n  - 各境界値のテスト（枠の境界、リンクの期限）。\n  - ロールバック後の接続再利用。\n  - 鍵のマスク（8文字未満、8文字、それ以上）。\n  - ログ・例外メッセージに機密情報が出ないこと。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `list_notes` で `sort` に list など非ハッシュ値を渡すと、`sort not in SORT_COLUMNS` が ValidationError ではなく TypeError になる。 / 提案: `isinstance(sort, str)` を先に確認する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名の拒否と正常系の作成だけで、不十分。境界値、tags の型・個数、重複タグ、ロールバックのテストがない。\n- AC2: 同じ組織内の get だけで、不十分。他の組織・他人の非公開メモ、閲覧数の同時加算のテストがない。\n- AC3: 一覧の基本と日本語の検索だけで、不十分。ワイルドカード、タグ、範囲外のテストがない。`\\` のバグも見逃している。\n- AC4: 所有者による更新・削除の正常系だけで、不十分。Conflict、Forbidden、NotFound、同時更新のテストがない。\n- AC5: 件数の確認と非管理者の拒否だけで、不十分。他の組織への移管と、途中失敗時に元のままであることを確かめるテストがない。\n- AC6: 監査ログの action と actor だけで、不十分。マスクは未検証。\n- AC7: 上限の確認と窓の切り替えだけで、不十分。ちょうど window 秒の境界と、同時の呼び出しのテストがない。\n- AC8: 往復と改ざん（note_id の置換）だけで、不十分。期限ちょうど、期限切れ、形の崩れのテストがない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip や `.only` は無い）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体・結合テストで足りる。ただし並行処理と途中失敗の決定論的なテストは必要。\n### 不足しているリスク\n- K1: 認可の漏えいを確かめるテストがない。\n- K3: 同時の更新・閲覧・呼び出しで更新や数が失われるリスクの検証がない。\n- K4: 途中の失敗による不整合の検証がない。\n- K5: 機密情報の露出の検証がない。\n- K6: 組織の外への移管・一部だけ移るリスクの検証がない。\n- K7: api_key の漏えいの検証がない。\n- K8: 共有リンクの検証が不足している。\n- なお、実装コードは読んだ範囲で、K1・K3・K4・K6 に対する設計どおりの機構（`_visible`、`BEGIN IMMEDIATE`、WHERE での version 判定、同組織チェック）が入っていた。実行で確かめたのは検索の挙動だけ。\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK だった。\n- インメモリ DB で `\\` を含む検索を再現し、重大1の不具合を確認した。コードは変更していない。\n- `git status` で、notes/ と tests/ が未追跡であることを確認した。`$AQ trace` と `$AQ history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

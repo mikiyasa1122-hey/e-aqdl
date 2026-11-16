@@ -1,0 +1,49 @@
+{
+ "case": "EXC-01",
+ "rep": 3,
+ "sec": 33.9,
+ "exit": 0,
+ "cost_usd": 0.1433694,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21905,
+  "cache_read_input_tokens": 117934,
+  "output_tokens": 4394,
+  "output_tokens_details": {
+   "thinking_tokens": 916
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21905,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3056,
+    "cache_read_input_tokens": 38489,
+    "cache_creation_input_tokens": 3417,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3417
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2e25bbfa\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1 / 対応区分: 修正必須 / 内容: `get_note` は、見られないメモ（他の組織・他人の非公開）に対して Forbidden を投げている。仕様 R2 は、見られないメモを存在しないものと同じく NotFound にして存在を明かさないことを求めている。 / 成立条件: 別の組織の利用者、または他人の非公開メモを開こうとした利用者が、存在する note_id で `get_note` を呼ぶ。 / 影響: 存在するメモは Forbidden、存在しないメモは NotFound になる。この差で、他組織や他人の非公開メモの存在を推測でき、K1（漏えい）の要求を満たさない。 / 確認した保証: `update_note` と `delete_note` は `_visible` を先に見て NotFound を返すため問題ない。`get_note` だけが異なる。呼び出し元や上流で例外を変換する処理はなく、既存のテストでもこの経路は検証されていない。 / 根拠: notes/service.py の `get_note` 内の `if not _visible(user, row): raise Forbidden(...)`（`row is None` の判定の直後）。 / 提案: この分岐を `raise NotFound(f\"note {note_id}\")` にする（`row is None` と同じ扱いにまとめてよい）。あわせて、他組織・他人の非公開メモ・存在しないメモがすべて NotFound になるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1, K2, K3, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほぼ正常系の1ケースずつしかない。仕様が必須としている次の検証がない。(a) 他組織・他人の非公開メモの拒否（R2・R3・R4・R5。AC2 と K1）。(b) 同時の閲覧で数え漏れがないこと、および R4 の読み出しから書き込みの間に更新が入った場合の Conflict と version 不一致。`service.hooks` と `RateLimiter.hook` の差し込み口は、設計が決定論的な再現用に用意したのに、1度も使われていない（AC4 と K3）。(c) 作成・削除・移管の途中失敗でロールバックされ何も残らないこと（AC1・AC5・K4）。(d) `%` と `_` を含む検索語の LIKE エスケープ、SQL インジェクション文字列、page・per_page・sort・題名・本文・タグの境界値と不正値（AC3・K2）。(e) 管理者以外の拒否と、組織をまたぐ移管の拒否（AC5・K6）。(f) api_key のマスク（8文字未満は全部伏せる／8文字以上は末尾4文字だけ残す）（AC6・K7）。(g) RateLimiter の枠の境界（ちょうど window 秒で新しい枠になる）とスレッド並行（AC7・K3）。(h) 共有リンクの期限の境界（期限ちょうどは無効）、形の崩れ、期限切れ、署名の改ざん（AC8・K8）。(i) ログや例外メッセージに本文・署名・api_key が出ないこと（AC9・K5）。(j) 例外の後に接続が次の操作で使えること（AC10）。 / 根拠: 受け入れ条件 AC1〜AC10 とリスク K1〜K8 は、仕様上すべて必須の検証対象である。trace は全項目を「合格」としているが、実際に確かめているのは正常系のみで空洞化している。実際、重大1の欠陥は、AC2 を確かめるテストがあれば検出できた。 / 提案: 上の (a)〜(j) を unittest で追加する。並行実行と途中の失敗は `hooks.before_write` と `RateLimiter.hook` を使い、sleep に頼らず決定論的に再現する。`:memory:` とは別に、スレッドごとに別の接続を持つ一時ファイルの DB を使う。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、権限の判定（`_visible`・`_can_modify`）をトランザクションの外で読んだ行で行っている。判定の後、書き込みの前に `transfer_notes` が入ると、元の所有者が判定を通ったまま削除できる余地がある。update は version の条件で Conflict になるが、delete には version の条件がない。 / 提案: 判定用の読み出しを `transaction()` の内側に移す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、不十分。長さ・空白・タグ・本文の境界、タグが文字列そのものの場合、途中失敗でロールバックされる検証がない。\n- AC2: 不十分。見え方（組織・非公開・NotFound）、閲覧数の加算、同時の閲覧の検証がなく、実装も NotFound の規則に違反している（重大1）。\n- AC3: `test_list_first_page` と `test_search` の正常系のみで、不十分。範囲外・sort・`%`・`_`・タグ OR・インジェクションの検証がない。\n- AC4: `test_update_by_owner` と `test_delete_by_owner` のみで、不十分。Forbidden・NotFound・Conflict・競合・更新時の検証・削除の失敗が未検証。\n- AC5: `test_transfer` は件数だけを見ていて、移管後の所有者を確かめていない。`test_transfer_requires_admin` は管理者以外の拒否の1ケースだけ。組織をまたぐ拒否と失敗時に元のままであることが未検証で、不十分。\n- AC6: `test_export_audit` は action と actor だけを確認している。api_key のマスクは未検証で、不十分。\n- AC7: `test_limit` は上限と、61秒後の枠の更新だけを確認している。ちょうど window 秒の境界と、スレッド並行が未検証で、不十分。\n- AC8: `test_roundtrip` と `test_tampered` のみで、不十分。期限の境界、期限切れ、形の崩れが未検証。\n- AC9: 検証がなく、不十分。\n- AC10: 検証がなく、不十分。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。ただし、検証の空洞化は重大2のとおり。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、リスクは unit テストで確かめられる）。ただし、スレッド並行は別接続・別スレッドでの統合的な unit テストが必要。\n\n### 不足しているリスク\n- K1: 閲覧の NotFound 規則違反（重大1）と、検証の欠如（重大2）。\n- K3・K4・K6・K7・K8: 検証がない（重大2）。\n- 権限判定とトランザクションの隙間（軽微1）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて通った。ただし内容は正常系が中心。\n- notes/db.py、service.py、ratelimit.py、share.py、errors.py を通読した。SQL はすべてプレースホルダーで、LIKE も ESCAPE を使っている。ORDER BY は固定の辞書から選んでいる。ロールバックの実装は妥当。\n- `aqdlc history` では、検証条件の bind だけで、弱体化や改ざんは見当たらなかった。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

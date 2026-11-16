@@ -1,0 +1,49 @@
+{
+ "case": "SQL-03",
+ "rep": 3,
+ "sec": 30.4,
+ "exit": 0,
+ "cost_usd": 0.1349383,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20782,
+  "cache_read_input_tokens": 118743,
+  "output_tokens": 3992,
+  "output_tokens_details": {
+   "thinking_tokens": 651
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20782,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2568,
+    "cache_read_input_tokens": 39971,
+    "cache_creation_input_tokens": 1043,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1043
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 86e2428c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `list_notes` が sort を検証しておらず、許可された2値以外の文字列がそのまま ORDER BY に埋め込まれる。 / 成立条件: 呼び出し側が利用者入力を sort に渡す。`sort=\"id\"` と `sort=\"(SELECT 1/0)\"` は ValidationError にならず、そのまま実行された（実行で確認）。 / 影響: 仕様の「updated か title だけ、範囲外は ValidationError」に反する。SQL インジェクションの経路にもなり、ORDER BY 句内の任意式（サブクエリによる他の組織の情報の推測など）を評価できる。 / 根拠: notes/service.py:271 の `SORT_COLUMNS.get(sort, sort)`。上流の検証・DB の制約はなく、既存のテストも防いでいない。 / 提案: sort が `SORT_COLUMNS` にない場合は ValidationError を送出し、`.get` のフォールバックをやめる。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査に `TAG_RE = ^[a-z0-9-]{1,20}$` と `.match` を使っているため、末尾の改行を許してしまう。 / 成立条件: `tags=[\"ab\\n\"]` で作成・更新・検索を行う。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。`create_note(tags=[\"ab\\n\"])` は note id 2 を返して成功した（実行で確認）。タグを R1 の規則で検査するはずの R3（検索）の検査も通る。 / 根拠: notes/service.py:158, 208, 293。 / 提案: `TAG_RE.fullmatch` に変える（share.py の LINK_RE と同じ方式）か、`\\Z` を使う。\n- [重大3] 区分: テスト / 対象: AC1〜AC5, AC7, AC8, AC10, K1, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: テストは12件しかなく、ほとんど正常系のみ。仕様で必須とされた検証が欠けている。欠けているのは、各入力検証の境界（題名100/101文字、タグ5/6個、per_page 0/51、sort 不正）、並行実行（同時閲覧の数え漏れ、更新の Conflict、RateLimiter の同時呼び出し）、途中失敗のロールバック（`hooks.before_write` を使った create・delete・transfer）、他の組織・他人の非公開メモの NotFound と Forbidden、LIKE の % と _、共有リンクの期限境界・形の崩れ・改ざん、例外の後の接続の再利用（AC10）。 / 根拠: 設計のテスト方針は hooks と RateLimiter.hook で並行・失敗を再現するとしているが、tests/test_notes.py にそれを使うテストが無い（12件はすべて grep で確認）。重大1・2の欠陥もテストで検出されていない。K1・K3・K4・K6・K8 は必須のリスクで、現状のテストでは空洞化している。 / 提案: 上記の境界・異常系・hooks による決定論的な並行・失敗のテストを追加する。\n- [重大4] 区分: テスト / 対象: AC9, R9, K5 / 対応区分: 証拠不足 / 内容: ログ・例外のメッセージに本文・署名・api_key が出ないことを確かめるテストがない。 / 根拠: AC9 は仕様上の必須条件で、assertLogs などによる確認が見当たらない。 / 提案: ログと例外の文字列に機密値が含まれないことを検証するテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `list_notes` の COUNT と SELECT が別々の文で、1つのトランザクションにまとまっていない。そのため、間に書き込みが入ると total と items がずれうる。 / 提案: 読み取りを1つのトランザクションで囲む。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで、境界・タグ・ロールバックを確かめておらず不十分。\n- AC2: 閲覧数が増えることは確認しているが、組織違い・非公開の NotFound と同時閲覧の検証がなく不十分。\n- AC3: test_list_first_page と test_search だけで、sort 不正・範囲外・LIKE の % と _・タグ OR が未検証のため不十分（重大1のバグを見逃している）。\n- AC4: 作成者による更新・削除だけで、Conflict・管理者・他人・非公開・失敗時の巻き戻しが未検証のため不十分。\n- AC5: 正常系と非管理者のみで、別組織と途中失敗の巻き戻しが未検証のため不十分。\n- AC6: test_export_audit が1件ある。8文字未満の鍵の伏せ方は未確認で、不十分な可能性がある。\n- AC7: test_limit で上限は確認しているが、枠の境界とスレッドの同時呼び出しが未検証のため不十分。\n- AC8: test_roundtrip と test_tampered だけで、期限ちょうど・期限切れ・形の崩れが未検証のため不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出した兆候はなし。`history` を見たところ、検証条件の弱体化はなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと DB テストで足りる。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: sort 経由のインジェクションがテストされておらず、実装に実際に欠陥がある。\n- K3: 同時の更新・閲覧・呼び出しで更新や数が失われるリスクを確かめるテストがない。\n- K4: 途中の失敗による不整合を確かめるテストがない。\n- K5: 機密情報の露出を確かめるテストがない。\n- K6: 移管で一部だけ移る・組織外に渡るリスクを確かめるテストがない。\n- K8: 期限切れ・改ざん・形の崩れた共有リンクを通すリスクの検証が不足している。\n\n### 確認したこと\n- 仕様・設計・全ソース（db, service, ratelimit, share, errors）を読んだ。\n- `python3 -B -m unittest discover` は 12 件すべて合格した。ただし網羅性が低い。\n- 再現スクリプトを実行し、`sort=\"id\"` と `sort=\"(SELECT 1/0)\"` が ValidationError にならずに通ること、タグ `\"ab\\n\"` が作成できることを確認した。\n- `aqdlc history --since 0` を確認し、検証条件の弱体化はなかった。",
+ "files_changed": [],
+ "valid": true
+}

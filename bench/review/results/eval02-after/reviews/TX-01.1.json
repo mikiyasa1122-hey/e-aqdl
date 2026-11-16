@@ -1,0 +1,49 @@
+{
+ "case": "TX-01",
+ "rep": 1,
+ "sec": 44.8,
+ "exit": 0,
+ "cost_usd": 0.1645517,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 22653,
+  "cache_read_input_tokens": 159597,
+  "output_tokens": 5796,
+  "output_tokens_details": {
+   "thinking_tokens": 1304
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22653,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3412,
+    "cache_read_input_tokens": 42491,
+    "cache_creation_input_tokens": 394,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 394
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 548d810a\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, R10, K4, AC4（notes/service.py:187-192 の delete_note） / 対応区分: 修正必須 / 内容: 削除がタグ削除とメモ削除の2つのトランザクションに分かれている。仕様 R4 は「タグとメモを1つのトランザクションで消す」と定めている。 / 成立条件: 1つ目のコミット後、2つ目のトランザクションの前後で失敗が起きる（hooks.before_write(\"delete:note\") や DB エラー）。 / 影響: メモが残ったままタグだけが消え、監査ログも残らない。データが不整合になる。 / 根拠: 実行して確認した。delete:note で例外を起こすと、メモは残り、タグは `['x']` から `[]` になった。上流の検証や DB の制約はこれを防いでいない。 / 提案: note_tags の削除、notes の削除、監査ログの記録を1つの `with transaction(conn)` にまとめる。hook は同じトランザクションの中に置く。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3（notes/service.py:14, 64, 150 の TAG_RE.match） / 対応区分: 修正必須 / 内容: TAG_RE が `^...$` のため、末尾に改行を付けたタグ（\"abc\\n\"）が通る。仕様はタグを英小文字・数字・ハイフンの1〜20文字に限っている。 / 成立条件: タグが \"abc\\n\" のように末尾に改行を含む。create・update・search のすべてで起きる。 / 影響: 不正なタグが保存される。実行すると `['abc\\n']` が保存・返却された。入力検証が空洞化する。 / 根拠: Python の `$` は末尾の改行の前にも一致する。share.py は同じ理由で fullmatch を使っており、実装内でも不統一になっている。 / 提案: `TAG_RE.fullmatch(t)` に変える（2か所）。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8（tests/test_notes.py 全体） / 対応区分: 証拠不足 / 内容: テストは正常系が中心で、仕様の規則と設計書の差し込み口（hooks.before_write、RateLimiter.hook）を一度も使っていない。次の証拠がない。①途中失敗時のロールバック（作成・削除・移管。重大1を検出できなかった）②他組織・他人の非公開メモの NotFound（get・list・search・update）③Forbidden（member による他人のメモの更新・削除、他組織への移管）④version の Conflict と、読み出しから書き込みの間に更新が入った場合の Conflict⑤複数スレッドでの閲覧数の数え漏れと RateLimiter の同時呼び出し⑥枠の境界（ちょうど window 秒）と期限の境界（now == expires）⑦LIKE の % と _ のエスケープ、タグ OR 検索、入力の境界値（100文字、5個、per_page 51、page 0）⑧api_key の伏せ字（V6 は action と actor しか見ていない）⑨ログ・例外のメッセージに機密情報が出ないこと⑩例外の後に接続が使えること。 / 根拠: 認可、SQL、同時実行、データ整合性が中心のリスクであり、条件を外しても失敗するテストが1つもない。tests/test_notes.py は 12 件すべて合格するが、重大1・2の欠陥を検出できなかった。 / 提案: 上記①〜⑩を、決定論的な差し込み口と別々の接続・スレッドで検証するテストを追加する。たとえば hook で障害を起こして削除・作成・移管の全体が元に戻ることを確かめ、clock を差し替えて境界をちょうどの値で確かめる。\n- [重大4] 区分: 実装 / 対象: R4, K1, K3（notes/service.py:157-178 の update_note） / 対応区分: 修正必須 / 内容: 認可の判定（_visible と _can_modify）と、楽観的ロックの前提になる行の読み出しが、トランザクションの外で行われている。 / 成立条件: 読み出しの後、書き込みの前に transfer_notes が実行され、所有者が変わる。呼び出し側が最新の version を渡す。 / 影響: 古い所有者の権限で、移管後のメモを更新できる。ただし version が最新である必要があるため、影響は限定的。 / 根拠: 認可は 158-162 行の事前の読み出しで決まり、168 行以降の UPDATE は id と version だけを条件にしていて owner_id を条件にしていない。delete_note も同様。実際に再現して確かめたわけではなく、コードの経路からの判断である。 / 提案: BEGIN IMMEDIATE の中で行を読み直して認可を判定する。または UPDATE の WHERE に owner_id・org_id の条件を加える。\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py:171） / 対応区分: 改善提案 / 内容: 更新の対象のメモが同時に削除されていた場合も、NotFound ではなく Conflict になる。仕様の範囲内で、動作の問題ではない。 / 提案: 必要なら rowcount が 0 のときに存在を確認して NotFound を返す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけを確認しており、不十分。タグの規則（個数・形式・改行）、題名・本文の境界、途中失敗でも何も残らないことの確認がない。\n- AC2: 同じ組織の利用者による閲覧が通ることしか確認しておらず、不十分。他組織・他人の非公開メモの NotFound、閲覧数の増加、同時閲覧での数え漏れの確認がない。\n- AC3: 一覧は件数、検索は部分一致が1件通ることしか確認しておらず、不十分。範囲外の入力の拒否、% と _ のエスケープ、タグ OR 検索、非公開メモの除外、並び順の確認がない。\n- AC4: 所有者による更新と削除だけで、不十分。Conflict、Forbidden、非公開メモへの NotFound、削除のトランザクション（重大1）の確認がない。\n- AC5: 件数と管理者以外の拒否だけで、不十分。組織をまたぐ移管の拒否、元の所有者のメモが残らないこと、途中失敗で元のままになることの確認がない。\n- AC6: 不十分。api_key の伏せ字を一度も確認していない。8文字未満の鍵や、ちょうど8文字の鍵の境界もない。\n- AC7: 枠が切れた後に再び通ることしか確認しておらず、不十分。ちょうど window 秒の境界、スレッドからの同時呼び出し、上限を超えて許さないことの確認がない。\n- AC8: 往復と改ざん1パターンだけで、不十分。期限の境界（now == expires）、期限切れ、形の崩れ、署名の改ざんの確認がない。\n- AC9: 不十分。ログ・例外メッセージ・出力に機密情報が出ないことを確認するテストがない。\n- AC10: 不十分。例外の後に接続を使い続けられることを確認するテストがない。\n- エンジンが検出したテストの兆候はなし。ただし gate の合格は、実装の正しさの証拠として弱い。\n### E2E の要否\n- 不要（ライブラリのみで UI・HTTP がない）。ただし、別々の接続・別スレッドでの並行テストは必要（重大3）。\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを防ぐ検証がない。\n- K2: LIKE のワイルドカードとエスケープを確かめる検証がない。実装は ESCAPE とプレースホルダーを使っており問題なし。\n- K3: 同時の閲覧・更新・呼び出しの検証がない。\n- K4: ロールバックの検証がなく、実際に削除で不整合が出ている（重大1）。\n- K5・K7: api_key の伏せ字とログの検証がない。\n- K6: 他組織への移管の拒否と、途中失敗で元のままになることの検証がない。\n- K8: 期限の境界と形の崩れたリンクの検証がない。\n### 確認したこと\n- spec.md・design.md と、notes/ の全ソース（db、service、ratelimit、share、errors）を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12 件が合格した。\n- 読み取り専用の Python スクリプトで再現を確認した。末尾に改行を含むタグ \"abc\\n\" が保存された。delete_note の途中で例外を起こすとタグだけが消え、メモが残った。\n- `aqdlc history --since 0` を確認した。検証条件の弱体化の形跡は見つからなかった（bind が追加されているだけ）。\n- git の状態は全ファイルが未追跡で、git diff による比較はできなかった。\n- 次の項目は問題を見つけなかった。SQL はすべてプレースホルダーで、ORDER BY は固定の辞書から作っている。LIKE は % _ \\ をエスケープし ESCAPE を付けている。RateLimiter は Lock の中で枠の境界を判定している。share.py は fullmatch・compare_digest・期限の境界（>=）が正しい。api_key の伏せ字ロジックは仕様どおり。ログには ID だけを出している。",
+ "files_changed": [],
+ "valid": true
+}

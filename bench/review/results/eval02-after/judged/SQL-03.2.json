@@ -1,0 +1,38 @@
+{
+ "case": "SQL-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0653223,
+ "judge_raw": "各指摘の判定は次のとおりです。\n\n- **重大1**: 埋め込み欠陥そのものです。127行の `SORT_COLUMNS.get(sort, sort)` で、許可外の `sort` がそのまま ORDER BY に入ります。原因・箇所・影響（任意の式、ブラインドの推測）が正解データと一致します。\n- **重大2**: 実在する欠陥です。`TAG_RE.match` と `$` の組み合わせで、末尾が改行のタグが通ります。仕様のタグ規則に反しており、埋め込み欠陥とは別物です。\n- **重大3**: テストの不足だけを指摘しているので、test_gap です。\n- **重大4**: 更新・削除で認可の確認が transaction の外にあり、transfer との競合で古い判定のまま書き込めるという指摘です。読み出し後に所有者が変わる実在の競合で、埋め込み欠陥とは別なので real_other と判定します。ただし仕様上の位置づけはやや弱く、version を渡し直した場合に限られます。\n- **軽微1**: version の型を検査しないという指摘です。欠陥というより入力検証の改善提案なので style とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の sort を許可値に限らず ORDER BY に直接入れる点を、箇所・原因・影響まで正しく指摘している。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の match と $ により末尾改行のタグが通る、実在する別の検証漏れである。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"認可の再確認が transaction 外にあり、transfer との競合で古い判定のまま更新される実在の競合である。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"version の型検査という入力検証の改善提案で、仕様違反の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ sort の ORDER BY 差し込みを、同じ箇所・原因・影響で指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の sort を許可値に限らず ORDER BY に直接入れる点を、箇所・原因・影響まで正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の match と $ により末尾改行のタグが通る、実在する別の検証漏れである。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "認可の再確認が transaction 外にあり、transfer との競合で古い判定のまま更新される実在の競合である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "version の型検査という入力検証の改善提案で、仕様違反の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ sort の ORDER BY 差し込みを、同じ箇所・原因・影響で指摘している。"
+ }
+}

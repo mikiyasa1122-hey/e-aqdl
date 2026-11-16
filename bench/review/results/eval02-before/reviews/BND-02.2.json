@@ -1,0 +1,49 @@
+{
+ "case": "BND-02",
+ "rep": 2,
+ "sec": 33.5,
+ "exit": 0,
+ "cost_usd": 0.11016019999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13896,
+  "cache_read_input_tokens": 120302,
+  "output_tokens": 4253,
+  "output_tokens_details": {
+   "thinking_tokens": 959
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13896,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2727,
+    "cache_read_input_tokens": 36467,
+    "cache_creation_input_tokens": 3836,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3836
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 05596f5d\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3（`notes/service.py` の `list_notes` 53〜54 行付近） / 対応区分: 修正必須 / 内容: page の検査が `page < 0` になっており、page=0 を ValidationError にしていない。仕様は「page は1以上」で、範囲外は ValidationError。 / 成立条件: `list_notes(conn, user, page=0)` を呼ぶ。上流に別の検査はない。 / 影響: 仕様上は拒否すべき入力が通り、offset が負の値（-per_page）になって SQLite では先頭ページと同じ結果が返る。返り値の `page` は 0 になる。 / 根拠: 実際に `page=0` で実行し、`{'items': [...], 'total': 1, 'page': 0, ...}` が返ることを確認した。既存のテストに page=0 を検査するものはない。 / 提案: 検査を `page < 1` に直し、page=0 と page=-1 が ValidationError になるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC2・AC4・AC5・AC7・AC8, K1・K2・K3・K4・K8） / 対応区分: 証拠不足 / 内容: `tests/test_notes.py`（12 件）は正常系が中心で、仕様と設計が必須とする異常系・境界値・並行実行・失敗時の巻き戻しをほとんど確かめていない。足りない検証は次のとおり。 (a) K1: 他の組織の人・他人の非公開メモ・存在しないメモが、どれも NotFound になること。一覧・検索に非公開メモが出ないこと。管理者が非公開メモを扱えないこと。 (b) K2: `%` `_` `'` を含む検索語と、タグ・sort の不正な値。 (c) AC1: 入力の境界値（題名 100/101 文字、本文 10000/10001 文字、タグ 5/6 個、不正なタグ、tags に文字列を渡す）。`hooks.before_write(\"create:tags\")` で途中失敗させ、メモ・タグ・監査ログが何も残らないこと。 (d) AC4: 古い version での Conflict、`hooks.before_write(\"update\")` を使った読み出しと書き込みの間の競合、Forbidden、削除が失敗したときの巻き戻し。 (e) AC2・AC7: 複数スレッド（別々の接続）で閲覧数が正確に増えること、複数スレッドから同時に `hit` しても上限を超えないこと、枠の境界がちょうど window 秒であること。 (f) AC5: 他の組織の利用者を含む移管が Forbidden になること、途中失敗で元に戻ること。 (g) AC6: 8 文字未満・ちょうど 8 文字の api_key の伏せ方。api_key が結果に含まれないこと。 (h) AC8: 期限ちょうどの時刻での拒否、期限切れ、形の崩れたリンク（改行や全角数字を含むもの）。 (i) AC9・AC10: ログや例外のメッセージに本文・署名・api_key が出ないこと。例外の後に接続が再利用できること。現状のテストは「期限切れ」「期限ちょうど」を一度も検査していない。 / 根拠: 仕様は AC を「規則どおりに決まる」と定めている。K1〜K8 は漏えい・競合・不整合・リンクの偽装といった重大なリスクである。設計は `service.hooks.before_write` と `RateLimiter.hook` を、これらを再現するための差し込み口として用意しているが、どのテストからも使われていない。重大1のような境界の不具合も、現状のテストでは検出できない。 / 提案: 上の (a)〜(i) を、AC・リスクごとに決定論的なテストとして追加する。並行実行は sleep ではなく差し込み口とスレッドの同期で再現する。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `search_notes` は、タグの検査（個数・形式）を `_validate` と重複して書いている。 / 提案: タグの検査を共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名だけを確かめており不十分。境界値、タグの検査、途中失敗で何も残らないこと（K4）が未検証。\n- AC2: V2 は同じ人の閲覧しか確かめておらず不十分。他の組織・非公開・存在しないメモの NotFound（K1）と、並行して閲覧したときの数え漏れ（K3）が未検証。実装は `BEGIN IMMEDIATE` と `views = views + 1` で正しいように見える。\n- AC3: V3 は一覧の 1 ページ目と検索の通常ケースだけで不十分。実装に page=0 を通す欠陥がある（重大1）。LIKE のエスケープ、タグの OR、範囲外の入力（K2）が未検証。\n- AC4: V4 は作成者による更新と削除の成功だけで不十分。Conflict、Forbidden、競合、削除の巻き戻し（K3・K4）が未検証。\n- AC5: V5 は成功と非管理者の拒否だけで不十分。別の組織への移管（K6）と途中失敗での巻き戻しが未検証。\n- AC6: V6 は api_key の伏せ方を一度も確かめておらず不十分（K7）。\n- AC7: V7 は枠の境界（ちょうど window 秒）と並行呼び出しを確かめておらず不十分（K3）。\n- AC8: V8 は正常系と改ざん 1 件だけで不十分。期限切れ、期限ちょうど、形の崩れたリンク（K8）が未検証。\n- AC9: V9 はログや例外のメッセージの内容を確かめておらず不十分（K5）。\n- AC10: V10 は例外の後に接続を再利用できることを確かめておらず不十分。\n- エンジンが検出したテストの兆候はなし。履歴（`history`）では検証条件を弱めた変更は見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テスト（unittest）と、別々の接続・スレッドを使うテストで足りる。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K6・K8: 上の重大2のとおり、検証が不足している。\n- 実装を読んだ範囲では、認可（`_visible`・`_can_modify`）、SQL のプレースホルダーと LIKE の ESCAPE、`transaction` の巻き戻し、共有リンクの `fullmatch` と `compare_digest` は仕様どおりに見える。ただしテストで確かめられていない。\n\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を通読した。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12 件が成功した。\n- `list_notes(page=0)` を実行し、拒否されず結果が返ることを確認した（重大1）。\n- `aqdlc.py history --since 0 --project .` で、検証条件の紐づけ（bind）が追加されただけで、弱める変更はないことを確認した。\n- `$AQ gate` と `$AQ trace` は実行していない（trace は未実行）。",
+ "files_changed": [],
+ "valid": true
+}

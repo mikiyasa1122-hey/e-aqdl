@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0697903,
+ "judge_raw": "**判定**: 欠陥なしのケースです。埋め込んだ変更は、OFFSET を変数 `offset` に分けただけで振る舞いは変わりません。レビュー担当はこの箇所を指摘しておらず、`matches_defect` に当たる指摘はありません。\n\n- **重大1**: `TAG_RE` は `^...$` で、`re.match` で使われています。そのため `\"abc\\n\"` のように末尾に改行があるタグが通ります。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する実在の欠陥で、レビュー担当は再現も確認しています。埋め込んだ欠陥ではないので `real_other` です。\n- **重大2〜4**: コードの欠陥の主張ではなく、テストの不足だけを指摘しています。いずれも `test_gap` です。\n- **軽微1**: 仕様違反とレビュー担当自身が認めている改善提案なので、`style` です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と re.match の組み合わせで末尾改行付きのタグが通るのは実在する仕様違反で、埋め込んだ変更（OFFSET の変数化）とは無関係。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"ロールバック・並行・Conflict を確かめるテストがないという、テスト不足だけの指摘。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"RateLimiter と共有リンクの境界・並行のテストがないという、テスト不足だけの指摘。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"認可・セキュリティの否定系テストがないという、テスト不足だけの指摘（実装は妥当と認めている）。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"delete の rowcount 未確認と先頭ゼロの note_id は、仕様違反ではない改善提案。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビュー担当は OFFSET の変数化には触れておらず、重大1（タグ末尾の改行）は埋め込みとは別の実在の欠陥。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と re.match の組み合わせで末尾改行付きのタグが通るのは実在する仕様違反で、埋め込んだ変更（OFFSET の変数化）とは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "ロールバック・並行・Conflict を確かめるテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "RateLimiter と共有リンクの境界・並行のテストがないという、テスト不足だけの指摘。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "認可・セキュリティの否定系テストがないという、テスト不足だけの指摘（実装は妥当と認めている）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "delete の rowcount 未確認と先頭ゼロの note_id は、仕様違反ではない改善提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は OFFSET の変数化には触れておらず、重大1（タグ末尾の改行）は埋め込みとは別の実在の欠陥。"
+ }
+}

@@ -1,0 +1,38 @@
+{
+ "case": "SEC-02",
+ "rep": 1,
+ "judge_cost_usd": 0.0650203,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `export_audit` が `api_key` を伏せずに返す点を指摘しており、埋め込んだ欠陥と箇所・原因・影響がすべて一致するため、matches_defect です。\n- **重大2**: 鍵の伏せ方を確かめるテストがないという、テストの不足だけの指摘なので test_gap です。\n- **重大3**: `TAG_RE` を `.match` で使うと末尾の改行を通すという、実在する別の欠陥です。再現も示されているため real_other です。\n- **重大4**: テストの網羅不足だけを指摘しているので test_gap です。\n- **軽微1**: 削除済みメモで Conflict になることは仕様の範囲内と自ら認めており、欠陥の主張ではなく改善提案のため style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずに actor_key として全文返す点を指摘しており、埋め込んだ欠陥と箇所・原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"鍵の伏せ方を確かめるテストがないという、テストの不足だけの指摘である。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"TAG_RE を .match で使うため末尾が改行のタグが検査を通る、実在するバグ（仕様違反）を再現つきで指摘している。\"},\n  {\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"仕様の範囲内と認めたうえでのメッセージ改善の提案であり、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ api_key 未マスクの欠陥を、箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずに actor_key として全文返す点を指摘しており、埋め込んだ欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "鍵の伏せ方を確かめるテストがないという、テストの不足だけの指摘である。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "TAG_RE を .match で使うため末尾が改行のタグが検査を通る、実在するバグ（仕様違反）を再現つきで指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "仕様の範囲内と認めたうえでのメッセージ改善の提案であり、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ api_key 未マスクの欠陥を、箇所・原因・影響とも正確に捉えている。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-02",
+ "rep": 1,
+ "sec": 36.7,
+ "exit": 0,
+ "cost_usd": 0.138326,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20591,
+  "cache_read_input_tokens": 113760,
+  "output_tokens": 4457,
+  "output_tokens_details": {
+   "thinking_tokens": 1191
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20591,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3101,
+    "cache_read_input_tokens": 36385,
+    "cache_creation_input_tokens": 4207,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4207
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e3e2b821\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: タグの検査が `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っている。Python の `$` は末尾の改行の手前にも一致するので、`\"abc\\n\"` のような改行付きのタグが通る。 / 成立条件: `create_note`、`update_note`、`search_notes` に、末尾が改行のタグ（例 `[\"abc\\n\"]`）を渡す。 / 影響: 仕様は「英小文字・数字・ハイフンの1〜20文字」だけを許すが、この規則を破るタグが保存される。保存後は `abc` と `abc\\n` が別のタグになり、タグ絞り込みの結果も食い違う。 / 根拠: notes/service.py:15（TAG_RE の定義）、:57 と :133（`TAG_RE.match`）。`create_note(c,u,'t','b',['abc\\n'])` が例外を出さずに note_id=1 を返すことを実行して確認した。share.py は同じ問題を避けるため fullmatch を使っており、実装内で不統一になっている。 / 提案: `TAG_RE.fullmatch(t)` に変える（または `\\Z` を使う）。あわせて「改行付きタグ」「21文字のタグ」「大文字のタグ」を拒否するテストを追加する。\n- [重大2] 区分: テスト / 対象: AC2, AC4, AC5, K1, K6 / 対応区分: 証拠不足 / 内容: 認可の拒否を確かめるテストが1件もない。他の組織・他人の非公開メモを見る、一覧・検索に出す、更新・削除する、管理者が非公開メモに触る、他の組織を絡めて移管する、といった場面で NotFound / Forbidden になることを確かめていない。`test_transfer_requires_admin` だけが存在する。 / 根拠: K1（漏えい）と K6（組織の外への移管）は仕様上の重要なリスクで、`_visible` や `_can_modify`、組織の条件を外してもテストが通ってしまう。tests/test_notes.py は全12件のうち正常系が大半を占める。 / 提案: 他の組織の利用者・他人の非公開メモ・存在しないメモを使い、get / list / search / update / delete の結果を確かめる。管理者の更新・削除が同じ組織の公開メモでは通り、非公開メモでは NotFound になることも確かめる。他の組織への移管が Forbidden になることも確かめる。\n- [重大3] 区分: テスト / 対象: AC1, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K3, K4, K5, K8 / 対応区分: 証拠不足 / 内容: 次の項目を確かめるテストがない。(a) 同時の閲覧数・更新（Conflict）・RateLimiter（`hook` や `hooks.before_write` の差し込み口はあるが使われていない）。(b) 作成・削除・移管の途中失敗でロールバックされ、接続を使い続けられること。(c) api_key の伏せ字（8文字未満・ちょうど8文字）。(d) 期限ちょうどでの無効化、署名の改ざん、形の崩れたリンク。(e) ログ・例外に本文・署名・鍵が出ないこと。(f) 入力検証の境界（題名100・101文字、タグ5・6個、page=0、per_page=51、不正な sort、`%` / `_` を含む検索、SQL 文字列を含む検索語）。 / 根拠: これらは仕様が AC として明示している境界・同時実行・失敗時の不整合・機密の漏えいにあたり、既存テストは正常系の一部だけを見ている。設計の「テスト方針」で差し込み口を用意したのに使っていない。 / 提案: 差し込み口で並行実行と途中失敗を決定論的に再現するテストを追加する（sleep には頼らない）。ほかの項目についても、境界値と異常系のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 対応区分: 改善提案 / 内容: `delete_note` は、`_visible` と `_can_modify` を確認してから別に BEGIN するので、その間に移管で所有者が変わったメモも消せる。`update_note` は version の条件で守られている。 / 提案: トランザクションの中でメモを読み直して認可を再確認するか、`DELETE ... WHERE id=? AND owner_id=?` のような条件で守る。\n- [軽微2] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `007.123.<署名>` のように先頭がゼロの note_id でも、`int` に変換して署名を検証するので有効になる。リンクの形が1通りに決まらない。 / 提案: 先頭ゼロを拒否するか、再生成した文字列と比べる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空題名しか見ていない。境界値、タグの規則（重大1）、途中失敗時に何も残らないことを確かめていない。\n- AC2: 不十分。自分のメモの閲覧しか見ていない。閲覧数の同時加算や、見えないメモが NotFound になることを確かめていない。\n- AC3: 不十分。一覧の1ページ目と単純な検索だけで、範囲外の拒否、`%` / `_`、タグ OR、SQL 注入のテストがない。\n- AC4: 不十分。所有者による更新と削除だけで、Conflict・Forbidden・管理者の扱い・失敗の伝播を確かめていない。\n- AC5: 不十分。成功と非管理者の拒否だけで、他の組織、途中失敗時に元のままであることを確かめていない。\n- AC6: 不十分。action と actor だけを確かめ、伏せ字の中身は確かめていない。\n- AC7: 不十分。枠が切り替わることだけを確かめ、ちょうど window 秒のときと、同時の呼び出しを確かめていない。\n- AC8: 不十分。往復と署名の差し替えだけで、期限ちょうど・期限切れ・形の崩れを確かめていない。\n- AC9: テストなし。\n- AC10: テストなし。\n- エンジンが検出した兆候はなし。skip や `.only` はないが、全体として空洞が目立つ。テストの改ざん・弱体化は確認していない（git は未コミット、新規作成のため）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest による単体・結合テスト（実際の SQLite を使う）で足りる。ただし、実ファイルのデータベースを複数のスレッド・接続で使う並行テストは必要。\n\n### 不足しているリスク\n- K1、K3、K4、K5、K6、K7、K8: 上記のとおり検証がない。\n- R9: ログ・例外に機密情報が出ないことを確かめるテストがない。コードを読んだ範囲では、本文・署名・鍵をログに出している箇所は見当たらない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて合格。\n- `create_note(..., ['abc\\n'])` を実行し、拒否されず note_id=1 が返ることを確認した（重大1）。\n- `aqdlc trace`: すべての要求が「合格だが反証未実施」の状態。\n- gate は実行していない。依存関係のインストールも、コードの変更もしていない。",
+ "files_changed": [],
+ "valid": true
+}

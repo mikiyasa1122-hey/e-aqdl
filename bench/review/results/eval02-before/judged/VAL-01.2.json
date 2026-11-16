@@ -1,0 +1,38 @@
+{
+ "case": "VAL-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0635523,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`_validate` が `strip()` をせず、空白だけの題名を受理する点を指摘しています。箇所も原因も影響も一致します。\n- **重大2**: 実在する欠陥です。`TAG_RE.match` と `$` の組み合わせにより、末尾に改行が付いたタグを通します。実行して確認しています。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: 実在する欠陥です。`page=10**30` で OFFSET の計算が SQLite の整数範囲を超え、OverflowError になります。仕様の「範囲外は ValidationError」に反します。\n- **軽微1**: 認可判定が transaction の外にある点の指摘です。更新は version で保護されているため、仕様違反の欠陥とまでは言えません。改善提案にとどまるので style とします。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_validate が strip をせず空白だけの題名を受理する点で、埋め込んだ欠陥と箇所・原因・影響が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"match と $ の組み合わせで末尾が改行のタグを通す、実在する仕様違反である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"page に巨大な整数を渡すと OverflowError になり、範囲外は ValidationError という仕様に反する実在のバグである。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"認可判定をトランザクション内に移す改善提案で、更新は version で保護されており、欠陥の主張としては弱い。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、空白だけの題名を strip で弾いていないという埋め込み欠陥そのものを指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_validate が strip をせず空白だけの題名を受理する点で、埋め込んだ欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "match と $ の組み合わせで末尾が改行のタグを通す、実在する仕様違反である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "page に巨大な整数を渡すと OverflowError になり、範囲外は ValidationError という仕様に反する実在のバグである。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "認可判定をトランザクション内に移す改善提案で、更新は version で保護されており、欠陥の主張としては弱い。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、空白だけの題名を strip で弾いていないという埋め込み欠陥そのものを指摘している。"
+ }
+}

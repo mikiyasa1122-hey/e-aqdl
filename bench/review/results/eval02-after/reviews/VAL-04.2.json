@@ -1,0 +1,49 @@
+{
+ "case": "VAL-04",
+ "rep": 2,
+ "sec": 33.8,
+ "exit": 0,
+ "cost_usd": 0.10511419999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12757,
+  "cache_read_input_tokens": 122102,
+  "output_tokens": 4186,
+  "output_tokens_details": {
+   "thinking_tokens": 788
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12757,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2853,
+    "cache_read_input_tokens": 37037,
+    "cache_creation_input_tokens": 2581,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2581
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7be71891\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` が tags を検査していない。`notes/service.py` の `_validate(new_title, new_body, [])` は tags に空配列を渡しており、`new_tags` の個数・形式・型を一切検査しないまま `note_tags` に保存する。 / 成立条件: 作成者または管理者が `tags=[...]` を渡して更新する。6個以上、大文字、空白入り、21文字以上のどれでも成立する。 / 影響: 仕様の「更新でも R1 の入力検証を行う（タグを含む）」に違反する。不正なタグがデータに入る。検索側は TAG_RE で検査するため、そのタグでは絞り込めなくなる。 / 根拠: 一時 DB で `update_note(c,u,n,1,tags=[\"BADBADBAD\",\"x y\"])` を実行したところ ValidationError にならず、`get_note` が `['BADBADBAD', 'x y']` を返した。上流に別の検証はない。 / 提案: 更新用の tags は `_tag_list` の結果を `_validate(new_title, new_body, new_tags or [])` に渡す。検査はトランザクションの前に行う。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件の大半に、規則を確かめるテストがない。`tests/test_notes.py` の 12 件はほぼ正常系だけである。次のテストが欠けている。 (a) 境界値と拒否の検査（題名100/101文字・空白だけ、本文、タグ5/6個、タグの形式、`tags=\"abc\"`）。 (b) R1 の途中失敗で何も残らないこと、R4 の削除の途中失敗、R5 の移管の途中失敗の全件ロールバック（`hooks.before_write` を使う）。 (c) R2 の他組織・他人の非公開・存在しないメモがすべて NotFound になること、閲覧数の同時加算。 (d) R3 の `%`・`_`・`\\` の検索、タグ OR、page/per_page/sort の範囲外、他人の非公開の除外。 (e) R4 の Forbidden、Conflict（古い version と競合時）、非公開メモを管理者が扱うと NotFound になること。 (f) R5 の他組織への移管が Forbidden になること。 (g) R6 の api_key のマスク（8文字未満・ちょうど8文字）。 (h) R7 のちょうど window 秒での枠の切り替えと、スレッドからの同時呼び出し。 (i) R8 の期限ちょうど・期限切れ・形の崩れ。 (j) R9 のログに本文・署名・api_key が出ないこと。 (k) R10 の例外の後に接続を再利用できること。 / 根拠: 認可、SQL、並行処理、ロールバック、期限の境界はいずれも重要なリスク（K1〜K8）で、条件を外しても現状のテストは1件も落ちない。重大1の欠陥もこのテスト不足のために見逃された。 / 提案: 上記を、設計書の差し込み口（`hooks.before_write`、`RateLimiter.hook`）を使い、sleep に頼らず決定論的に追加する。並行の確認は別々の接続・別々のスレッドで行う。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` の認可と所有者の確認が、トランザクションの外で読んだ `row` に基づいている。`_visible` と `_can_modify` は `BEGIN IMMEDIATE` の前に実行される。トランザクション内の UPDATE は `id` と `version` だけを条件にしており、所有者・組織・非公開の再確認がない。 / 成立条件: 呼び出し側が最新の version を渡せる状態で、検査の後、書き込みの前に `transfer_notes` が走る。`transfer_notes` は `version` を +1 するため、通常は Conflict になる。ただし、呼び出し側がその新しい version を知っている場合、権限を失った元の所有者でも更新が通る。 / 影響: 限定的だが TOCTOU の穴である。`delete_note` も同様に、検査後に所有者が変わっても削除が通る。 / 根拠: `notes/service.py` の `update_note`・`delete_note` は、権限の検査（トランザクション外）と書き込み（トランザクション内）が分かれている。`get_note` はトランザクション内で再確認しており、不整合がある。未確認: 実際に version を知った状態で再現できるかは、実行して確かめていない。 / 提案: トランザクション内で行を読み直して `_visible` と `_can_modify` を再評価してから UPDATE・DELETE する。または UPDATE・DELETE の WHERE に owner/org の条件を加える。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `verify_link` は先頭に 0 を付けた note_id（例: `007.…`）も、`int` で正規化した署名として検証できる。同じ note に対して複数の文字列表現が有効になる。 / 提案: 先頭 0 を拒否する（`0|[1-9][0-9]*`）か、再構成した文字列と一致するかを確かめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空の題名の拒否と正常系だけを確認している。境界値・タグの規則・ロールバックの検証がない。実装は準拠している（create_note）。\n- AC2: 不十分。閲覧の正常系しかなく、NotFound の3種類・非公開・閲覧数の並行加算の検証がない。\n- AC3: 不十分。1ページ目と通常の検索1件だけ。ワイルドカード、タグ OR、範囲外、非公開の除外の検証がない。実装では ESCAPE、プレースホルダー、SORT_COLUMNS の許可リストを確認した。\n- AC4: 不十分かつ実装に欠陥あり（重大1・3）。所有者による更新・削除の正常系しかない。\n- AC5: 不十分。正常系と非管理者の拒否のみ。他組織への移管と途中失敗時の巻き戻しの検証がない。\n- AC6: 不十分。マスクの値を一切確かめていない（`actor` だけ）。\n- AC7: 不十分。単純な上限のみ。ちょうど window 秒の境界と同時呼び出しの検証がない。\n- AC8: 不十分。往復と改ざんのみ。期限ちょうど・期限切れ・形の崩れの検証がない。\n- AC9: テストなし。\n- AC10: テストなし。\n- テストの兆候: エンジンが検出した skip などはない。検証条件の弱体化も、今回の範囲では確認していない。\n\n### E2E の要否\n- 不要（HTTP・UI のないライブラリ）。ただし、別接続・別スレッドでの並行テストは必要。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8: 上記のとおり、検証が不足している。実装側は K2 と K8 については適切である。\n- R9: ログに本文を出さないことを確かめるテストがない。\n\n### 確認したこと\n- spec.md と design.md を読み、`notes/*.py` と `tests/test_notes.py` の全行を確認した。\n- `python3 -m unittest discover` を実行し、12 件が成功した（正常系のみ）。\n- 一時のインメモリ DB で、更新時の不正タグが受理されることを再現した。\n- `$AQ trace` / `history` / `gate` は実行していない（`git status` で全体が未追跡であることだけ確認した）。",
+ "files_changed": [],
+ "valid": true
+}

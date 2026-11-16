@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-09",
+ "rep": 2,
+ "judge_cost_usd": 0.0709463,
+ "judge_raw": "**分類の要点**\n\n- 重大1: Python の `$` は末尾の改行の手前にも一致するため、`.match` では `\"abc\\n\"` が通る。仕様の「英小文字・数字・ハイフン」に反する実在の欠陥である。埋め込んだ変更は `tag_rows` を変数に分けるだけで振る舞いを変えないので、埋め込み欠陥ではない。\n- 重大2・重大3: テストの不足だけを指摘していて、コードの欠陥の主張ではない。\n- 軽微1: ハッシュできない値（list など）を `sort` に渡すと、`in dict` で TypeError になる。仕様は範囲外を ValidationError とするので、実在する欠陥だが影響は小さい。\n- 軽微2: 認可の判定がトランザクションの外で読んだ行に基づく。移管と競合すると、元の作成者が DELETE を通せる余地がある（DELETE には version の条件がない）。実在するが、条件の狭い競合である。\n\nこのケースは欠陥なしなので、`defect_detected` は \"n/a\"、`matched_label` は null になる。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と `.match` により末尾が改行のタグが通るのは実在する仕様違反で、埋め込んだ変更（tag_rows の変数化）とは無関係。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"異常系・境界・同時実行のテスト不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"監査ログの api_key 伏せと共有リンク検証のテスト不足だけを指摘している。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"sort にハッシュできない値を渡すと ValidationError でなく TypeError になるのは実在する軽微な欠陥。\"},\n  {\"label\": \"軽微2\", \"class\": \"real_other\", \"reason\": \"認可の判定がトランザクションの外の読み出しに基づくため、移管と競合すると旧作成者の削除が通りうるのは実在する競合で、条件は狭い。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、実在の別の欠陥3件（重大1・軽微1・軽微2）を指摘しており、埋め込み欠陥はないので誤検出ではない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と `.match` により末尾が改行のタグが通るのは実在する仕様違反で、埋め込んだ変更（tag_rows の変数化）とは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "異常系・境界・同時実行のテスト不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "監査ログの api_key 伏せと共有リンク検証のテスト不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "sort にハッシュできない値を渡すと ValidationError でなく TypeError になるのは実在する軽微な欠陥。"
+   },
+   {
+    "label": "軽微2",
+    "class": "real_other",
+    "reason": "認可の判定がトランザクションの外の読み出しに基づくため、移管と競合すると旧作成者の削除が通りうるのは実在する競合で、条件は狭い。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、実在の別の欠陥3件（重大1・軽微1・軽微2）を指摘しており、埋め込み欠陥はないので誤検出ではない。"
+ }
+}

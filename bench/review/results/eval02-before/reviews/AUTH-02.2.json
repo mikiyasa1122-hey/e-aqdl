@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-02",
+ "rep": 2,
+ "sec": 26.7,
+ "exit": 0,
+ "cost_usd": 0.0954092,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12370,
+  "cache_read_input_tokens": 121632,
+  "output_tokens": 3375,
+  "output_tokens_details": {
+   "thinking_tokens": 523
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12370,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2235,
+    "cache_read_input_tokens": 37645,
+    "cache_creation_input_tokens": 1133,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1133
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7a4e3663\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 (notes/service.py:248-252 list_notes) / 対応区分: 修正必須 / 内容: list_notes の WHERE が `org_id = ?` だけで、他人の非公開メモを除外していない。 / 成立条件: 同じ組織の利用者 A が非公開メモを作り、同じ組織の B が list_notes を呼ぶ。 / 影響: 他人の非公開メモの題名・ID・更新時刻が漏れる。total の件数にも含まれる。R2 の「存在を明かさない」にも反する。 / 根拠: 実際に実行して確認した。A の非公開メモ \"secret\" が B の一覧の items に出て、total=1 になった。search_notes は `(private = 0 OR owner_id = ?)` を付けており、一覧だけ抜けている。上流の保証や DB の制約はない。 / 提案: where を `org_id = ? AND (private = 0 OR owner_id = ?)` にし、args に user[\"id\"] を足す（COUNT と SELECT の両方）。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3 (notes/service.py:136 TAG_RE と :186, :272) / 対応区分: 修正必須 / 内容: TAG_RE が `^...$` と `match` の組み合わせで、末尾の改行を許してしまう。 / 成立条件: タグが \"ab\\n\" のように末尾に改行を持つ（作成・更新・検索の絞り込み）。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という規則に違反するタグが保存される。 / 根拠: create_note(tags=['ab\\n']) が成功して note_id 2 を返した。share.py は同じ問題を避けるため fullmatch を使っている。 / 提案: `TAG_RE.fullmatch(t)` に変える。\n- [重大3] 区分: テスト / 対象: AC3, K1, K2 / 対応区分: 証拠不足 / 内容: 他人の非公開メモが一覧に出ないこと、per_page・page・sort の範囲外の拒否、LIKE の % と _ のエスケープ、タグ OR 絞り込み、SQL インジェクション文字列を検索語に入れた場合のテストがない。 / 根拠: test_list_first_page と test_search だけで、これらを確かめていない。そのため [重大1] を検出できずに gate が通った。K1 と K2 は必須のリスク。 / 提案: 非公開メモを含む一覧のテスト、範囲外のテスト、`%` や `' OR 1=1 --` を含む検索のテスト、タグ OR のテストを追加する。\n- [重大4] 区分: テスト / 対象: AC2, AC4, AC5, AC7, AC10, K3, K4, K6 / 対応区分: 証拠不足 / 内容: テストは全部で12件しかない。次の検証が存在しない。 / 根拠: 仕様が必須と定めている項目である。具体的には、閲覧数の同時加算、Conflict（version 不一致・読み出しから書き込みの間の割り込み）、Forbidden と NotFound の区別、transfer の途中失敗の巻き戻しと別組織の拒否、create と delete の途中失敗の巻き戻し（設計が用意した hooks.before_write が使われていない）、RateLimiter の枠の境界と複数スレッドの同時呼び出し（RateLimiter.hook を使う）、期限ちょうどの共有リンクと形の崩れたリンク、api_key の伏せ字（8文字未満・8文字以上の境界）、例外の後の接続の再利用、ログへの機密情報の非出力。 / 提案: 上記を、hooks と別スレッド・別接続で決定論的に再現するテストとして追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。境界値、タグの規則、ロールバックの検証がなく不十分。\n- AC2: 閲覧数の同時加算も、組織をまたぐ NotFound も確かめておらず不十分。\n- AC3: 不十分。非公開メモの漏れが実際にある（重大1）。\n- AC4: test_update_by_owner と test_delete_by_owner だけ。Conflict と Forbidden の検証がなく不十分。\n- AC5: 正常系と管理者以外の拒否だけ。組織をまたぐ場合と途中失敗の検証がなく不十分。\n- AC6: test_export_audit があるが、伏せ字の境界を確かめているか未確認。\n- AC7: test_limit だけ。枠の境界と同時呼び出しの検証がなく不十分。実装は Lock で守られており、ざっと読んだ限り妥当。\n- AC8: test_roundtrip と test_tampered だけ。期限の境界と形の崩れたリンクの検証がない。実装は妥当に見える。\n- AC9: 検証なし（実装は本文・署名・api_key をログに出していない）。\n- AC10: 検証なし（transaction() は例外のときに ROLLBACK している）。\n- エンジンが検出したテストの兆候はなし。\n### E2E の要否\n- 不要（HTTP や UI を持たないライブラリで、unittest で足りる）。\n### 不足しているリスク\n- K1: 一覧からの漏えい（重大1）。\n- K2: SQL インジェクションの検証がない。実装は LIKE の ESCAPE とプレースホルダーで妥当に見える（f-string で組み立てている部分は、固定の列名とプレースホルダー数のみ）。\n- K3, K4, K6, K8: 上記のとおり検証が不足している。\n### 確認したこと\n- spec.md、design.md、notes/*.py を全部読んだ。\n- `python3 -m unittest discover` を実行した。12件が通過した。\n- 再現スクリプトを実行した。他人の非公開メモが一覧に出ること、末尾に改行を持つタグが保存されることを確認した。\n- git status で成果物が未追跡であることを確認した。履歴上、検証条件の弱体化の兆候はなし。",
+ "files_changed": [],
+ "valid": true
+}

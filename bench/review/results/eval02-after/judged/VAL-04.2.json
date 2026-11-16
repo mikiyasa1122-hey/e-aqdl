@@ -1,0 +1,33 @@
+{
+ "case": "VAL-04",
+ "rep": 2,
+ "judge_cost_usd": 0.0640762,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `update_note` が `_validate` に空配列を渡しており、更新時に新しいタグを検査していません。埋め込んだ欠陥と箇所・原因・影響がすべて一致します。\n- **重大2**: テストの不足だけを指摘していて、コードの欠陥の主張ではありません。\n- **重大3**: `update_note` と `delete_note` の認可確認がトランザクションの外にあるという TOCTOU の指摘です。`transfer_notes` は version を +1 するため、通常は Conflict になります。成立には新しい version を知っている必要があり、報告者自身も再現を確認していません。ただしコード上の実在する弱点なので、`real_other` とします。\n\n軽微1は、先頭 0 付きの note_id が複数の表現で通るという指摘です。仕様は「10進の数字だけ」と定めており、先頭 0 を禁じていません。そのためこれは仕様違反ではなく、改善提案にとどまります。`style` とします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note が _validate に空配列を渡し更新時のタグを検査しない点を、同じ箇所・原因・影響で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note の認可確認がトランザクション外にある TOCTOU は実在する弱点だが、成立条件が限定的で、報告者も再現を確認していない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭 0 付きの note_id が通ることは仕様違反ではなく、正規化に関する改善提案である。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が update_note で新しいタグを _validate に渡していない欠陥を、再現の根拠つきで的確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note が _validate に空配列を渡し更新時のタグを検査しない点を、同じ箇所・原因・影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update_note と delete_note の認可確認がトランザクション外にある TOCTOU は実在する弱点だが、成立条件が限定的で、報告者も再現を確認していない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭 0 付きの note_id が通ることは仕様違反ではなく、正規化に関する改善提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が update_note で新しいタグを _validate に渡していない欠陥を、再現の根拠つきで的確に指摘している。"
+ }
+}

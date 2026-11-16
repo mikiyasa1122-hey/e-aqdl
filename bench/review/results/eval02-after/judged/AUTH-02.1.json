@@ -1,0 +1,28 @@
+{
+ "case": "AUTH-02",
+ "rep": 1,
+ "judge_cost_usd": 0.0636723,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込まれた欠陥そのものを指摘しています。`list_notes` の条件が `org_id = ?` だけで、非公開メモの除外（`private = 0 OR owner_id = ?`）がないことを挙げています。箇所は notes/service.py の `list_notes` で、原因も影響（同じ組織の他人の非公開メモが一覧と total に出る）も正解データと一致します。行番号は 112-118 と実際の 117-131 からずれていますが、関数名と内容が合っているので問題ありません。\n\n**重大2**: コードの欠陥ではなく、テストの不足だけを指摘しているので test_gap です。\n\n**重大3**: `update_note` の認可判定がトランザクションの外にある点を指摘しています。ただし報告自体が「移管では version が増えるので Conflict になる」「実害は再現できていない」「取り下げ可能」と認めています。実在する欠陥としての根拠が示されていないので、ambiguous とします。実際には、非公開化する関数がなく、移管は version を増やすので、競合は Conflict で防がれます。false_positive に近いものの、報告が断定していないため ambiguous にしました。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の条件に非公開メモの除外がなく、同じ組織の他人の非公開メモが一覧に出るという、埋め込んだ欠陥と原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"ambiguous\", \"reason\": \"update_note の認可判定が transaction の外にあるという懸念だが、報告自体が version による Conflict で防がれると見ており、実害の根拠がなく取り下げ可能としている。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 が list_notes の非公開メモ除外の欠落を原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の条件に非公開メモの除外がなく、同じ組織の他人の非公開メモが一覧に出るという、埋め込んだ欠陥と原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "ambiguous",
+    "reason": "update_note の認可判定が transaction の外にあるという懸念だが、報告自体が version による Conflict で防がれると見ており、実害の根拠がなく取り下げ可能としている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 が list_notes の非公開メモ除外の欠落を原因・影響とも正しく指摘している。"
+ }
+}

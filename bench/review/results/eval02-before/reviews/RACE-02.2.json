@@ -1,0 +1,49 @@
+{
+ "case": "RACE-02",
+ "rep": 2,
+ "sec": 27.4,
+ "exit": 0,
+ "cost_usd": 0.09957560000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13338,
+  "cache_read_input_tokens": 120176,
+  "output_tokens": 3419,
+  "output_tokens_details": {
+   "thinking_tokens": 600
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13338,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2419,
+    "cache_read_input_tokens": 36395,
+    "cache_creation_input_tokens": 3350,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3350
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d865c6b5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3 / 対応区分: 修正必須 / 内容: `get_note` が閲覧数を「トランザクションの外で読んだ値 + 1」で書き込んでおり、同時に閲覧されると数え漏れが起きる。 / 成立条件: 別々の接続・スレッドが同じメモを同時に閲覧する。たとえば A と B がどちらも `views=0` を読み（`notes/service.py:100`）、A が 1 を書いた後、B も `views=0+1=1` を書く。 / 影響: 2 回閲覧されても views が 1 になる。仕様の「同時に閲覧されても数え漏れがないこと」に反する。 / 確認した保証: `BEGIN IMMEDIATE` は UPDATE 以降しか保護しない。読み取りが外にあるため、ロックや DB の制約では防げない。既存テストにも同時閲覧のものはなく、防いでいない。 / 根拠: `notes/service.py:99-103`。`views = row[\"views\"]` を読み、`hooks.before_write(\"view\")` を挟み、`SET views = ?, (views+1)` を書いている。before_write のフックで再現できる。 / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` に変える。読み取りとの突き合わせは、トランザクション内で `_row` を取り直した結果で行う。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが 12 件しかなく、ほとんどが正常系である。仕様が必須とする次の検証がない。(1) 他の組織・他人の非公開メモが NotFound になること（K1）。(2) タグ・題名・本文の境界値と、失敗時に何も残らないこと（AC1・K4）。(3) 同時閲覧と同時更新。version 不一致・読み書きの間の更新による Conflict と、管理者以外の Forbidden（AC2・AC4・K3）。(4) 検索での `%`・`_` の扱い、SQL インジェクション、per_page・page・sort の範囲外（AC3・K2）。(5) 移管の途中失敗でのロールバックと、組織をまたぐ移管の拒否（AC5・K6）。(6) api_key の伏せ字（8 文字未満を含む。AC6・K7）。(7) RateLimiter の枠の境界と同時呼び出し（AC7）。(8) 共有リンクの期限ちょうど・形の崩れ（AC8・K8）。(9) ログに機密が出ないこと（AC9）。(10) 例外後も接続が使えること（AC10）。 / 根拠: 設計書が用意した差し込み口（`hooks.before_write` と `RateLimiter.hook`）をテストで一度も使っていない。そのため、重大1 のバグを現在のテストは検出できない。`unittest` は 12 件通過したが、リスクを確かめているのは `test_transfer_requires_admin` と `test_tampered` 程度である。仕様が明示するリスク K1〜K8 は、認可・並行・SQL・ロールバックに関わる。 / 提案: 各 AC と K に対応する異常系・境界値のテストを追加する。並行系は、フックで割り込みを決定論的に再現する（sleep に頼らない）。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、権限（`_visible`・`_can_modify`）を `BEGIN IMMEDIATE` の外で行の読み取り結果から判定している。そのため、判定後に移管や削除が入った場合に古い所有者情報で認可が通る可能性がある。version 条件があるため、更新は競合として Conflict になる。delete には version 条件がない。 / 提案: トランザクション内で行を取り直してから認可を判定する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 の作成テストは正常系と空題名だけで不十分。境界値・タグ規則・ロールバックの検証がない。\n- AC2: V2 は閲覧数が増えることすら確かめていない。同時閲覧もなく、実装にも欠陥がある（重大1）。\n- AC3: 一覧は先頭ページ、検索は 1 件の一致しか見ていない。範囲外・`%`/`_`・タグ OR・インジェクションの検証がなく不十分。\n- AC4: 所有者による更新・削除だけで、Conflict・Forbidden・NotFound がなく不十分。\n- AC5: 管理者の成功と非管理者の拒否だけ。組織違反・途中失敗のロールバックがなく不十分。\n- AC6: 伏せ字の出力を検証していない（action と actor しか見ていない）。不十分。\n- AC7: 上限超過と枠の再開だけ。ちょうど window 秒の境界と同時呼び出しがなく不十分。\n- AC8: 往復と改ざんは確認している。期限ちょうど・形の崩れ・期限切れの検証がなく不十分。\n- AC9・AC10: 対応するテストがない。\n- エンジンが検出したテストの兆候はなし（skip・`.only` なし）。\n### E2E の要否\n- 不要。HTTP や UI を持たないライブラリで、unittest で SQLite を直接検証できる。ただし並行系のテストは必須。\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションと LIKE のエスケープを確かめるテストがない。\n- K3: 同時閲覧の数え漏れという実在の欠陥があり、同時更新・同時呼び出しのテストもない。\n- K4・K6: 途中失敗のロールバックを確かめるテストがない。\n- K5・K7: 伏せ字とログへの機密の出力を確かめるテストがない。\n- K8: 期限ちょうど・形の崩れたリンクを確かめるテストがない。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が通過した。\n- `notes/*.py` をすべて読んだ。`service.get_note` の views の読み取り・書き込みが競合することをコードの経路から確認した。再現の実行はしていない。\n- `aqdlc history --since 0` を確認した。検証条件の弱体化はなく、bind の追加のみだった。\n- `git status` を確認した。実装は未コミット（untracked）。",
+ "files_changed": [],
+ "valid": true
+}

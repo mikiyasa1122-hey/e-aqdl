@@ -1,0 +1,49 @@
+{
+ "case": "TX-04",
+ "rep": 1,
+ "sec": 29.5,
+ "exit": 0,
+ "cost_usd": 0.1205689,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17963,
+  "cache_read_input_tokens": 115409,
+  "output_tokens": 3716,
+  "output_tokens_details": {
+   "thinking_tokens": 599
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17963,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2330,
+    "cache_read_input_tokens": 36865,
+    "cache_creation_input_tokens": 1330,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1330
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a7130b66\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R10, AC10, R4, R2, K4, 設計「transaction() は例外のときに ROLLBACK」 / 対応区分: 修正必須 / 内容: `notes/service.py:29-31` の `transaction()` は、例外時に `except BaseException: raise` するだけで ROLLBACK していない。ROLLBACK は COMMIT 失敗時だけ。 / 成立条件: `with transaction(conn)` の中で例外が出る場合すべて。具体例は、古い version での `update_note`（Conflict）、`get_note`・`delete_note` で並行削除や権限変更により NotFound になる場合、`before_write` の障害、`create_note`・`transfer_notes` の途中失敗。 / 影響: トランザクションが開いたまま残る。同じ接続の次の書き込みが `OperationalError: cannot start a transaction within a transaction` で失敗し、AC10（例外の後も接続を使い続けられる）と R10 を満たさない。例外後に次の操作で COMMIT されると、失敗した操作の一部（タグの途中状態、移管の一部、閲覧数の加算）が確定する恐れがある。R1・R4・R5 の「失敗時に何も残さない」と K4 が崩れる。 / 確認した保証: 呼び出し元に ROLLBACK はなく、接続は isolation_level=None のため暗黙の ROLLBACK もない。既存テストはこの経路を通らない。 / 根拠: 一時スクリプトで、古い version の `update_note` が Conflict になった後に `conn.in_transaction` が True だった。続く `create_note` は OperationalError で失敗した（再現済み）。 / 提案: `except BaseException:` で `if conn.in_transaction: conn.execute(\"ROLLBACK\")` を行ってから `raise` する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: テストは12件だけで、ほぼ正常系の1件ずつ。次の検証が欠けている。(a) 失敗時のロールバックと接続の再利用（`before_write` による途中障害、Conflict の後の継続利用）。(b) 並行の閲覧数、更新の競合、RateLimiter の複数スレッド（`hook` の差し込み口は用意されているが未使用）。(c) 他の組織・他人の非公開メモの NotFound、管理者による非公開メモへの操作、組織をまたぐ移管の Forbidden。(d) `%`・`_`・`\\` を含む検索語、タグ OR の絞り込み、入力検証の境界値（題名100/101文字、タグ5/6個、per_page 0/51、不正な sort）。(e) 共有リンクの期限ちょうどと形の崩れ。(f) R9 の機密情報がログ・例外に出ないこと。 / 根拠: 重大1のバグを 12 件すべてが見逃しており、AC10・K4 の検証が空洞化している。これらは仕様の受け入れ条件・重要リスクに直結するため必須。 / 提案: 上記 (a)〜(f) の異常系・境界値・並行（hook で決定論的に再現）のテストを追加し、ROLLBACK を外すと失敗することを確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、タグ・本文・境界値・失敗時に何も残らないことは未検証。不十分。\n- AC2: 同組織の閲覧のみ。他組織・非公開・存在しない場合の NotFound、並行の閲覧数は未検証。不十分。\n- AC3: 一覧の1ページ目と単純な検索のみ。`%`・`_` の扱い、範囲外の入力、タグ OR、他人の非公開メモの除外は未検証。不十分。実装は ESCAPE とプレースホルダーを使っており、コード上は妥当。\n- AC4: 作成者による更新・削除の正常系のみ。Conflict、Forbidden、管理者の扱い、削除の失敗は未検証。不十分。実装は重大1の影響を受ける。\n- AC5: 正常系と管理者以外の拒否のみ。組織をまたぐ場合と途中失敗の巻き戻しは未検証。不十分。\n- AC6: `test_export_audit` あり。8文字未満の鍵や境界は未確認。実装は妥当だが検証はやや弱い。\n- AC7: `test_limit` のみ。枠の境界と並行は未検証。不十分。実装は Lock で保護されており、コード上は妥当。\n- AC8: `test_roundtrip` と `test_tampered` のみ。期限ちょうどと形の崩れは未検証。不十分。\n- AC9: 検証なし。コード上は本文・署名・api_key をログに出していない。\n- AC10: 検証なし。実装は不合格（重大1）。\n- エンジンが検出した兆候はなし（skip・.only・アサーションなし）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリなので、unittest の結合テストで足りる。\n\n### 不足しているリスク\n- K3: 並行する閲覧・更新・RateLimiter のテストがない。\n- K4: ロールバックの実装不備（重大1）とテスト不在（重大2）。\n- K1・K6・K8・K2: 実装はコード上おおむね妥当に見えるが、テストがない。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests`: 12件すべて OK。ただし重大1の経路は通らない。\n- 一時スクリプトで Conflict 後の `in_transaction` が True になり、次の `create_note` が OperationalError になることを再現した。\n- 全ソース（db / service / ratelimit / share / errors）を読んだ。SQL は実行時の値をすべてプレースホルダーで渡している。LIKE は ESCAPE `\\` で、`%`・`_`・`\\` をエスケープしている。\n- `$AQ trace`、`$AQ history`、`git diff` は実行していない。コードは git 未追跡の新規ファイルで、検証条件の改ざん有無は確認できていない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-04",
+ "rep": 1,
+ "judge_cost_usd": 0.0666243,
+ "judge_raw": "**判定**: このケースは欠陥なしなので、埋め込んだ欠陥に当たる指摘はありません。\n\n- **重大1**: 実在する欠陥です。`TAG_RE` は `^...$` で、`.match` を使っています。Python の `$` は末尾の改行の直前にも一致するため、\"abc\\n\" が通ります。仕様の「英小文字・数字・ハイフンのみ」に反します。今回の変更（IN 句のプレースホルダーの作り方）とは無関係で、元からあるコードの問題です。\n- **重大2〜4**: コードの欠陥の主張ではなく、テストの不足だけを指摘しています。\n- **軽微1**: 実在します。`sort` に list などハッシュできない値を渡すと、`sort not in SORT_COLUMNS` が TypeError になります。仕様は範囲外の値を ValidationError とするので、これに反します。ただし影響は小さいです。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と `.match` の組み合わせで末尾が改行のタグが通り、仕様のタグ規則に反する実在のバグである。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"認可・競合・境界値・インジェクションなどのテスト不足だけの指摘である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"移管・監査ログの伏せ字・ログ・例外後の接続に関するテスト不足の指摘である。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"RateLimiter と共有リンクの境界・並行のテスト不足の指摘である。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"ハッシュ不可な sort で TypeError になり、仕様の ValidationError に反する実在の軽微なバグである。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、実在する別の欠陥（タグの改行、sort の型）が指摘されたが、IN 句の変更に起因するものはない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と `.match` の組み合わせで末尾が改行のタグが通り、仕様のタグ規則に反する実在のバグである。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "認可・競合・境界値・インジェクションなどのテスト不足だけの指摘である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "移管・監査ログの伏せ字・ログ・例外後の接続に関するテスト不足の指摘である。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "RateLimiter と共有リンクの境界・並行のテスト不足の指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "ハッシュ不可な sort で TypeError になり、仕様の ValidationError に反する実在の軽微なバグである。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、実在する別の欠陥（タグの改行、sort の型）が指摘されたが、IN 句の変更に起因するものはない。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "BND-04",
+ "rep": 2,
+ "sec": 33.7,
+ "exit": 0,
+ "cost_usd": 0.111867,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14073,
+  "cache_read_input_tokens": 122990,
+  "output_tokens": 4326,
+  "output_tokens_details": {
+   "thinking_tokens": 601
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14073,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2872,
+    "cache_read_input_tokens": 37424,
+    "cache_creation_input_tokens": 3512,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3512
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6c5216d5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8, notes/share.py の verify_link（約37行目） / 対応区分: 修正必須 / 内容: 仕様は「期限の時刻ちょうど以降は無効」だが、実装は `now > expires` で判定しており、now == expires のリンクが有効になる。 / 成立条件: now が expires と等しい（verify_link に now を渡す）。 / 影響: 期限切れのリンクが1秒間通り、K8（期限切れリンクを通す）が起きる。 / 根拠: now=1100・expires=1100 で実行したところ note_id の 1 が返り、Forbidden にならなかった。docstring は「ちょうどを含む」と書いているがコードと食い違っている。上流に別の期限検査はない。 / 提案: `>=` に変え、expires-1・expires・expires+1 の境界テストを足す。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3, notes/service.py の TAG_RE（14行目）と _validate・search_notes / 対応区分: 修正必須 / 内容: TAG_RE は `^...$` を `.match` で使っているため、末尾に改行を付けたタグ（\"abc\\n\"）が通る。 / 成立条件: タグ文字列の末尾が \"\\n\"。create・update・search のすべてで起きる。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。検索のタグ検査も素通りになる。 / 根拠: `TAG_RE.match(\"abc\\n\")` が真になることを実行して確認した。share.py は同じ理由で fullmatch を使っており、実装内で扱いが食い違っている。 / 提案: `TAG_RE.fullmatch(t)` に変え、改行付きのタグを拒否するテストを足す。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8（特に AC2, AC4, AC5, AC7, K1, K3, K4, K6） / 対応区分: 証拠不足 / 内容: テストは正常系が中心で、仕様の主要な規則を確かめるものがない。次の検証が欠けている。(a) 他の組織・他人の非公開メモが NotFound になること（get・list・search・update・delete）。(b) update・delete が他人に対して Forbidden になること、管理者の扱い、非公開メモの管理者への NotFound。(c) version 不一致と、読み出しから書き込みの間に別の更新が入った場合の Conflict。(d) 作成・削除・移管の途中失敗でロールバックされること（hooks.before_write）と、例外の後に接続を使い続けられること。(e) 閲覧数の同時加算。(f) RateLimiter の同時呼び出しと枠の境界ちょうど。(g) 移管で組織をまたぐ場合の拒否と、途中で失敗したときに元のまま残ること。(h) 監査ログの api_key のマスク（8文字未満を含む）。(i) LIKE の % と _ の扱い。(j) 共有リンクの期限境界・形の崩れ。(k) ログ・例外に機密情報が出ないこと。 / 根拠: tests/test_notes.py は12件だけで、test_transfer は件数しか見ていない。test_export_audit は action と actor だけを見ており、api_key のマスクを確かめていない。設計書は並行実行と途中失敗を hooks で再現できるとしているが、hooks を使うテストが1件もない。このため重大1・2の欠陥も検出されなかった。 / 提案: 上の (a)〜(k) を決定論的に確かめるテストを追加する。並行処理は sleep ではなく hooks.before_write・RateLimiter.hook と別接続（ファイルDB）・別スレッドで再現し、各テストは対応する条件（認可・version 条件・ESCAPE・ロック・境界）を外すと失敗するものにする。\n- [重大4] 区分: 実装 / 対象: R5, AC5, K6, notes/service.py の transfer_notes / 対応区分: 証拠不足 / 内容: 移管の「全部か、何もしないか」「組織の外へ渡さない」を確かめる証拠がない。実装は BEGIN IMMEDIATE のトランザクション内で処理し、組織が違えば Forbidden にしている。 / 根拠: 検証がないため、R5 の中核である失敗時のロールバックと組織をまたぐ拒否が、実際に動くことを示せない。K6 は重要なリスクである。 / 提案: 重大3 (g) のテストで補う。移管の途中で before_write に例外を送り、移管前の所有者が全件そのまま残ることと、他の組織の利用者を移管先にしたときの Forbidden を確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで不十分。境界値（100文字・タグ5個・タグの形式・改行付きタグ）と、失敗時に何も残らないことの検証がない。実際に重大2の欠陥がある。\n- AC2: 他の組織・非公開の NotFound と、同時の閲覧数加算の検証がない。不十分。\n- AC3: test_list_first_page と test_search のみ。範囲外の値、sort、% と _、タグの OR、他人の非公開の除外が未検証。不十分。\n- AC4: 所有者の update・delete だけ。Forbidden・Conflict・タグの検査・失敗時の例外伝播が未検証。不十分。\n- AC5: 件数と、管理者でない場合の Forbidden だけ。組織をまたぐ場合と途中失敗が未検証。不十分。\n- AC6: マスクを確かめていない。不十分。\n- AC7: 上限超過と枠の再開だけ。ちょうど window 秒の境界と同時の呼び出しが未検証。不十分。\n- AC8: 往復と改ざん1件だけ。期限の境界・形の崩れ・期限切れが未検証で、実際に重大1の欠陥がある。不十分。\n- AC9: 検証なし。不十分。\n- AC10: 検証なし。不十分。\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなしは見つからなかった）。ただし、検証条件の変更履歴（history）には bind が並んでいるだけで、弱体化の痕跡は見つからなかった。\n### E2E の要否\n- 不要（HTTP 層のないライブラリで、リスクは unittest の統合テストで確かめられる）。ただし、SQLite のファイルDBを使った別接続・別スレッドの競合テストは必要（重大3）。\n### 不足しているリスク\n- K1: 認可の拒否経路が未検証。\n- K2: LIKE のエスケープ（% と _、バックスラッシュ）が未検証。実装は ESCAPE とプレースホルダーを使っており、コード上は問題ない。\n- K3: 同時の更新・閲覧・呼び出しが未検証。\n- K4: 途中失敗のロールバックが未検証。\n- K5, K7: api_key のマスクとログ・例外の機密が未検証。\n- K6: 重大4のとおり。\n- K8: 重大1のとおり。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が成功した。\n- share.py の `verify_link(\"s\", link, now=expires)` を実行し、note_id が返る（Forbidden にならない）ことを確認した。\n- `TAG_RE.match(\"abc\\n\")` が真になることを確認した。\n- `aqdlc history --since 0` を確認し、検証条件を弱めた変更はなかった。\n- ソースを読み、SQL がプレースホルダーと ESCAPE で組み立てられていること、transaction() が BEGIN IMMEDIATE と ROLLBACK で処理していること、RateLimiter がロック内で判定していること、update_note の UPDATE に version 条件があることを確かめた。",
+ "files_changed": [],
+ "valid": true
+}

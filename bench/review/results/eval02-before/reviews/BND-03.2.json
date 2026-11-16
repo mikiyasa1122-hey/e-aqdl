@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 2,
+ "sec": 37.7,
+ "exit": 0,
+ "cost_usd": 0.11869779999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14651,
+  "cache_read_input_tokens": 124378,
+  "output_tokens": 4764,
+  "output_tokens_details": {
+   "thinking_tokens": 890
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14651,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3387,
+    "cache_read_input_tokens": 38529,
+    "cache_creation_input_tokens": 2536,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2536
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7 / 対応区分: 修正必須 / 内容: 枠の境界判定が仕様と逆。`notes/ratelimit.py` の `if now - start > self.window:` では、ちょうど window 秒たった時点が新しい枠にならない。 / 成立条件: 枠の開始から経過時間がちょうど window 秒（例: limit=2、window=60、t=0 で2回消費し、t=60 で hit）のとき。 / 影響: 仕様は「ちょうど window 秒たったら新しい枠」だが、実際は RateLimited になる。AC7 の境界が未達になる。 / 根拠: ratelimit.py の `hit`。`>` を `>=` にすると仕様どおりになる。tests/test_notes.py は t=61 しか見ておらず、この欠陥を検出しない。 / 提案: `>=` に直し、t=59.999、t=60 の境界テストを足す。\n- [重大2] 区分: テスト / 対象: AC7, K3, R7 / 対応区分: 証拠不足 / 内容: RateLimiter が同時に呼ばれても上限を超えないことを確かめるテストがない。`RateLimiter.hook` は設計で用意されているが、どのテストも使っていない。複数スレッドで `hit` を呼ぶテストがなく、「枠の境界」のテストもない。 / 根拠: AC7 は「同時の呼び出しを含む」と明記し、K3 も同時実行のリスクを挙げている。ロックを外しても現在のテストは通る。 / 提案: 複数スレッド（Barrier など決定論的な同期）で limit+N 回 `hit` し、成功が limit 回ちょうどになることを確かめる。ロックを外すと失敗する形にする。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 仕様の中心となる検証がほぼない。次の項目に対応するテストが見つからない。 (a) 他組織・他人の非公開メモが NotFound になること（K1、R2、R3、R4、R5）。 (b) 管理者が非公開メモを扱えないこと。 (c) Forbidden（他人の更新・削除）。 (d) 楽観的ロックの Conflict と、読み出しから書き込みの間に更新が入る場合（`before_write` を使う）。 (e) 閲覧数の同時加算。 (f) 作成・更新・削除・移管の途中失敗でロールバックされること（`hooks.before_write` で例外を起こす）。 (g) 入力検証の境界（題名100/101文字、空白だけ、本文10000文字、タグ5/6個、不正タグ、tags に文字列を渡す）。 (h) page・per_page・sort の範囲外。 (i) `%` と `_` を含む検索、タグ OR 絞り込み、SQL インジェクション文字列。 (j) 他組織間の移管が Forbidden になること。 (k) 例外後も接続を使えること（AC10）。 / 根拠: 12件のテストはほぼ正常系だけ。これらの認可・整合性・インジェクションのリスクは K1〜K4、K6 の必須の検証だが、条件を外しても全テストが通る。 / 提案: 上記 (a)〜(k) を追加する。並行実行と途中の失敗は設計どおり `hooks.before_write` と別スレッド・別接続で再現する。\n- [重大4] 区分: テスト / 対象: AC6, AC9, K5, K7 / 対応区分: 証拠不足 / 内容: `test_export_audit` は action と actor しか見ておらず、api_key が伏せられることを確かめていない。8文字未満・ちょうど8文字の境界もない。AC9 の「ログ・例外メッセージ・出力に本文・署名・api_key が出ない」も確かめるテストがない（`assertLogs` などでログに本文・署名がないことを見る）。 / 根拠: AC6 は api_key の伏せ字そのもの。K7 は api_key の漏えいで、実装を壊しても現在のテストは通る。 / 提案: 末尾4文字以外が `*` になること、7文字・8文字の鍵、管理者でない呼び出しが Forbidden になること、ログと例外のメッセージに本文・署名がないことを確認するテストを足す。\n- [重大5] 区分: テスト / 対象: AC8, K8 / 対応区分: 証拠不足 / 内容: 共有リンクの検証が薄い。期限の境界（now = expires - 1 と now = expires）がない。期限切れそのもの、署名の改ざん、形の崩れたリンク（要素の数が違う・改行を含む・大文字16進・非数字）、str 以外の入力もない。改ざんのテストは note_id の置換1件だけ。 / 根拠: AC8 は「期限の境界を含む」と明記している。K8 は期限切れ・改ざん・形の崩れたリンクを通すリスクで、検証の条件を外しても気づけない。 / 提案: 境界と各種の不正リンクを parametrize 的に追加する。\n- [軽微1] 区分: 設計 / 対象: R10 / 対応区分: 改善提案 / 内容: `notes/__init__.py` が空で、設計書の「要求との対応」や impl-map の `notes/__init__.py` は実体と合っていない（実際の実装は service.py、ratelimit.py、share.py）。`update_note` は権限確認を BEGIN の外で行うため、権限確認から書き込みの間に所有者が移管されても、version が一致すれば更新が通る余地がある（仕様上は許容範囲）。 / 提案: impl-map を実ファイルに直し、必要なら権限確認を transaction 内で再確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は題名が空の拒否と正常系の作成しか確かめていない。境界値、タグ検査、途中失敗のロールバックがなく不十分（重大3）。\n- AC2: V2 に閲覧数のテストも、他組織・他人の非公開が NotFound になるテストもなく不十分（重大3）。\n- AC3: V3 は1ページ目の件数と単純検索のみ。範囲外入力、ワイルドカード、タグ OR、SQL 入力、他人の非公開の除外がなく不十分（重大3）。\n- AC4: V4 は所有者の更新と削除の正常系のみ。Conflict、Forbidden、検証、削除失敗がなく不十分（重大3）。\n- AC5: V5 は管理者の正常系と、非管理者の拒否のみ。他組織間の移管と途中失敗で元に戻ることがなく不十分（重大3）。\n- AC6: api_key の伏せ字を見ておらず空洞（重大4）。\n- AC7: 実装に境界のバグがあり（重大1）、同時呼び出しと枠の境界のテストもない（重大2）。\n- AC8: 期限の境界・形の崩れ・期限切れがなく不十分（重大5）。\n- AC9: ログ・出力に機密情報が出ないことを確かめるテストがなく不十分（重大4）。\n- AC10: 例外の後に接続を使い続けられることのテストがなく不十分（重大3）。\n- エンジンが検出したテストの兆候: なし。skip や `.only` もなく、検証条件・テストの弱体化の履歴も確認できなかった。ただしテストの総量が足りない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest と実 SQLite（:memory: とファイル）で確かめられる。ただし並行実行は別スレッド・別接続の統合テストが必要（重大2、重大3）。\n\n### 不足しているリスク\n- K1: 他組織・他人の非公開メモの漏えいを確かめる検証がない。コード上は `_visible` で適切に絞られている。\n- K2: SQL インジェクションを確かめる検証がない。コード上はプレースホルダーと ESCAPE を使っている。\n- K3: 同時の更新・閲覧・呼び出しの検証がない（R7 には実装の欠陥もある）。\n- K4: 途中の失敗による不整合の検証がない。\n- K5: 機密情報の露出の検証がない。\n- K6: 移管の検証がない。\n- K7: 監査ログの api_key の検証がない。\n- K8: 共有リンクの境界・改ざんの検証が不足している。\n\n### 確認したこと\n- 仕様・設計・全ソース（db.py、service.py、ratelimit.py、share.py）と tests/test_notes.py を通読し、`git status` でコード変更がないことを確認した。\n- `$AQ history --since 0` で検証条件（check `unit` の1件）と bind を確認した。弱体化の変更は見つからなかった。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が OK だった。ただし上記のとおり、重要なリスクは確かめていない。\n- コード上の確認として、認可（`_visible` と `_can_modify`）、プレースホルダーと LIKE の ESCAPE、transaction の ROLLBACK、UPDATE の version 条件は、概ね設計どおりだった。ratelimit の境界（重大1）だけが仕様と食い違っていた。",
+ "files_changed": [],
+ "valid": true
+}

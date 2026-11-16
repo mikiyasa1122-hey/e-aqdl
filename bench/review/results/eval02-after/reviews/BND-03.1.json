@@ -1,0 +1,49 @@
+{
+ "case": "BND-03",
+ "rep": 1,
+ "sec": 30.9,
+ "exit": 0,
+ "cost_usd": 0.13188909999999998,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20434,
+  "cache_read_input_tokens": 115471,
+  "output_tokens": 3859,
+  "output_tokens_details": {
+   "thinking_tokens": 777
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20434,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2454,
+    "cache_read_input_tokens": 36968,
+    "cache_creation_input_tokens": 3698,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3698
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 414a8efe\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7 / 対応区分: 修正必須 / 内容: RateLimiter が枠の境界を誤っている。`notes/ratelimit.py` の `if now - start > self.window` は「ちょうど window 秒たったら新しい枠」という仕様に反する。 / 成立条件: 枠の開始からちょうど window 秒後に hit したとき。 / 影響: 本来許可すべき呼び出しが RateLimited になる。 / 根拠: ratelimit.py の hit() を読んで判断した。limit=1・window=10 で t=0 に hit し、t=10 で hit すると RateLimited になることを実行して確認した。 / 提案: 比較を `>=` に変える。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件の正常系中心で、受け入れ条件とリスクを確かめていない。tests/test_notes.py には次の検証がない。他の組織・他人の非公開メモの NotFound、閲覧数の並行加算、LIKE の % と _ のエスケープ、SQL インジェクション、タグの境界（5個・重複・形式）、題名・本文の長さの境界、更新の Conflict と競合（`hooks.before_write`）、途中失敗でのロールバック（作成・削除・移管）、移管の組織越え、api_key のマスク、RateLimiter の境界と並行（`hook` を使う）、共有リンクの期限の境界・形崩れ、機密情報がログに出ないこと、例外後の接続の再利用。 / 根拠: 設計書は `hooks.before_write` と `RateLimiter.hook` を再現用の差し込み口として定めているが、テストは一度も使っていない。たとえば RateLimiter の境界バグ（重大1）も、現在のテストでは検出されない。 / 提案: 上記の各条件を異常系・境界値で確かめるテストを追加する。条件を外したら失敗することも確認する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: update_note で楽観的ロックの Conflict と入力検証・認可の順序が不安定である。更新後に tags だけ変える場合を含め、競合を検出するのは `UPDATE ... WHERE version` の rowcount のみで、`_visible` と `_can_modify` は transaction の外の古い row で判定している。 / 成立条件: 認可の判定後、更新の前に他の利用者が所有者を変更した場合（transfer_notes など）。 / 影響: 所有者でなくなった元の作成者が、他人に移ったメモを更新できる。transfer は version を +1 するので、version が最新なら Conflict になるが、呼び出し側が最新の version を取り直していた場合は通ってしまう。 / 根拠: service.py の update_note は `_row` を BEGIN IMMEDIATE の前に読み、transaction の内側で `_visible` と `_can_modify` を再判定していない。get_note は transaction の内側で再判定しているため、扱いが非対称である。delete_note も同様で、認可の判定が transaction の外にある。実行での再現はしていない（コードの経路からの判断）。 / 提案: transaction の内側で row を読み直し、`_visible`・`_can_modify` を再判定してから更新・削除する。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: 共有リンクの note_id が先頭ゼロ付き（例 `007.…`）でも、int 化した値で署名を検証するため `7` の正規形と同じ署名が通る。 / 提案: note_id・期限は先頭ゼロを許さない正規形だけ受け付ける。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけで不十分。タグ・長さの境界、途中失敗で何も残らないことが未確認。\n- AC2: 他の組織・非公開の NotFound と閲覧数の並行加算が未確認で不十分。\n- AC3: 一覧の1ページ目と単純な検索のみ。範囲外の入力、% と _、タグの OR、他人の非公開メモの除外が未確認で不十分。\n- AC4: 作成者の更新と削除だけ。Conflict・Forbidden・管理者・競合・削除の失敗が未確認で不十分。\n- AC5: 移管の成功と非管理者の拒否のみ。組織越えと途中失敗での巻き戻しが未確認で不十分。\n- AC6: 監査ログの action と actor だけを見ており、api_key のマスクを確かめていない。不十分。\n- AC7: 上限の超過と翌枠の復帰のみ。ちょうど window 秒の境界（実際にバグあり）と並行呼び出しが未確認で不十分。\n- AC8: 往復と改ざんのみ。期限の境界・形崩れ・期限切れが未確認で不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。\n### E2E の要否\n- 不要（ライブラリで UI・HTTP がないため）。ただし、並行処理とロールバックは、差し込み口を使った統合的なテストが必要。\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。\n- K2: SQL インジェクションと LIKE のエスケープを確かめるテストがない（実装は `ESCAPE '\\\\'` とプレースホルダーで妥当に見える）。\n- K3: 同時の更新・閲覧・呼び出しを確かめるテストがない。\n- K4: 途中失敗による不整合を確かめるテストがない。\n- K5, K7: 監査ログからの api_key 漏えいとログの機密情報を確かめるテストがない。\n- K6: 移管で組織の外にメモが渡ることと、一部だけ移ることを確かめるテストがない。\n- K8: 期限切れ・改ざん・形崩れの共有リンクを通さないことを、境界を含めて確かめるテストがない。\n### 確認したこと\n- `python3 -B -m unittest discover -s tests`: 12件がすべて成功した。\n- RateLimiter の境界を最小の再現スクリプトで実行した。ちょうど window 秒で RateLimited になり、仕様に反する。\n- `$AQ history --since 0` の末尾を確認した。検証条件の弱体化の履歴はなく、bind のみだった。\n- notes/ の全ソース（db・service・ratelimit・share・errors）を読んだ。SQL はプレースホルダーと ESCAPE 句で組まれている。",
+ "files_changed": [],
+ "valid": true
+}

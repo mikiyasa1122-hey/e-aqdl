@@ -1,0 +1,49 @@
+{
+ "case": "VAL-03",
+ "rep": 2,
+ "sec": 23.2,
+ "exit": 0,
+ "cost_usd": 0.0889382,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12090,
+  "cache_read_input_tokens": 123522,
+  "output_tokens": 2821,
+  "output_tokens_details": {
+   "thinking_tokens": 552
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12090,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1795,
+    "cache_read_input_tokens": 38136,
+    "cache_creation_input_tokens": 825,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 825
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0f27a8ba\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: `notes/service.py:136` の `TAG_RE = re.compile(r\"^[a-z0-9-]{1,20}\")` に末尾の固定がなく、`_validate`（行186）と `search_notes`（行272）が `TAG_RE.match` で検査している。このため、先頭が規則どおりなら後ろに何が付いても通る。 / 成立条件: タグが21文字以上、または空白・大文字・記号などを含む場合（例: `'a'*21`、`'ab c'`、`'x!'`）。create・update・search のすべてで起きる。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」の規則に反するタグが保存される。ValidationError になるべき入力が通る。 / 根拠: `python3 -c \"import notes.service as s; s._validate('t','b',['a'*21,'ab c','x!']); print('accepted')\"` が `accepted` と出力した（実行して確認済み）。上流にほかの検証はなく、DB 側にも CHECK 制約がない。 / 提案: `TAG_RE.fullmatch(t)` を使うか、パターンを `^[a-z0-9-]{1,20}\\Z` にする。\n- [重大2] 区分: テスト / 対象: R1, AC1, AC3, K2 / 対応区分: 証拠不足 / 内容: タグの不正入力（21文字、大文字、記号、空文字、文字列そのもの、6個以上）を拒否するテストがない。`tests/test_notes.py` のタグ関連の記述は、正常系の1件（20行目）だけだった。 / 根拠: AC1 と AC3 は入力の拒否を受け入れ条件に含む。実際に [重大1] の欠陥が、12件のテスト全通過のまま見逃されている。 / 提案: create・update・search で、不正なタグが ValidationError になるテストを、境界値（20文字は通り、21文字は拒否）と合わせて追加する。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、認可（`_visible`・`_can_modify`）をトランザクションの外で判定している。delete では、判定後に transfer が走ると、元の所有者でなくなった利用者が削除できる余地がある。update は version の条件で Conflict になるので防がれている。 / 提案: delete のトランザクション内で、行を読み直して `_can_modify` を再確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: タグの検証が空洞化している（上の重大1・重大2）。ロールバックの検証は、`hooks.before_write(\"create:tags\")` を使った途中失敗の再現として存在する。\n- AC2: 閲覧数の同時加算は、`BEGIN IMMEDIATE` と `views = views + 1` で実装されている。同時実行テストの中身は精査していない（未確認）。\n- AC3: SQL のプレースホルダーと `ESCAPE` は適用されている（実装を確認）。タグの検査が弱いため不十分（重大1）。\n- AC4: version を条件にした UPDATE で Conflict を判定している。実装は妥当。タグの検証は不十分。\n- AC5: transfer は同じ組織のときだけ、1つのトランザクションで実行される。実装は妥当（個別のテストは未精査）。\n- AC6: 実装は妥当。8文字未満をすべて伏せ、8文字以上は末尾4文字だけ残している。\n- AC7: ratelimit はロックを使い、枠の境界は `>=` で判定している。実装は妥当（個別のテストは未精査）。\n- AC8: share の正規表現は fullmatch で、`compare_digest` と期限の `>=` 判定を使っている。実装は妥当（個別のテストは未精査）。\n- AC9: ログは ID だけを出力している。実装は妥当。\n- AC10: `transaction()` が ROLLBACK している。実装は妥当。\n- エンジンが検出したテストの兆候はなし。テスト全12件は通過した。\n\n### E2E の要否\n- 不要（HTTP・UI のないライブラリで、unittest による結合的な検証で足りる）。\n\n### 不足しているリスク\n- R1: タグの不正入力の検証がない（重大2）。\n- K1: delete の認可を、トランザクション内で再確認していない（軽微1）。\n\n### 確認したこと\n- `spec.md`、`design.md`、`notes/` の全ソースを読んだ。\n- `python3 -B -m unittest -q`: 12件すべて通過。\n- `_validate` に不正なタグを渡す再現: 受理された（重大1の根拠）。\n- `trace` と `history --since 0` は実行していない。検証条件の改ざんは未確認。",
+ "files_changed": [],
+ "valid": true
+}

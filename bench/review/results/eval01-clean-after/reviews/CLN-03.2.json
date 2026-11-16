@@ -1,0 +1,49 @@
+{
+ "case": "CLN-03",
+ "rep": 2,
+ "sec": 24.4,
+ "exit": 0,
+ "cost_usd": 0.1018955,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14939,
+  "cache_read_input_tokens": 122935,
+  "output_tokens": 2983,
+  "output_tokens_details": {
+   "thinking_tokens": 845
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14939,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1641,
+    "cache_read_input_tokens": 37616,
+    "cache_creation_input_tokens": 4270,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4270
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e7dd616c\n### 指摘\n- なし\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `_validate` が題名の空白だけ・100文字超、本文10000文字超、タグ6個以上、不正な文字、文字列そのものの tags を拒否している。作成は `transaction()` の中で行い、`hooks.before_write(\"create:tags\")` でタグ挿入の失敗を再現している。テストはこの失敗の後に何も残らないことを確かめており妥当。\n- AC2: `_visible` で他の組織・他人の非公開・存在しないメモがすべて NotFound になる。テストは NotFound の場合に閲覧数が増えないこと、確認後に非公開へ変更された場合、閲覧の間に別の閲覧が入った場合を `hooks` で決定論的に再現している。閲覧数の加算は `UPDATE views = views + 1` でアトミックなので妥当。\n- AC3: SQL はすべてプレースホルダーで、LIKE は `ESCAPE '\\'` と `_like_escape` で `%`・`_`・`\\` を普通の文字として扱っている。題名と本文の両方に同じエスケープ済みパターンが渡っている。ORDER BY は `SORT_COLUMNS` の許可リストで固定されている。page・per_page・sort の範囲外と bool は拒否される。タグの OR 絞り込みと検査もある。コードで確認でき、テストファイルも存在し妥当。\n- AC4: `_check_modify` で、非公開は管理者にも NotFound、他人は Forbidden になる。認可と検証は同じトランザクションの中で読み直した行に対して行っている。version は UPDATE の条件に入れて rowcount で判定しており、読み出しから書き込みの間に他の更新が入った場合も Conflict になる。削除は1つのトランザクションで、例外は握りつぶさず伝わる。テストでは `hooks` で割り込みと失敗を再現している。妥当。\n- AC5: 管理者のみ、元・先・管理者が同じ組織のときだけ移せる。更新はすべて1つのトランザクションの中で、`transfer:i` フックで途中失敗を再現するテストがある。妥当。\n- AC6: `_mask_key` は末尾4文字以外を伏せ、8文字未満は全部伏せる。管理者だけが出力でき、組織で絞っている。妥当。\n- AC7: ロックの中で判定しており、固定枠の境界は `>=` で window 秒ちょうどから新しい枠になる。テストは枠の境界（159.999 と 160.0）、拒否が枠を延ばさないこと、Barrier による20スレッド同時、`hook` による割り込みを含む。sleep に頼らず決定論的で妥当。\n- AC8: `LINK_RE.fullmatch` で形を厳密に検査している。期限は `>=` で境界を含み、署名は `compare_digest` で比較している。期限切れ・改ざん・形の崩れはすべて Forbidden。境界を含むテストがある。妥当。\n- AC9: ログと例外のメッセージには ID・タグ・件数だけが出ており、本文・署名・api_key は出ていない。テストファイルもある。妥当。\n- AC10: `transaction()` は `BaseException` で ROLLBACK し、ROLLBACK の失敗で元の例外を隠さない。例外の後に接続を使い続けるテストがある。妥当。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストはなかった。`history` を見ると、検証条件の変更は `bind` による新規の紐付けだけで、弱体化は見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のない標準ライブラリだけの Python ライブラリで、並行実行と途中失敗は、実際のスレッドと SQLite、フックによる単体テストで検証できている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、63件がすべて OK だった。\n- `service.py`・`db.py`・`ratelimit.py`・`share.py` を通読し、認可・SQL・トランザクション・並行処理・秘密情報の扱いを確認した。\n- `aqdlc.py history --since 0` を実行し、検証条件の弱体化がないことを確認した。\n- コードは変更していない。`gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

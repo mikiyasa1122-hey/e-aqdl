@@ -1,0 +1,49 @@
+{
+ "case": "SQL-04",
+ "rep": 3,
+ "sec": 32.9,
+ "exit": 0,
+ "cost_usd": 0.128774,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18987,
+  "cache_read_input_tokens": 115300,
+  "output_tokens": 4128,
+  "output_tokens_details": {
+   "thinking_tokens": 455
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18987,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3133,
+    "cache_read_input_tokens": 36807,
+    "cache_creation_input_tokens": 2412,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2412
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c0544cd2\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `search_notes` が、利用者が渡したタグを SQL の文字列に直接埋め込んでいる（`notes/service.py:146-148`、`quoted = \", \".join(f\"'{t}'\" for t in tags)`）。仕様の「SQL は必ずプレースホルダー」に違反している。さらに、R3 の「タグも R1 の規則で検査する」が実装されておらず、`TAG_RE` による検査がない。件数の上限（5個）しか見ていない。/ 成立条件: `tags=[\"zz') OR 1=1 --\"]` のように、`'` を含むタグを渡す。/ 影響: SQL インジェクションが成立する。実際に `tags=[\"zz') OR 1=1 --\"]` を渡すと `sqlite3.OperationalError: incomplete input` が出て、SQL の構造が壊れることを確認した。`)` で条件を閉じる形にすれば、組織・非公開の絞り込みの外側に `OR` を足せる。その場合、他の組織・他人の非公開メモが漏れる（K1）。/ 確認した保証: 上流でタグを検査する処理はない。`_validate` は create/update でしか呼ばれない。/ 根拠: `notes/service.py:139-151`。上記の再現コマンドを実行した。/ 提案: タグごとに `TAG_RE` で検査して ValidationError にする。あわせて `IN (?, ?, ...)` のプレースホルダーに変え、値は `args` で渡す。\n- [重大2] 区分: テスト / 対象: AC3, K2 / 対応区分: 証拠不足 / 内容: インジェクションを試すテストがない。タグの形式違反の拒否、`%`・`_` の部分一致、タグの OR 絞り込みを確かめるテストもない。`test_search` は通常語での検索だけで、`tags` 引数は一度も使っていない。/ 根拠: AC3 とリスク K2 は必須であり、重大1の欠陥も現在のテストを通過してしまう。/ 提案: 悪意あるタグが ValidationError になること、`%`・`_` を含む語が文字どおり一致すること、タグの OR、per_page・page・sort の範囲外の拒否を、それぞれ検証する。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC5, AC7, K1, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 次の検証がまったくない。\n  - 他の組織・他人の非公開メモが NotFound になること（R2、K1）。\n  - 閲覧数の同時加算。\n  - 更新の version 不一致による Conflict、および読み出しと書き込みの間に更新が割り込んだ場合の Conflict。\n  - 更新・削除の Forbidden。\n  - 移管の組織またぎの拒否と、途中失敗のロールバック。\n  - create の途中失敗でメモが残らないこと。\n  - RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。\n  - 共有リンクの期限ちょうど、形式崩れ、期限切れ。\n  - api_key の伏せ字。\n  - ログへの機密情報の漏れ（AC9）。\n  - 例外後の接続の再利用（AC10）。/ 根拠: これらは受け入れ条件・主要リスクそのもので、設計も `hooks.before_write` と `RateLimiter.hook` を用意して決定論的な再現を想定している。それなのに差し込み口を使ったテストが1つもない。現在の12テストは正常系中心で、`transfer_requires_admin` 以外に拒否系がほぼない。/ 提案: 差し込み口を使い、上記の各条件を外すと失敗するテストを AC ごとに追加する。\n- [重大4] 区分: 実装 / 対象: R4, AC4 / 対応区分: 修正必須 / 内容: `update_note` が、認可判定・`_validate` の検査・versionの確認を `transaction` の外で行っている。そのうえ、トランザクション内では、認可の条件（owner・org・private）を再確認していない。/ 成立条件: 認可判定の後、書き込みの前に `transfer_notes` で作成者が変わる、またはメモが非公開に変わる。/ 影響: 認可を通った後に権限が変わっても、古い判定のまま更新できる。`transfer_notes` は version を増やすので多くは Conflict になるが、呼び出し側が最新の version を渡していた場合は更新が通る。`delete_note` も `_can_modify` を事前に1回見るだけで、トランザクション内では再確認していない。/ 確認した保証: 楽観的ロックの version 条件が一部を防ぐ。ただし `delete_note` には version 条件がない。/ 根拠: `notes/service.py:154-185`。/ 提案: `transaction` の内側で `_row` を取り直し、`_visible` と `_can_modify` を再判定してから更新・削除する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` は `_validate` の後にタグを検査しているが、`tags` を渡さない場合に既存タグの重複・個数は再検査されない。仕様上は問題ないので、保守性の観点だけの指摘。/ 提案: 検査の順序と責務を関数のコメントで明記する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけ。空題名の拒否と正常系しか見ておらず、題名の長さ・空白だけ・本文の上限・タグの個数と形式・tags が文字列の場合・途中失敗で何も残らないことは未検証のため不十分。\n- AC2: 見え方（他の組織・非公開）も同時の閲覧数も未検証。不十分。\n- AC3: 通常語の検索と1ページ目の一覧だけで、拒否・境界・インジェクションは未検証。実装にも欠陥がある（重大1）。\n- AC4: 作成者の更新と削除の正常系だけ。Conflict・Forbidden・競合は未検証。不十分。\n- AC5: 管理者でない場合の拒否だけ。組織またぎ・ロールバックは未検証。不十分。\n- AC6: `test_export_audit` は action と actor だけで、api_key の伏せ字を確かめていない。不十分。\n- AC7: 枠の再利用だけ。ちょうど window 秒の境界とスレッド同時呼び出しは未検証。不十分。\n- AC8: 往復と改ざんだけ。期限ちょうど・形式崩れ・期限切れは未検証。不十分。\n- AC9: ログの検査テストなし。コードを読むと本文や署名はログに出していないが、検証はされていない。不十分。\n- AC10: 例外後の接続再利用のテストなし。不十分。\n- エンジンが検出したテストの兆候はなし（skip・`.only` なし）。\n### E2E の要否\n- 不要。HTTP 層のない Python ライブラリであり、単体・結合テスト（SQLite はインメモリ）で足りる。\n### 不足しているリスク\n- K1: 非公開メモ・他の組織のメモの漏えい。検索のインジェクション（重大1）により成立しうる。テストもない。\n- K2: タグ経由の SQL インジェクション。\n- K3: 閲覧数の同時加算と RateLimiter の同時性。コードは `BEGIN IMMEDIATE` とロックで保護されているように見えるが、検証がない。\n- K4・K6: 移管・作成の途中失敗のロールバック。コードは設計どおりに見えるが、検証がない。\n- K5・K7・K8: api_key の伏せ字、ログの機密情報、共有リンクの境界。コードは仕様どおりに見えるが、検証がない。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が通った。\n- `search_notes` にタグ `\"zz') OR 1=1 --\"` を渡して実行した。`sqlite3.OperationalError: incomplete input` が出て、SQL の注入が成立することを確認した。\n- LIKE まわり（`_like_escape` と `ESCAPE '\\\\'`）は、題名・本文の両方に同じ `pattern` が渡っていることをコード上で確認した。\n- `$AQ gate`、`trace`、`history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

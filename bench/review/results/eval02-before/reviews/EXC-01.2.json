@@ -1,0 +1,49 @@
+{
+ "case": "EXC-01",
+ "rep": 2,
+ "sec": 32.0,
+ "exit": 0,
+ "cost_usd": 0.1058414,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13489,
+  "cache_read_input_tokens": 120194,
+  "output_tokens": 3985,
+  "output_tokens_details": {
+   "thinking_tokens": 654
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13489,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2814,
+    "cache_read_input_tokens": 36416,
+    "cache_creation_input_tokens": 3482,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3482
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 5\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2e25bbfa\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K1, notes/service.py の get_note（約 91 行目） / 対応区分: 修正必須 / 内容: 見られないメモ（他組織・他人の非公開）に Forbidden を返している。仕様は、見られないメモはどれも NotFound にして存在を明かさないとしている。 / 成立条件: 別組織の利用者、または他人の非公開メモを見ようとする利用者が get_note を呼ぶ。 / 影響: 存在しないメモは NotFound、存在するが見られないメモは Forbidden になる。この違いでメモの存在が分かり、K1 の漏えいにあたる。 / 根拠: `if not _visible(user, row): raise Forbidden(...)` と書かれている。update_note と delete_note は同じ状況で NotFound を返しており、一貫していない。上流にこれを防ぐ処理はない。 / 提案: Forbidden を NotFound に変える。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4, K2, notes/service.py の TAG_RE（約 14 行目） / 対応区分: 修正必須 / 内容: タグの検査が `^[a-z0-9-]{1,20}$` と `re.match` の組み合わせになっている。`$` は末尾の改行にも一致するので、`\"ab\\n\"` のようなタグを通してしまう。 / 成立条件: 作成・更新・検索のタグ引数に、末尾に改行を付けた文字列を渡す。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。 / 根拠: `TAG_RE.match('ab\\n')` が True を返すのを実行して確認した。 / 提案: `fullmatch` を使うか、`\\Z` で終える。\n- [重大3] 区分: 実装 / 対象: R4, AC4, notes/service.py の update_note・delete_note / 対応区分: 修正必須 / 内容: 更新と削除で、見えるか・変更できるかの判定がトランザクションの外で行われている。トランザクション内では更新時に version を見るだけで、削除時は何も確認していない。 / 成立条件: 判定の後、書き込みの前に、他の接続が同じメモを削除する。または管理者による移管で所有者が変わる。 / 影響: 削除では、すでに消えたメモに対して成功し、存在しない note への監査ログが残る。移管で所有者が変わった場合も、判定は古い所有者のまま通る。 / 根拠: delete_note では `_row`・`_visible`・`_can_modify` がすべて `with transaction` より前にある。トランザクション内の DELETE は rowcount を確認していない。 / 提案: BEGIN IMMEDIATE の後でメモを読み直して認可を判定し、DELETE の rowcount が 0 なら NotFound にする。\n- [重大4] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系が主で 12 件だけあり、受け入れ条件・リスクの大半を確かめていない。 次の検証が欠けている。拒否の経路（他組織・他人の非公開が NotFound、Forbidden、Conflict、各境界値）、途中失敗でのロールバック（hooks.before_write）、同時閲覧と RateLimiter の同時実行（hook）、LIKE の % と _、SQL インジェクションの文字列、タグの OR 絞り込み、移管の全部か何もしないか、api_key の伏せ字、共有リンクの期限境界、機密情報がログに出ないこと、例外後の接続再利用。 / 根拠: tests/test_notes.py を通読すると、これらのテストが1つもない。重大1・重大2 のバグもテストで検出されていない。設計書も、並行実行と途中失敗を差し込み口で再現できるようにする方針を示している。 / 提案: 上記の拒否経路・境界・ロールバック・並行の検証を追加する。\n- [重大5] 区分: 実装 / 対象: R8, AC8, K8, notes/share.py の LINK_RE と verify_link / 対応区分: 修正必須 / 内容: note_id が「10進の数字だけ」の文字列で、int に変換してから署名を検証するため、先頭に 0 を付けた別表記のリンクも有効になる。 / 成立条件: 正規のリンク `7.exp.sig` に対し、`007.exp.sig` を渡す。 / 影響: 署名された文字列と一致しない形のリンクが通る。仕様の「形の崩れたリンクは Forbidden」に反する可能性がある。 / 根拠: コードを読んで確認した。`int(m.group(1))` で正規化してから `_sign` を呼んでいる。この挙動は実行していないので、未確認の部分がある。 / 提案: 元の文字列のまま署名を照合するか、正規化後の表記と一致しないリンクを Forbidden にする。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: 更新で、存在しない version を渡した場合の記録が監査ログに残らない。 / 提案: Conflict になった事実を監査に記録するかは、必要に応じて仕様で決める。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名と正常系だけで、不十分。長さの境界、タグ、ロールバックの検証がない。\n- AC2: 閲覧数の増加も、他組織・他人の非公開・存在しないメモの NotFound も確かめていない。不十分で、重大1 を見逃している。\n- AC3: 1ページ目と通常の検索だけで、不十分。範囲外の入力、% と _、タグの OR、インジェクションの検証がない。\n- AC4: 所有者による更新と削除だけで、不十分。Conflict、Forbidden、管理者、並行の検証がない。\n- AC5: 件数と管理者以外の拒否だけで、不十分。組織の跨ぎ、途中失敗の検証がない。\n- AC6: ログの先頭行の action と actor だけで、api_key の伏せ字を確かめていない。不十分。\n- AC7: 上限と枠の再開だけで、不十分。ちょうど window 秒の境界と同時呼び出しの検証がない。\n- AC8: 往復と改ざん1件だけで、不十分。期限の境界、期限切れ、形の崩れの検証がない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要。HTTP や UI を持たない Python のライブラリで、単体・結合テストで足りる。\n### 不足しているリスク\n- K1: 見られないメモの NotFound を確かめるテストがない。\n- K2: インジェクションの文字列をテストしていない。\n- K3: 同時の閲覧・更新・RateLimiter のテストがない。\n- K4: 途中失敗でのロールバックのテストがない。\n- K5, K7: api_key の伏せ字とログの内容をテストしていない。\n- K6: 移管で組織の外に渡らないこと、途中失敗で元のままになることをテストしていない。\n- K8: 期限の境界・形の崩れのテストがない。\n### 確認したこと\n- `python3 -m unittest discover -s tests` は 12 件が OK だった。\n- `TAG_RE.match('ab\\n')` が True を返すことを実行して確認した。\n- notes/ の db.py・service.py・ratelimit.py・share.py と tests/test_notes.py を通読した。\n- `history --since 0` で検証条件の変更履歴を見た。見えた範囲は bind が中心で、弱体化は見当たらない。",
+ "files_changed": [],
+ "valid": true
+}

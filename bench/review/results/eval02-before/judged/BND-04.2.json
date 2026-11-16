@@ -1,0 +1,28 @@
+{
+ "case": "BND-04",
+ "rep": 2,
+ "judge_cost_usd": 0.060252299999999995,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`verify_link` の比較が `>` で、期限ちょうどのリンクが有効になる点を、原因・影響とも一致して指摘しています。\n- **重大2**: `TAG_RE` の `$` と `re.match` の組み合わせで、末尾に改行を付けたタグが通ります。これは実在するバグです。ただし埋め込んだ欠陥とは別の箇所です。\n- **重大3**: コードの欠陥ではなく、テストの不足を指摘しています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"notes/share.py verify_link の比較が > で、期限ちょうどが有効になる点を、原因・影響とも一致して指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と re.match の組み合わせで末尾が改行のタグが通るのは実在する仕様違反で、埋め込んだ欠陥とは別の箇所。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"コードの欠陥ではなく、テストの網羅不足を指摘している。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ期限境界の欠陥を、箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "notes/share.py verify_link の比較が > で、期限ちょうどが有効になる点を、原因・影響とも一致して指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と re.match の組み合わせで末尾が改行のタグが通るのは実在する仕様違反で、埋め込んだ欠陥とは別の箇所。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "コードの欠陥ではなく、テストの網羅不足を指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ期限境界の欠陥を、箇所・原因・影響とも正確に捉えている。"
+ }
+}

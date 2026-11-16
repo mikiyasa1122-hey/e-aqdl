@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 2,
+ "sec": 31.0,
+ "exit": 0,
+ "cost_usd": 0.1148177,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 14203,
+  "cache_read_input_tokens": 164357,
+  "output_tokens": 4155,
+  "output_tokens_details": {
+   "thinking_tokens": 585
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14203,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2495,
+    "cache_read_input_tokens": 40646,
+    "cache_creation_input_tokens": 421,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 421
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3, notes/ratelimit.py:19 / 対応区分: 修正必須 / 内容: `hit()` が `with threading.Lock():` で呼び出しのたびに新しいロックを作っており、排他が働かない。`self._lock` が使われていない。 / 成立条件: 同じ RateLimiter に対し、複数のスレッドが同じ利用者で同時に `hit` を呼ぶ。 / 影響: 上限を超えて許可される。仕様「複数のスレッドから同時に呼ばれても、上限を超えて許さない」に違反する。 / 根拠: `limit=5` の RateLimiter に、`hook` で2スレッドを同期させて20スレッドから `hit(1)` を呼ぶ再現を実行した。許可は10件で、上限の5件を超えた（`python3 -I` で実行）。上流や DB にこれを防ぐ仕組みはない。 / 提案: `with self._lock:` に直す。あわせて、競合を決定論的に再現するテストを追加する（重大3）。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4, notes/service.py:14,64,150 / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。`$` は末尾の改行の手前にも一致するため、`\"abc\\n\"` のようなタグが検証を通る。 / 成立条件: 末尾に `\\n` を付けたタグを、作成・更新・検索の tags に渡す。 / 影響: 仕様のタグ規則（英小文字・数字・ハイフンの1〜20文字）に違反するタグが保存される。実際に `create_note(..., ['abc\\n'])` が成功した。 / 根拠: `service.py:14` の正規表現と、`:64`（`_validate`）・`:150`（`search_notes`）の `.match`。共有リンクの検証は同じ問題を避けるために `fullmatch` を使っており、実装の中でも不統一になっている。 / 提案: `TAG_RE.fullmatch(t)` に変える（またはパターンを `\\Z` で終える）。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストが正常系を数件確かめるだけで、仕様の規則と異常系を確かめていない。足りない検証は次のとおり。(a) 権限・組織・非公開（NotFound か Forbidden か、他組織・他人の非公開の漏えい）。(b) 閲覧数の同時加算。(c) 楽観的ロックの Conflict と、読み出しから書き込みの間に入る更新。(d) 作成・削除・移管の途中失敗でのロールバック（`hooks.before_write` が未使用）。(e) 検索の `%` `_` `\\` と、タグの OR 絞り込み。(f) 一覧の境界値（page=0、per_page=51、不正な sort、bool）。(g) 監査ログの api_key の伏せ方（8文字未満を含む）。(h) RateLimiter の枠の境界（ちょうど window 秒）と、同時の呼び出し。(i) 共有リンクの期限の境界・形の崩れ・期限切れ。(j) 例外の後に接続を使い続けられること。(k) R9 の機密情報がログに出ないこと。 / 根拠: 上記は AC と K の必須の検証である。実際に、重大1の同時実行のバグと、重大2のタグの検証漏れを、既存のテストは検出できなかった。 / 提案: 上記の項目ごとに、決定論的なテストを追加する。並行実行は `hook` と `Barrier` で再現し、別スレッド・別接続を使う。\n- [軽微1] 区分: 実装 / 対象: R5, notes/service.py:194-207 / 対応区分: 改善提案 / 内容: `transfer_notes` は、渡された `from_user`・`to_user` の dict を DB と照合せずに信用している。仕様の対象外（呼び出し側が確かめてから渡す）に当たるため重大にはしない。 / 提案: 防御として、`to_user` の org_id を DB で確認すると堅い。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系と空の題名の拒否だけで不十分。タグの規則・境界・ロールバックの検証がない。重大2のとおり、改行付きのタグがすり抜ける。\n- AC2: 見え方の検証も、閲覧数の同時加算の検証もなく、不十分。\n- AC3: 一覧の1ページ目と単純な検索だけで不十分。`%` `_`、タグ、範囲外の検証がない。\n- AC4: 所有者による更新と削除の正常系だけで不十分。Conflict・Forbidden・NotFound の検証がない。\n- AC5: 管理者でない場合の拒否と正常系だけで不十分。他組織への移管と、途中失敗での元のままの検証がない。\n- AC6: api_key の伏せ方を確かめていない。不十分。\n- AC7: 上限と枠のリセットの単純な検証だけ。同時の呼び出しの検証がなく、バグを見逃した。不十分。\n- AC8: 往復と改ざん1件だけ。期限の境界・形の崩れ・期限切れの検証がなく、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。ただし、検証の量が不足している。\n### E2E の要否\n- 不要（ライブラリで UI・HTTP がない）。ただし並行実行・途中失敗の検証はユニットで必要。\n### 不足しているリスク\n- K1: 認可の組み合わせの検証がない。\n- K3: 閲覧・更新・回数制限の同時実行の検証がない。実際に RateLimiter に欠陥があった。\n- K4: 途中の失敗でのロールバックの検証がない。\n- K5・K7: 機密情報の伏せ方・ログの検証がない。\n- K8: リンク期限の境界と形の崩れの検証がない。\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が通ったが、上記の欠陥は検出されなかった。\n- RateLimiter を20スレッドで同時に呼ぶ再現を実行した。上限5に対して10件が許可された。\n- `create_note(..., ['abc\\n'])` が成功することを実行して確認した。\n- SQL は、プレースホルダー・LIKE の ESCAPE 句・ORDER BY のホワイトリストを確認した。問題は見つからなかった。\n- `trace` と `history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}
