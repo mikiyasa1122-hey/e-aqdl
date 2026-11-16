@@ -994,7 +994,9 @@ def gate_source_lines(ctx):
     res = g.get("results") or {}
     checks = res.get("checks") or {}
     if checks:
-        lines.append("- チェック: " + "、".join(f"{n} {V.LABEL[V.status_of(r)]}" for n, r in checks.items()))
+        lines.append("- チェック: " + "、".join(f"{n} {V.LABEL[V.status_of(r)]}" for n, r in checks.items())
+                     + "（チェックの合格は終了コードによる。実行されたテストの件数は数えていないので、"
+                       "すべてのテストが実行されたことの証明ではない）")
     vres = res.get("verifications") or {}
     if vres:
         cnt = {}

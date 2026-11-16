@@ -221,25 +221,101 @@ def analyze_http(seg):
 PR_WRITE = (["pr", "create"], ["pr", "edit"], ["pr", "ready"], ["pr", "reopen"], ["pr", "new"])
 
 
+# 字句で読み切れない書き方（サブシェル・bash -c・eval・前置コマンド・別名・gh のフラグの位置）でも、
+# push・PR の作成／更新らしければ、照合の対象にする（見落とすより、照合して通すほうが安全）
+PUSH_LIKE = re.compile(r"\bgit(?:\s+-{1,2}[\w.-]+(?:[= ](?!push\b)[^\s|;&]+)?)*\s+push\b"
+                       r"|\balias\.[\w-]+=[^\s]*push\b")
+PR_LIKE = re.compile(r"\bgh\b[^|;&\n]*?\bpr\b[^|;&\n]*?\b(create|edit|ready|reopen|new)\b")
+GH_API_PULLS = re.compile(r"\bgh\s+api\b[^|;&\n]*?repos/[^\s/]+/[^\s/]+/pulls(?:/\d+)?\b")
+GH_API_WRITE = re.compile(r"(?:-X|--method)[ =]?(?:POST|PATCH|PUT)\b|\s-(?:f|F)\s|\s--(?:field|raw-field|input)\b", re.I)
+
+
+def _strip_prefix_cmds(toks):
+    """前置コマンド（sudo・timeout・env など）とそのオプションを読み飛ばす。"""
+    while toks:
+        b = os.path.basename(toks[0])
+        if b in ("sudo", "command", "exec", "time", "nohup", "env", "xargs", "nice", "stdbuf"):
+            toks = toks[1:]
+            while toks and (toks[0].startswith("-") or re.match(r"^[A-Za-z_][A-Za-z0-9_]*=", toks[0])):
+                opt = toks[0]
+                toks = toks[1:]
+                if opt in ("-u", "-n", "-C", "-g", "-o", "-i", "-e", "-I", "-L", "-P") and toks and b != "env" or \
+                        (b == "env" and opt == "-u" and toks):
+                    toks = toks[1:]
+        elif b == "timeout":
+            toks = toks[1:]
+            while toks and toks[0].startswith("-"):
+                toks = toks[1:]
+            toks = toks[1:] if toks else toks  # 時間
+        else:
+            break
+    return toks
+
+
 def publish_kind(cmd):
     """コマンドが、レビュー・gate の結果を外に出す操作か。戻り値: "pr"・"push"・None（"pr" を優先）。
 
-    - gh pr create・edit・ready・reopen → "pr"
+    - gh pr create・edit・ready・reopen・new、gh api で pulls に書き込むもの → "pr"
     - git push（削除だけのものを除く） → "push"
+    字句で読み切れない書き方でも、それらしければ対象にする（PUSH_LIKE・PR_LIKE）。
     """
+    cmd = cmd or ""
+    if PR_LIKE.search(cmd) or (GH_API_PULLS.search(cmd) and GH_API_WRITE.search(cmd)):
+        return "pr"
     kind = None
-    for seg in SEGMENT_SPLIT.split(cmd or ""):
-        toks = tokens(seg.strip())
-        while toks and toks[0] in ("sudo", "command", "exec", "time", "nohup", "env"):
-            toks = toks[1:]
-        if toks and os.path.basename(toks[0]) in ("gh", "gh.exe"):
-            words = [t for t in toks[1:] if not t.startswith("-")]
-            if words[:2] in PR_WRITE:
-                return "pr"
+    for seg in SEGMENT_SPLIT.split(cmd):
+        toks = _strip_prefix_cmds(tokens(seg.strip().strip("()")))
         sub, args, _cwd = git_subcommand(toks)
-        if sub == "push" and not analyze_push(args)["delete"]:
+        if sub == "push":
+            if not analyze_push(args)["delete"]:  # 削除だけの push（--delete・:branch）は、内容を出さない
+                kind = "push"
+            continue
+        if PUSH_LIKE.search(seg):
             kind = "push"
     return kind
+
+
+def push_sources(cmd):
+    """push されるコミットの元の参照の列（既定は HEAD）。--all・--mirror・--tags や、読み切れないときは None。"""
+    srcs = []
+    for seg in SEGMENT_SPLIT.split(cmd or ""):
+        toks = _strip_prefix_cmds(tokens(seg.strip().strip("()")))
+        sub, args, _cwd = git_subcommand(toks)
+        if sub != "push":
+            if PUSH_LIKE.search(seg):
+                return None
+            continue
+        info_ = analyze_push(args)
+        if info_["delete"]:
+            continue
+        flags = [a for a in args if a.startswith("-")]
+        if info_["all"] or info_["mirror"] or "--tags" in flags or "--follow-tags" in flags:
+            return None
+        if not info_["refspecs"]:
+            srcs.append("HEAD")
+        for r in info_["refspecs"]:
+            src = r.lstrip("+").split(":")[0]
+            if src:
+                srcs.append(src)
+    return srcs
+
+
+def push_tree_problems(project, sources):
+    """push されるコミットの内容が、作業ツリーの HEAD（gate が検査した内容）と同じか。問題の文の列。"""
+    if sources is None:
+        return ["push する参照を特定できない（--all・--mirror・--tags や、読み切れない書き方）。作業ブランチを1つだけ、"
+                "`git push -u origin <ブランチ>` の形で push する"]
+    code, head = sh_run("git rev-parse --verify -q HEAD^{tree}", project, 30)
+    if code != 0 or not head.strip():
+        return ["HEAD を解決できない（コミットがない）"]
+    out = []
+    for src in sources:
+        c, t = sh_run(f"git rev-parse --verify -q {shlex.quote(src + '^{tree}')}", project, 30)
+        if c != 0 or not t.strip():
+            out.append(f"push する参照 {src} を解決できない")
+        elif t.strip() != head.strip():
+            out.append(f"push する {src} の内容が、gate の対象（今の HEAD）と違う")
+    return out
 
 
 def guard_reasons(cmd, project, current_branch_fn, remote_has_branch_fn):
