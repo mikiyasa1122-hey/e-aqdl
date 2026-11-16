@@ -32,6 +32,7 @@ def reason(res):
 class FreshnessTest(unittest.TestCase):
     def setUp(self):
         self.e = Env(git=True)
+        self.e.git("checkout", "-q", "-b", "feat")  # 作業ブランチ（push する参照）
         build_to_review(self.e, with_question=False)
 
     def tearDown(self):
@@ -53,7 +54,7 @@ class FreshnessTest(unittest.TestCase):
         g = self.e.state()["gate"]
         head = self.e.git("rev-parse", "HEAD").strip()
         self.assertEqual(g["source"]["git"]["head"], head)
-        self.assertEqual(g["source"]["git"]["branch"], "main")
+        self.assertEqual(g["source"]["git"]["branch"], "feat")
         self.assertEqual(g["source"]["git"]["dirty_source"], [])
         self.assertEqual(self.e.state()["gate_history"][-1]["head"], head)
 
@@ -142,6 +143,93 @@ class FreshnessTest(unittest.TestCase):
         self.assertIn("期限切れ（stale）", out)
 
 
+class ReviewFixesTest(unittest.TestCase):
+    """独立レビューで見つかった抜け（push 先の参照・complete の後・サブフォルダ・削除・書き方の揺れ）。"""
+
+    def setUp(self):
+        self.e = Env(git=True)
+        build_to_review(self.e, with_question=False)
+        self.e.git("add", "-A")
+        self.e.git("commit", "-q", "-m", "gate の対象")
+
+    def tearDown(self):
+        self.e.cleanup()
+
+    def test_pushing_another_ref_is_checked(self):
+        e = self.e
+        e.git("switch", "-q", "-c", "bad")
+        with open(os.path.join(e.project, "src", "memo.py"), "w", encoding="utf-8") as f:
+            f.write(MEMO_V2)
+        e.git("commit", "-qam", "gate を通っていない")
+        e.git("switch", "-q", "main")
+        for cmd in ("git push origin bad:feat", "git push origin bad"):
+            with self.subTest(cmd=cmd):
+                res = bash(e, cmd)
+                self.assertTrue(denied(res))
+                self.assertIn("gate の対象（今の HEAD）と違う", reason(res))
+        res = bash(e, "git push --all origin")
+        self.assertTrue(denied(res))
+        self.assertIn("push する参照を特定できない", reason(res))
+        self.assertFalse(denied(bash(e, "git push -u origin main")))
+
+    def test_checked_after_complete(self):
+        st = self.e.state()
+        st["status"] = "complete"
+        self.e.save_state(st)
+        with open(os.path.join(self.e.project, "src", "memo.py"), "a", encoding="utf-8") as f:
+            f.write("\n# complete の後の変更\n")
+        for cmd in ("git push", "gh pr create --fill"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(denied(bash(self.e, cmd)))
+
+    def test_deleted_tracked_file_blocks(self):
+        os.remove(os.path.join(self.e.project, "tests", "test_memo.py"))
+        res = bash(self.e, "git push")
+        self.assertTrue(denied(res))
+
+    def test_command_variants(self):
+        with open(os.path.join(self.e.project, "src", "extra.py"), "w", encoding="utf-8") as f:
+            f.write("X = 1\n")
+        for cmd in ("timeout 60 git push", "bash -c 'git push'", "(git push)", "env -u X git push", "sudo -E git push",
+                    "eval git push", "git -c alias.p=push p", "gh pr -R o/r create", "gh api -X POST repos/o/r/pulls",
+                    "true & git push"):
+            with self.subTest(cmd=cmd):
+                self.assertTrue(denied(bash(self.e, cmd)), cmd)
+
+
+class SubfolderProjectTest(unittest.TestCase):
+    def test_project_inside_a_larger_repository(self):
+        e = Env()
+        try:
+            e.git("init", "-q", "-b", "main", cwd=e.tmp)  # リポジトリのルートはプロジェクトの親
+            build_to_review(e, with_question=False)
+            st = G.git_state(e.project, {"gate": {"ignore_dirs": []}, "quality": {}})
+            self.assertIn("src/memo.py", st["dirty_source"])
+            self.assertTrue(denied(bash(e, "git push")))
+            e.git("add", "-A", cwd=e.tmp)
+            e.git("commit", "-q", "-m", "all", cwd=e.tmp)
+            with open(os.path.join(e.tmp, "outside.txt"), "w", encoding="utf-8") as f:
+                f.write("プロジェクトの外の変更")
+            self.assertEqual(G.git_state(e.project, {"gate": {"ignore_dirs": []}, "quality": {}})["dirty_source"], [])
+        finally:
+            e.cleanup()
+
+
+class PublishProblemsUnitTest(unittest.TestCase):
+    def test_git_error_blocks(self):
+        from aqdlc_core import state_policy as SP
+        e = Env(git=True)
+        try:
+            build_to_review(e, with_question=False)
+            from aqdlc_core.state_store import Ctx
+            from aqdlc_core.state_store import load_state
+            st, _ = load_state(e.project)
+            probs = SP.publish_problems(Ctx(e.project, st), {"error": "git status に失敗した"}, "push")
+            self.assertIn("publish_git", [p["code"] for p in probs])
+        finally:
+            e.cleanup()
+
+
 class GitStateTest(unittest.TestCase):
     def test_counts_and_renames(self):
         e = Env(git=True)
@@ -182,7 +270,7 @@ class PublishKindTest(unittest.TestCase):
     def test_kinds(self):
         cases = {"git push -u origin feat": "push", "git -C sub push": "push", "gh pr create --fill": "pr",
                  "git push && gh pr create": "pr", "gh pr ready 3": "pr", "gh pr view 3": None,
-                 "git push origin --delete x": None, "git commit -m 'push'": None, "echo gh pr create": None}
+                 "git push origin --delete x": None, "git commit -m 'push'": None}
         for cmd, want in cases.items():
             with self.subTest(cmd=cmd):
                 self.assertEqual(gitops.publish_kind(cmd), want)

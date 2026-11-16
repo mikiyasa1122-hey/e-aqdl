@@ -279,7 +279,12 @@ def publish_problems(ctx, git_now, kind):
     else:
         li = last_impl(s) or {"seq": 0}
         out += _gate_block(ctx, li, lambda r: r)
-    dirty = (git_now or {}).get("dirty_source") or []
+    gn = git_now or {}
+    if gn.get("error"):
+        out.append(P("publish_git", f"git の状態を確認できない（{gn['error']}）。照合できないので止める", "orchestrator"))
+    for msg in gn.get("push_problems") or []:
+        out.append(P("publish_ref", msg, "orchestrator"))
+    dirty = gn.get("dirty_source") or []
     if dirty:
         out.append(P("publish_dirty", "コミットしていない変更がある（push・PR の内容が gate の対象と一致しない）: "
                      + ", ".join(dirty[:5]) + (" …" if len(dirty) > 5 else ""), "orchestrator"))
