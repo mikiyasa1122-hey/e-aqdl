@@ -218,6 +218,30 @@ def analyze_http(seg):
     return []
 
 
+PR_WRITE = (["pr", "create"], ["pr", "edit"], ["pr", "ready"], ["pr", "reopen"], ["pr", "new"])
+
+
+def publish_kind(cmd):
+    """コマンドが、レビュー・gate の結果を外に出す操作か。戻り値: "pr"・"push"・None（"pr" を優先）。
+
+    - gh pr create・edit・ready・reopen → "pr"
+    - git push（削除だけのものを除く） → "push"
+    """
+    kind = None
+    for seg in SEGMENT_SPLIT.split(cmd or ""):
+        toks = tokens(seg.strip())
+        while toks and toks[0] in ("sudo", "command", "exec", "time", "nohup", "env"):
+            toks = toks[1:]
+        if toks and os.path.basename(toks[0]) in ("gh", "gh.exe"):
+            words = [t for t in toks[1:] if not t.startswith("-")]
+            if words[:2] in PR_WRITE:
+                return "pr"
+        sub, args, _cwd = git_subcommand(toks)
+        if sub == "push" and not analyze_push(args)["delete"]:
+            kind = "push"
+    return kind
+
+
 def guard_reasons(cmd, project, current_branch_fn, remote_has_branch_fn):
     cfg = config(project)
     auto = cfg["automation"]

@@ -204,6 +204,88 @@ def problems(ctx, stage="pr"):
     return out
 
 
+def _gate_block(ctx, li, fix_route):
+    """gate の有無・鮮度・実行中の変更・合否。問題があれば P の列（なければ空）。"""
+    s, cfg = ctx.state, ctx.cfg
+    out = []
+    g = s.get("gate")
+    if not g:
+        out.append(P("gate_missing", "Quality Gate が未実行", "gate"))
+        return out
+    stale = []
+    diff = G.describe_diff(g.get("snapshot"), ctx.snap)
+    if g.get("code_fp") != ctx.code_fp:
+        stale.append("コード（" + (diff or "内容が変化") + "）")
+    if g.get("checks_fp") != ctx.checks_fp:
+        stale.append("チェックの定義")
+    if g.get("config_fp") and g.get("config_fp") != ctx.config_fp:
+        stale.append("設定")
+    from . import holdout as HO
+    if HO.enabled(cfg) and HO.items(s) and g.get("holdout_fp") != ctx.holdout_fp():
+        stale.append("隠し受け入れテスト（holdout）")
+    vres = (g.get("results") or {}).get("verifications", {})
+    changed_v, new_v = [], []
+    for _r, _p, v in iter_verifications(s):
+        r = vres.get(v["id"])
+        if r is None:
+            new_v.append(v["id"])
+        elif r.get("fp") != G.verification_fp(v, cfg):
+            changed_v.append(v["id"])
+    if changed_v:
+        stale.append(f"検証条件（{', '.join(changed_v[:5])}）")
+    if new_v:
+        stale.append(f"結果のない検証（{', '.join(new_v[:5])}）")
+    if stale:
+        out.append(P("gate_stale", "gate 後に変わったものがある: " + "、".join(stale), "gate"))
+        return out
+    md = g.get("modified_during_gate")
+    if md:
+        out.append(P("gate_modified", f"gate の実行中に変更があった（{md.get('summary')}）。この gate の結果は使えない",
+                     "gate" if li["seq"] > g["seq"] else fix_route("implementer")))
+        return out
+    fl = V.failures(g.get("results"))
+    failed = [n for n, _r in fl["checks"]]
+    vfail = []
+    for _r, _p, v in iter_verifications(s):
+        r = vres.get(v["id"], {})
+        if v.get("after_merge") or (not G.is_automated(v) and v.get("manual")):
+            continue
+        if not V.passed(r):
+            vfail.append(v["id"])
+    hfail, qfail = fl["holdout"], fl["quality"]
+    if failed or vfail or hfail or qfail:
+        what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
+                        ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
+                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []) +
+                        [f"{label}（{V.reason_of(r)}）" for _k, label, r in qfail])
+        route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
+        out.append(P("gate_fail", f"gate が不合格: {what}", route))
+        return out
+    return out
+
+
+def publish_problems(ctx, git_now, kind):
+    """push・PR の作成／更新の前の照合（純粋関数。git の状態は呼び出し側が渡す）。
+
+    kind: "push"（作業ブランチの push。CI のために complete の前にも行う）/ "pr"（gh pr create・edit など）
+    - push: gate があり、合格していて、gate の後にコード・チェック・設定・検証条件が変わっていないこと
+    - pr: complete と同じ条件（problems の stage pr）をすべて満たすこと
+    - どちらも、コードの指紋の対象に未コミットの変更がないこと（push される内容が gate の対象と一致すること）
+    """
+    s = ctx.state
+    out = []
+    if kind == "pr":
+        out += problems(ctx, "pr")
+    else:
+        li = last_impl(s) or {"seq": 0}
+        out += _gate_block(ctx, li, lambda r: r)
+    dirty = (git_now or {}).get("dirty_source") or []
+    if dirty:
+        out.append(P("publish_dirty", "コミットしていない変更がある（push・PR の内容が gate の対象と一致しない）: "
+                     + ", ".join(dirty[:5]) + (" …" if len(dirty) > 5 else ""), "orchestrator"))
+    return out
+
+
 def _problems(ctx, stage):
     s, cfg = ctx.state, ctx.cfg
     auto = cfg["automation"]
@@ -349,58 +431,8 @@ def _problems(ctx, stage):
         if out:
             return out
 
-    g = s.get("gate")
-    if not g:
-        out.append(P("gate_missing", "Quality Gate が未実行", "gate"))
-        return out
-    stale = []
-    diff = G.describe_diff(g.get("snapshot"), ctx.snap)
-    if g.get("code_fp") != ctx.code_fp:
-        stale.append("コード（" + (diff or "内容が変化") + "）")
-    if g.get("checks_fp") != ctx.checks_fp:
-        stale.append("チェックの定義")
-    if g.get("config_fp") and g.get("config_fp") != ctx.config_fp:
-        stale.append("設定")
-    from . import holdout as HO
-    if HO.enabled(cfg) and HO.items(s) and g.get("holdout_fp") != ctx.holdout_fp():
-        stale.append("隠し受け入れテスト（holdout）")
-    vres = (g.get("results") or {}).get("verifications", {})
-    changed_v, new_v = [], []
-    for _r, _p, v in iter_verifications(s):
-        r = vres.get(v["id"])
-        if r is None:
-            new_v.append(v["id"])
-        elif r.get("fp") != G.verification_fp(v, cfg):
-            changed_v.append(v["id"])
-    if changed_v:
-        stale.append(f"検証条件（{', '.join(changed_v[:5])}）")
-    if new_v:
-        stale.append(f"結果のない検証（{', '.join(new_v[:5])}）")
-    if stale:
-        out.append(P("gate_stale", "gate 後に変わったものがある: " + "、".join(stale), "gate"))
-        return out
-    md = g.get("modified_during_gate")
-    if md:
-        out.append(P("gate_modified", f"gate の実行中に変更があった（{md.get('summary')}）。この gate の結果は使えない",
-                     "gate" if li["seq"] > g["seq"] else fix_route("implementer")))
-        return out
-    fl = V.failures(g.get("results"))
-    failed = [n for n, _r in fl["checks"]]
-    vfail = []
-    for _r, _p, v in iter_verifications(s):
-        r = vres.get(v["id"], {})
-        if v.get("after_merge") or (not G.is_automated(v) and v.get("manual")):
-            continue
-        if not V.passed(r):
-            vfail.append(v["id"])
-    hfail, qfail = fl["holdout"], fl["quality"]
-    if failed or vfail or hfail or qfail:
-        what = "、".join(([f"チェック {', '.join(failed)}"] if failed else []) +
-                        ([f"検証 {', '.join(vfail[:6])}"] if vfail else []) +
-                        ([f"隠しテスト {', '.join(hfail[:6])}"] if hfail else []) +
-                        [f"{label}（{V.reason_of(r)}）" for _k, label, r in qfail])
-        route = "gate" if li["seq"] > g["seq"] else fix_route("implementer")
-        out.append(P("gate_fail", f"gate が不合格: {what}", route))
+    out += _gate_block(ctx, li, fix_route)
+    if out:
         return out
 
     from . import counterfactual as CF
@@ -485,6 +517,7 @@ def _problems(ctx, stage):
         return out
 
     # final
+    vres = ((s.get("gate") or {}).get("results") or {}).get("verifications", {})
     am = []
     for _r, _p, v in iter_verifications(s):
         if not v.get("after_merge"):

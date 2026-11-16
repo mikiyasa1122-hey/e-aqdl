@@ -57,6 +57,18 @@ def hook_pre_bash(payload):
                   {"role": role, "cmd": cmd[:2000], "active": active,
                    "snapshot": G.snapshot(project, cfg, prev) if active else None,
                    "ignore_dirs": list(cfg["gate"]["ignore_dirs"]), "config_fp": G.config_fp(cfg, project)})
+    if state and state.get("status") in ("in_progress", "pr_ready") and cfg["automation"].get("block_stale_publish", True) \
+            and re.search(r"\b(git|gh)\b", cmd):
+        kind = gitops.publish_kind(cmd)
+        if kind:
+            from ..state import Ctx
+            from ..state_policy import publish_problems
+            probs = publish_problems(Ctx(project, state, cfg=cfg, fresh=True), G.git_state(project, cfg), kind)
+            if probs:
+                what = "PR の作成・更新" if kind == "pr" else "push"
+                return A.deny(f"{what}の前の照合: 最新のソースと、合格した gate の対象が一致しません。\n  - "
+                              + "\n  - ".join(p["msg"] for p in probs[:6])
+                              + "\n→ 必要ならコミットしてから gate をやり直し（古い合格は使えません）、`$AQ next` に従う")
     if re.search(r"\b(git|gh)\b|api\.github\.com", cmd):
         try:
             reasons = gitops.guard_reasons(cmd, project, gitops.current_branch, gitops.remote_has_branch)
