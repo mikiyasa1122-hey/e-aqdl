@@ -224,8 +224,8 @@ def _dec_lines(s, role):
     if pend:
         out += ["- 未決定: " + "、".join(f"{d['id']} {d.get('topic')}" for d in pend) + "（人の選択を待つ）"]
     if role == "design":
-        out += ["- 設計書の「設計判断とトレードオフ」に、採用した DEC の ID・採用した案・採用しない案と理由を書く"
-                "（採用した DEC の ID がない設計書は登録できない）。",
+        out += ["- 設計書の「設計判断とトレードオフ」に、採用した DEC を「DEC-001 = B」の形で書き、採用しない案と理由を添える"
+                "（この行がない設計書は登録できない。選び直したら書き直す）。",
                 "- 採用した方針に沿って設計する。前提が崩れた・別の案に変えるべき新事実が出たら、無言で変えず "
                 "`$AQ dec-revisit DEC-001 \"<事実>\"` で再確認に戻して統括に返す。新しい重要な論点は `$AQ dec` で登録する。"]
     elif role == "implementer":
@@ -901,11 +901,13 @@ def validate(role, ctx, entry, message):
             if not hash_line_ok(md, "仕様", ctx.spec_hash):
                 errs.append(f"設計書に、基にした仕様の指紋の行（仕様: {short(ctx.spec_hash)}）がない、または古い")
             from . import design_decisions as DD
-            sel = [d["id"] for d in DD.all_decs(s) if d.get("status") == "selected"]
-            miss = [i for i in sel if not re.search(rf"{re.escape(i)}(?![0-9])", md)]
+            sel = [d for d in DD.all_decs(s) if d.get("status") == "selected"]
+            nmd = DD.normalize(md)
+            miss = [f"{d['id']} = {d['selected']}" for d in sel
+                    if not re.search(DD._id_re(d["id"]) + rf"\s*(?:=|:)\s*{d['selected']}(?![A-Z0-9])", nmd)]
             if miss:
-                errs.append("設計書に、採用した設計方針の ID がない（「設計判断とトレードオフ」に、採用した案と"
-                            "採用しない案を ID で書く）: " + "、".join(miss))
+                errs.append("設計書に、採用した設計方針の行がない（「設計判断とトレードオフ」に「DEC-001 = B」の形で、"
+                            "採用した案と、採用しない案の理由を書く。選び直したら書き直す）: " + "、".join(miss))
         unmapped = [r["id"] for r in s["requirements"] if r["id"] not in s["design"].get("map", {})]
         if unmapped:
             errs.append("設計に対応付いていない要求（design-map）: " + "、".join(unmapped))
@@ -1047,6 +1049,7 @@ def register(role, ctx, entry, message):
             invalid = "判定を読み取れない"
         rec["passed"] = bool(rec.get("passed")) and invalid is None
         rec.update({"n": n, "seq": seq, "at": now_iso(), "code_fp": code_now, "graph_fp": ctx.graph_fp,
+                    "decisions_fp": ctx.decisions_fp,
                     "config_fp": ctx.config_fp,
                     "checks_fp": ctx.checks_fp, "spec_hash": ctx.spec_hash, "design_hash": ctx.design_hash,
                     "gate_stamp": (s.get("gate") or {}).get("stamp"), "report": os.path.relpath(path, ctx.project),

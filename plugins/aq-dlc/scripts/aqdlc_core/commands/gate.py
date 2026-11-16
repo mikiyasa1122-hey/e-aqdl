@@ -57,7 +57,7 @@ def cmd_gate(args):
         ok = False  # 検証したものと結果を紐付けるものが一致しないため不合格
     s["gate"] = {"seq": bump(s), "stamp": stamp, "ran_at": now_iso(), "after_merge": after_merge, "sec": dur,
                  "code_fp": G.code_fp(before), "code_fp_after": G.code_fp(after), "snapshot": before,
-                 "checks_fp": out["fps"]["checks"], "config_fp": out["fps"]["config"], "graph_fp": ctx.graph_fp,
+                 "checks_fp": out["fps"]["checks"], "config_fp": out["fps"]["config"], "graph_fp": ctx.graph_fp, "decisions_fp": ctx.decisions_fp,
                  "checks_pass": ok, "results": results, "holdout_fp": out["holdout_fp"],
                  "modified_during_gate": modified,
                  # 検査の対象: 正の識別子は内容の指紋（code_fp。未コミット・未追跡を含む）。HEAD と作業ツリーの状態は参照用

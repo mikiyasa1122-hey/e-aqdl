@@ -220,6 +220,8 @@ def _gate_block(ctx, li, fix_route):
         stale.append("チェックの定義")
     if g.get("config_fp") and g.get("config_fp") != ctx.config_fp:
         stale.append("設定")
+    if g.get("decisions_fp") is not None and g["decisions_fp"] != ctx.decisions_fp:
+        stale.append("設計方針（DEC）の選択")
     from . import holdout as HO
     if HO.enabled(cfg) and HO.items(s) and g.get("holdout_fp") != ctx.holdout_fp():
         stale.append("隠し受け入れテスト（holdout）")
@@ -344,16 +346,17 @@ def _problems(ctx, stage):
                 out.append(P("spec_unapproved", "仕様が人間に未承認", "human"))
     if out and out[-1]["route"] in ("human", "requirements"):
         return out
-    esc = [e["id"] for e in s["escalations"] if e.get("status") != "resolved"]
-    if esc:
-        out.append(P("escalation", f"未対応の差し戻し: {', '.join(esc)}", "orchestrator"))
-        return out
+    # 未決定の設計方針は、差し戻しより先に出す（差し戻しが残っていても、設計・実装に進めないように）
     from . import design_decisions as DD
     pend = DD.pending(s)
     if pend:
         out.append(P("dec_pending", "未決定の設計方針（人の選択が必要）: "
                      + "、".join(f"{d['id']} {d.get('topic')}" + ("（再確認）" if d.get("revisit") else "") for d in pend)
                      + "。decisions --pending の表で人に選んでもらい、dec-select で記録する", "human"))
+        return out
+    esc = [e["id"] for e in s["escalations"] if e.get("status") != "resolved"]
+    if esc:
+        out.append(P("escalation", f"未対応の差し戻し: {', '.join(esc)}", "orchestrator"))
         return out
 
     from . import workflow as WF
@@ -497,6 +500,8 @@ def _problems(ctx, stage):
             rs.append("仕様")
         if rv.get("design_hash") != ctx.design_hash:
             rs.append("設計")
+        if rv.get("decisions_fp") is not None and rv["decisions_fp"] != ctx.decisions_fp:
+            rs.append("設計方針（DEC）の選択")
         if rv.get("role_fp"):
             if ctx.reviewer_role_fp() != rv["role_fp"]:
                 rs.append("レビューの役割の定義（Role Profile）")

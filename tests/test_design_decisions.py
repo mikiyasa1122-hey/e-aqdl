@@ -54,11 +54,13 @@ def present(e):
 
 
 def design_md(e, ids=()):
+    """ids: 書く DEC の ID。選ばれている案を「DEC-001 = A」の形で書く。"""
     from_spec = e.state()["spec"]["registered_hash"]
     body = DESIGN_MD.format(spec=from_spec[:8])
+    sel = {d["id"]: d.get("selected") for d in e.state().get("design_decisions", [])}
     if ids:
         body = body.replace("## 設計判断とトレードオフ", "## 設計判断とトレードオフ\n"
-                            + "\n".join(f"- {i}: 採用した案と、採用しない案の理由" for i in ids))
+                            + "\n".join(f"- {i} = {sel.get(i)}: 採用した案。採用しない案の理由も書く" for i in ids))
     return body
 
 
@@ -208,7 +210,7 @@ class FlowTest(unittest.TestCase):
     def test_design_must_cite_adopted_decision(self):
         res = run_design(self.e, ids=())
         self.assertIsNotNone(res)
-        self.assertIn("採用した設計方針の ID がない", res["reason"])
+        self.assertIn("DEC-001 = A", res["reason"])
 
     def test_briefs_carry_the_constraint(self):
         self.assertFalse(denied(self.e.spawn("design")))
@@ -276,6 +278,110 @@ class FlowTest(unittest.TestCase):
         self.assertIn("dec-revisit", out)
 
 
+class ReviewFixesTest(unittest.TestCase):
+    """独立レビューで見つかった抜け: 別の返答での選択・名前での回答・表記の揺れ・選び直しの無効化・差し戻しとの順序。"""
+
+    def setUp(self):
+        self.e = Env()
+        requirements_with_dec(self.e)
+        _out, self.t = present(self.e)
+
+    def tearDown(self):
+        self.e.cleanup()
+
+    def test_choice_in_a_separate_reply(self):
+        self.e.human_says("DEC-001 = B でお願いします")
+        self.e.human_says(f"承認 {self.t}")
+        self.e.aq("spec", "--approve", "承認")
+        self.assertEqual(self.e.state()["design_decisions"][0]["selected"], "B")
+
+    def test_answer_by_option_name_without_id_is_not_approval(self):
+        self.e.human_answers({"更新の整合性": "B（行ロックで直列化）"})
+        self.e.human_says(f"承認 {self.t}")
+        out = self.e.aq("spec", "--approve", "承認", ok=False)
+        self.assertIn("推奨以外の案の名前", out)
+
+    def test_notation_variants(self):
+        self.e.human_says(f"承認 {self.t}\nｄｅｃ－１ ＝ ｂ")
+        self.e.aq("spec", "--approve", "承認")
+        self.assertEqual(self.e.state()["design_decisions"][0]["selected"], "B")
+
+
+class ReselectInvalidatesTest(unittest.TestCase):
+    def test_gate_and_review_become_stale(self):
+        from helpers import build_to_review  # noqa: F401
+        e = Env()
+        try:
+            requirements_with_dec(e)
+            _o, t = present(e)
+            e.human_says(f"承認 {t}")
+            e.aq("spec", "--approve", "承認")
+            self.assertIsNone(run_design(e))
+            e.spawn("implementer")
+            e.start("implementer")
+            implement(e, MEMO_V1)
+            self.assertIsNone(e.stop("implementer", "実装"))
+            e.aq("gate")
+            gate_fp = e.state()["gate"]["decisions_fp"]
+            e.spawn("design")
+            e.start("design")
+            e.as_role("design", "dec-revisit", "DEC-001", "前提が変わった")
+            e.stop("design", "差し戻し")
+            e.human_says("DEC-001 = B")
+            e.aq("dec-select", "DEC-001", "B")
+            self.assertNotEqual(gate_fp, DD.decisions_fp(e.state()))
+            # 同じ設計書では登録できない（選んだ案の行がない）
+            res = run_design(e, ids=())
+            self.assertIn("DEC-001 = B", (res or {}).get("reason", ""))
+            e.write_as("design", os.path.relpath(os.path.join(e.arts, "design.md"), e.project),
+                       design_md(e, ("DEC-001",)))
+            self.assertIsNone(e.stop("design", "選び直した案で設計を更新"))
+            e.spawn("implementer")
+            e.start("implementer")
+            implement(e, MEMO_V1)
+            self.assertIsNone(e.stop("implementer", "同じコードで登録し直す"))
+            self.assertIn("設計方針（DEC）の選択", e.next())  # 古い gate は使えない
+        finally:
+            e.cleanup()
+
+
+class EscalationOrderTest(unittest.TestCase):
+    def test_pending_decision_blocks_design_even_with_open_escalation(self):
+        e = Env()
+        try:
+            requirements_with_dec(e)
+            _o, t = present(e)
+            e.human_says(f"承認 {t}")
+            e.aq("spec", "--approve", "承認")
+            self.assertIsNone(run_design(e))
+            st = e.state()
+            st["escalations"].append({"id": "E1", "status": "open", "from": "implementer", "text": "x"})
+            st["design_decisions"][0].update(status="proposed", revisit={"by": "implementer", "reason": "x", "seq": 1})
+            e.save_state(st)
+            self.assertTrue(denied(e.spawn("design")))
+            self.assertIn("未決定の設計方針", e.next())
+        finally:
+            e.cleanup()
+
+
+class SupersedeKeepsSpecTest(unittest.TestCase):
+    def test_superseding_by_design_keeps_approved_spec(self):
+        e = Env()
+        try:
+            requirements_with_dec(e)
+            _o, t = present(e)
+            e.human_says(f"承認 {t}")
+            e.aq("spec", "--approve", "承認")
+            e.spawn("design")
+            e.start("design")
+            e.as_role("design", *dec_args("DEC-002", "--supersedes", "DEC-001"))
+            st = e.state()
+            from aqdlc_core.state_store import spec_hash
+            self.assertEqual(spec_hash(st, e.run_dir), st["spec"]["approved_hash"])
+        finally:
+            e.cleanup()
+
+
 class ChoiceParseTest(unittest.TestCase):
     def test_forms(self):
         keys = ["A", "B", "C"]
@@ -286,7 +392,9 @@ class ChoiceParseTest(unittest.TestCase):
 
     def test_ambiguous(self):
         keys = ["A", "B"]
-        for text in ("DEC-001 = A、いや DEC-001 = B", "DEC-001 = B ではなく A", "DEC-001 は保留", "DEC-001 = C"):
+        for text in ("DEC-001 = A、いや DEC-001 = B", "DEC-001 = B ではなく A", "DEC-001 は保留", "DEC-001 = C",
+                     "確認したい選択: DEC-001 = A / B → B でお願いします", "DEC-001 は Bにしようと思ったけど、やっぱり推奨のAで",
+                     "DEC-001 = B。いや、やっぱり推奨で", "DEC-001 = B（推奨で）"):
             with self.subTest(text=text):
                 got, why = DD.choice_in(text, "DEC-001", keys)
                 self.assertIsNone(got)

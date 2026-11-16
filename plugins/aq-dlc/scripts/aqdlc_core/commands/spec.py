@@ -71,7 +71,10 @@ def cmd_spec(args):
         die("承認の返答が、判断シートの推奨と違う回答かもしれないため、承認として扱いません（"
             + "；".join(conflicts) + "）。answer で回答を記録し、aq-dlc:requirements に反映を依頼してから、提示し直してください。")
     from .decisions import apply_spec_approval
-    dec_done, dec_why = apply_spec_approval(s, (ev or {}).get("text") or "")
+    replies = [e.get("text") or "" for e in s.get("human_events", [])
+               if e.get("seq", 0) > sp.get("presented_seq", 0) and e.get("parsed", True)
+               and (not s.get("eaqdl") or AP.in_transcript(s, e))]
+    dec_done, dec_why = apply_spec_approval(s, replies)
     if dec_why:
         die("承認の返答の、設計方針の選択が曖昧なため、承認として扱いません（" + "；".join(dec_why)
             + "）。「承認 " + target + "」と一緒に「DEC-001 = B」の形で選んでもらって、確認し直してください。")
