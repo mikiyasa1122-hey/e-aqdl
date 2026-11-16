@@ -127,6 +127,7 @@ def collect_metrics(s, project=None):
         "tokens_complete": complete,
         "models": (total or {}).get("models") or [],
         "quality": _quality_metrics(s, project),
+        "review_quality": _review_quality(s, roles),
         "role_profiles": _role_metrics(s),
         "counterfactual": cf,
         "memory": _memory_metrics(s),
@@ -149,6 +150,12 @@ def _workflow_label(s, project):
         return WF.effective(s, cfg)["mode"]
     except Exception:  # noqa: BLE001
         return None
+
+
+def _review_quality(s, roles):
+    from .. import review_quality as RQ
+    r = roles.get("reviewer") or {}
+    return RQ.summarize(s, reviewer_sec=round(r["sec"], 1) if r else None, reviewer_tokens=r.get("tokens"))
 
 
 def _quality_metrics(s, project):
@@ -213,6 +220,9 @@ def _memory_metrics(s):
 def cmd_metrics(args):
     as_json = pop_flag(args, "--json")
     all_runs = pop_flag(args, "--runs")
+    review_runs = pop_flag(args, "--reviews")
+    if review_runs:
+        return _metrics_reviews(args, as_json)
     if all_runs:
         return _metrics_runs(args, as_json)
     project, s, _ = open_state(args)
@@ -264,6 +274,44 @@ def cmd_metrics(args):
     mm = m["memory"]
     print(f"Memory: 利用範囲 {mm['scope']}・読み込み {mm['loaded']} 件・結果 {mm['results'] or 'なし'}・"
           f"共有 {mm['shared']} 件（却下 {mm['share_rejected']}）・終了時 {mm['end']}")
+    from .findings import summary_text
+    print(summary_text(m["review_quality"]))
+
+
+def _metrics_reviews(args, as_json):
+    """metrics --reviews — このプロジェクトの run をまたいだレビュー品質（run ごとと合計。判定済みの件数で率を出す）"""
+    from .. import review_quality as RQ
+    from ..state import runs_dir, migrate
+    project = resolve_project(args)
+    d = runs_dir(project)
+    runs = []
+    for rid in sorted(os.listdir(d)) if os.path.isdir(d) else []:
+        if not os.path.isfile(os.path.join(d, rid, "state.json")):
+            continue  # CURRENT などの印のファイル
+        st = load_json(os.path.join(d, rid, "state.json"), None)
+        if not isinstance(st, dict):
+            continue
+        st = migrate(st)
+        runs.append((rid, collect_metrics(st, project)["review_quality"], st.get("created"), st.get("closed_at")))
+    tot = RQ.aggregate([(r, m) for r, m, _a, _b in runs])
+    if as_json:
+        print(json.dumps({"runs": [{"run": r, **m} for r, m, _a, _b in runs], "total": tot}, ensure_ascii=False,
+                         indent=2, default=list))
+        return
+    print("| run | 指摘（重複を除く） | 判定済み | 未判定 | 妥当 | 受容 | 誤検知 | 要検証 | 適合率 | 外部の追加 | 見逃し | 状態 |")
+    print("|" + "---|" * 12)
+    for r, m, _a, _b in runs:
+        print(f"| {r} | {m['detected_unique']} | {m['judged']} | {m['untriaged']} | {m['valid']} | {m['accepted_risk']} | "
+              f"{m['false_positive']} | {m['needs_check']} | {m['precision'] if m['precision'] is not None else '-'} | "
+              f"{m['external_additional']} | {m['confirmed_misses']} | {'暫定' if m['provisional'] else '確定'} |")
+    period = [x for _r, _m, a, b in runs for x in (a, b) if x]
+    print(f"\n合計（{tot['runs']} run・期間 {min(period) if period else '-'} 〜 {max(period) if period else '-'}）: "
+          f"指摘 {tot['detected_unique']}・判定済み {tot['judged']}・未判定 {tot['untriaged']}・"
+          f"適合率 {tot['precision'] if tot['precision'] is not None else '-'}・外部の追加 {tot['external_additional']}・"
+          f"確定した見逃し {tot['confirmed_misses']}・観測された追加発見率 "
+          f"{tot['observed_additional_rate'] if tot['observed_additional_rate'] is not None else '-'}"
+          f"（{'暫定' if tot['provisional'] else '確定'}）")
+    print("※ 本当の欠陥の総数は分からないため、再現率は出しません。未判定の指摘は、妥当にも誤検知にも数えていません。")
 
 
 def _metrics_runs(args, as_json):
@@ -280,8 +328,8 @@ def _metrics_runs(args, as_json):
             continue
         st = migrate(st)
         m = st.get("metrics")
-        if not m or m.get("schema", 1) < METRICS_SCHEMA:
-            m = collect_metrics(st)
+        if not m or m.get("schema", 1) < METRICS_SCHEMA or "review_quality" not in m:
+            m = collect_metrics(st)  # review_quality のない保存値（この項目の追加前）も集計し直す
         tt = m.get("tokens_total") or {}
         rows.append({"run": rid, "status": st.get("status"), **m["conditions"], "gate_failed": m["gate"]["failed"],
                      "models": ",".join(m.get("models") or []) or None,
