@@ -1,6 +1,6 @@
 """PERF-01: 通常の Claude Code と E-AQDL の全工程を、同じ課題で比べる。
 
-  python3 bench/workflow/run_workflow.py run --task spec|vague|archive --cond plain|eaqdl --rep N --out DIR [--max-turns 10] [--budget 30]
+  python3 bench/workflow/run_workflow.py run --task spec|vague|archive --cond plain|eaqdl --rep N --out DIR [--max-turns 10] [--budget 30] [--model claude-sonnet-5-5]
   python3 bench/workflow/run_workflow.py evaluate --out DIR
   python3 bench/workflow/run_workflow.py report --out DIR
 
@@ -52,6 +52,14 @@ REFERENCE_ONLY = ("test_huge_page_returns_no_items", "test_permission_is_checked
 # 承認として扱わない（最初の試行で、混ぜた台本が受理されないことを確かめた。results/pilot/ANALYSIS.md）
 HUMAN_APPROVE = "承認 {ids}"
 HUMAN_REPLY = "推奨の選択で進めてください。"
+# モデルは固定する（CLI の既定のモデルは変わることがある。EVAL の計測で、既定が Opus になっていた）
+DEFAULT_MODEL = "claude-sonnet-5-5"
+# 利用の上限・一時的な障害で止まった回は、結果として保存しない（後で同じ回をやり直す）
+LIMIT_RE = re.compile(r"usage limit|rate limit|limit reached|overloaded|529|hit your limit", re.I)
+
+
+class Interrupted(Exception):
+    pass
 
 
 def arg(name, default=None):
@@ -87,8 +95,8 @@ def setup_project(dest, task="spec"):
     git(dest, "-c", "user.name=bench", "-c", "user.email=bench@local", "commit", "-q", "-m", "初期状態")
 
 
-def claude(cwd, prompt, cond, session=None, budget=None, env=None):
-    cmd = ["claude", "-p", prompt, "--output-format", "json", "--dangerously-skip-permissions"]
+def claude(cwd, prompt, cond, session=None, budget=None, env=None, model=DEFAULT_MODEL):
+    cmd = ["claude", "-p", prompt, "--output-format", "json", "--dangerously-skip-permissions", "--model", model]
     if cond == "eaqdl":
         cmd += ["--plugin-dir", PLUGIN]
     if session:
@@ -138,7 +146,7 @@ def finished(cond, project, last):
     return not re.search(r"[?？]\s*$|どちら|よろしいですか|確認させて|教えてください", text.strip()[-300:])
 
 
-def run(cond, rep, out, max_turns, budget, task="spec"):
+def run(cond, rep, out, max_turns, budget, task="spec", model=DEFAULT_MODEL):
     tag = f"{task}-{cond}-{rep}"
     dest = os.path.join(out, "runs", tag + ".json")
     if os.path.exists(dest):
@@ -154,7 +162,9 @@ def run(cond, rep, out, max_turns, budget, task="spec"):
     prompt = ("/aq-dlc:start " if cond == "eaqdl" else "") + TASKS[task]
     for i in range(max_turns):
         left = max(budget - spent, 0.5)
-        t = claude(project, prompt, cond, session, left, env)
+        t = claude(project, prompt, cond, session, left, env, model)
+        if t["is_error"] and LIMIT_RE.search(str(t.get("result") or "")[-600:]):
+            raise Interrupted(f"{tag}: {str(t.get('result'))[-300:]}")
         # total_cost_usd は、resume したセッションの累計。この回の分は差で出す
         cum = t["cost_usd"] or 0
         t["cost_cumulative_usd"], t["cost_usd"] = cum, round(max(cum - prev_cum, 0), 4) if cum >= prev_cum else cum
@@ -170,7 +180,7 @@ def run(cond, rep, out, max_turns, budget, task="spec"):
         ids = sorted(set(re.findall(r"SPEC-[0-9A-Za-z-]+", t.get("result") or "")))
         st = t["state_after"] or {}
         prompt = HUMAN_APPROVE.format(ids=" ".join(ids)) if ids and not st.get("spec_approved") else HUMAN_REPLY
-    rec = {"task": task, "cond": cond, "rep": rep, "turns": turns, "human_replies": len(turns) - 1,
+    rec = {"task": task, "cond": cond, "rep": rep, "model": model, "turns": turns, "human_replies": len(turns) - 1,
            "cost_usd": round(spent, 4), "sec": round(sum(t["sec"] for t in turns), 1),
            "final_state": eaqdl_state(project), "budget_hit": spent >= budget,
            "stopped_by": "max_turns" if len(turns) == max_turns and not finished(cond, project, turns[-1]) else "done"}
@@ -240,11 +250,38 @@ def evaluate(out):
         print(fn, {k: v for k, v in rec["evaluation"].items() if k != "failed"})
 
 
+def _stat(xs):
+    xs = [x for x in xs if isinstance(x, (int, float))]
+    if not xs:
+        return "-"
+    m = sum(xs) / len(xs)
+    return f"{m:.2f}（{min(xs):g}〜{max(xs):g}）" if len(xs) > 1 else f"{m:.2f}"
+
+
+def summary(recs):
+    """課題 × 条件ごとの平均（最小〜最大）。回数が少ないので、差は傾向として読む（検定はしない）。"""
+    groups = {}
+    for r in recs:
+        groups.setdefault((r.get("task", "spec"), r["cond"]), []).append(r)
+    lines = ["| 課題 | 条件 | 回数 | 必須の失敗 | 参考の失敗 | 費用（USD） | 時間（分） | 人の返答 | 完了まで進んだ |",
+             "|---|---|---|---|---|---|---|---|---|"]
+    for (task, cond), rs in sorted(groups.items()):
+        ev = [r.get("evaluation") or {} for r in rs]
+        done = sum(1 for r in rs if r["cond"] == "plain" and r["stopped_by"] == "done" and not r["budget_hit"]
+                   or (r.get("final_state") or {}).get("status") in ("complete", "pr_ready"))
+        lines.append(f"| {task} | {cond} | {len(rs)} | {_stat([e.get('failed_required') for e in ev])} | "
+                     f"{_stat([e.get('failed_reference_only') for e in ev])} | {_stat([r['cost_usd'] for r in rs])} | "
+                     f"{_stat([round(r['sec'] / 60, 1) for r in rs])} | {_stat([r['human_replies'] for r in rs])} | "
+                     f"{done}/{len(rs)} |")
+    return "\n".join(lines) + "\n"
+
+
 def report(out):
-    rows = []
+    rows, recs = [], []
     for fn in sorted(os.listdir(os.path.join(out, "runs"))):
         with open(os.path.join(out, "runs", fn), encoding="utf-8") as f:
             r = json.load(f)
+        recs.append(r)
         ev = r.get("evaluation") or {}
         fs = r.get("final_state") or {}
         rows.append(f"| {r.get('task', 'spec')} | {r['cond']} | {r['rep']} | {ev.get('hidden_pass_rate', 0):.3f} "
@@ -256,7 +293,8 @@ def report(out):
                     f"{fs.get('fix_iterations', '-')} | {r['stopped_by']}{'・予算の上限' if r['budget_hit'] else ''} |")
     md = ("# PERF-01 の結果\n\n| 課題 | 条件 | 回 | 隠しテストの合格率 | 失敗（必須 / 参考） | 失敗した repro | 自作テスト | 費用 | 時間 | 実行の回数 | "
           "人の返答 | E-AQDL の状態 | レビュー | 修正の回数 | 終わり方 |\n|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|\n"
-          + "\n".join(rows) + "\n")
+          + "\n".join(rows) + "\n\n## 課題 × 条件の集計（平均・括弧内は最小〜最大）\n\n" + summary(recs)
+          + "\nモデル: " + ", ".join(sorted({str(r.get("model", "未記録")) for r in recs})) + "\n")
     with open(os.path.join(out, "report.md"), "w", encoding="utf-8") as f:
         f.write(md)
     print(md)
@@ -266,7 +304,7 @@ if __name__ == "__main__":
     cmd, out = sys.argv[1], os.path.abspath(arg("--out", os.path.join(HERE, "results", "pilot")))
     if cmd == "run":
         run(arg("--cond"), int(arg("--rep", "1")), out, int(arg("--max-turns", "10")), float(arg("--budget", "30")),
-            arg("--task", "spec"))
+            arg("--task", "spec"), arg("--model", DEFAULT_MODEL))
     elif cmd == "evaluate":
         evaluate(out)
     elif cmd == "report":
