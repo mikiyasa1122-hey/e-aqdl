@@ -27,6 +27,7 @@ def run(project, state, cfg, run_dir, stamp, iter_verifications, after_merge, lo
     load_cfg: 実行後の設定を読み直す関数（gate の実行中の設定の変更を検出する）。
     lines: 表示用の行（表示は呼び出し側が行う）。
     """
+    git_before = G.git_state(project, cfg)
     before = G.snapshot(project, cfg, fresh=True)
     fps = {"checks": G.checks_fp(cfg), "config": G.config_fp(cfg, project),
            "verifications": {v["id"]: G.verification_fp(v, cfg) for _r, _p, v in iter_verifications(state)}}
@@ -54,7 +55,9 @@ def run(project, state, cfg, run_dir, stamp, iter_verifications, after_merge, lo
     sec = round(time.time() - t0, 1)
     cfg_after = load_cfg()
     after = G.snapshot(project, cfg, fresh=True)
+    git_after = G.git_state(project, cfg)
     return {"results": results, "ok": ok, "before": before, "after": after, "fps": fps, "cfg_after": cfg_after,
+            "git_before": git_before, "git_after": git_after,
             "holdout_fp": holdout_fp, "sec": sec, "lines": lines}
 
 

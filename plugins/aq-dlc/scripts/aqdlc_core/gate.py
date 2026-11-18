@@ -70,6 +70,61 @@ def source_files(project, cfg):
     return sorted(out)
 
 
+def git_state(project, cfg=None):
+    """git の HEAD と作業ツリーの状態（記録と、push・PR の前の照合に使う）。
+
+    戻り値: {"head", "branch", "staged", "unstaged", "untracked", "dirty_source"}。git でなければ head は None。
+    dirty_source: 未コミット（ステージ済み・未ステージ・未追跡）のうち、コードの指紋の対象になるファイル（最大50件）。
+    内容の指紋（code_fp）が gate の正の識別子で、HEAD は参照のために記録する。指紋が同じでも、
+    dirty_source があると、push される内容（コミット）は gate が検査した内容と一致しない。
+    """
+    out = {"head": None, "branch": None, "staged": 0, "unstaged": 0, "untracked": 0, "dirty_source": []}
+    if not shutil.which("git") or not os.path.isdir(project):
+        return out
+    code, head = sh_run("git rev-parse --verify -q HEAD", project, 30)
+    if code == 0 and head.strip():
+        out["head"] = head.strip()
+    code, br = sh_run("git symbolic-ref -q --short HEAD", project, 30)
+    out["branch"] = br.strip() if code == 0 and br.strip() else None
+    # プロジェクトがリポジトリのサブフォルダでもよいように、プロジェクトの中だけを見て、パスをプロジェクトからの相対にする
+    code, prefix = sh_run("git rev-parse --show-prefix", project, 30)
+    prefix = prefix.strip() if code == 0 else ""
+    code, st = sh_run("git status --porcelain=v1 -z --untracked-files=all -- .", project, 120)
+    if code != 0:
+        out["error"] = "git status に失敗した"
+        return out
+    srcs = set(source_files(project, cfg)) if cfg else set()
+    entries = st.split("\0")
+    i = 0
+    dirty = []
+    while i < len(entries):
+        e = entries[i]
+        i += 1
+        if len(e) < 4:
+            continue
+        x, y, path = e[0], e[1], e[3:]
+        if x in "RC":
+            i += 1  # 名前の変更・コピーは、次の要素が元の名前
+        if prefix:
+            if not path.startswith(prefix):
+                continue
+            path = path[len(prefix):]
+        if x == "?":
+            out["untracked"] += 1
+        else:
+            if x not in " ?":
+                out["staged"] += 1
+            if y not in " ?":
+                out["unstaged"] += 1
+        # 指紋の対象（未追跡は .gitignore・ignore_dirs・依存関係のフォルダを除く。追跡しているファイルは常に対象。
+        # gate で作り直すカバレッジのレポートと E-AQDL の記録は除く）と、削除したファイル（指紋の一覧に出ない）
+        deleted = x == "D" or y == "D" or not os.path.lexists(os.path.join(project, path))
+        if path in srcs or (deleted and x != "?" and not path.startswith((".aq-dlc/", ".claude/", ".git/"))):
+            dirty.append(path)
+    out["dirty_source"] = sorted(set(dirty))[:50]
+    return out
+
+
 def _stat_key(st):
     # 更新時刻だけでなく ctime（utime で戻せない）と inode も比べる
     return [st.st_size, st.st_mtime_ns, getattr(st, "st_ctime_ns", 0), getattr(st, "st_ino", 0)]

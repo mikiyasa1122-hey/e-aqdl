@@ -56,6 +56,7 @@ DEFAULTS = {
         "allow_github_ops": True,
         "block_force_push": True,
         "block_push_to_default_branch": True,
+        "block_stale_publish": True,
         "block_pr_merge": True,
         "block_destructive_gh": True,
     },

@@ -806,11 +806,13 @@ def cmd_complete(args):
               + "\n  - ".join(p["msg"] for p in final)
               + "\n→ PR を作成して報告し、マージを待つ（この間 Stop hook は止めない）。"
                 "\n→ マージ後: 既定ブランチを取り込み → gate --after-merge → 人の確認は ask でまとめて1回 → confirm → complete")
+        print("\n".join(gate_source_lines(ctx)))
         return
     s["status"] = "complete"
     s["metrics"] = collect_metrics(s, project)
     save_state(spath, s)
     info("完了条件を満たしました。status を complete にしました。（運用の指標は metrics で確認）")
+    print("\n".join(gate_source_lines(ctx)))
     from .state import deferred_list
     dl = deferred_list(s, ctx.cfg)
     if dl:
@@ -953,6 +955,10 @@ def cmd_report(args):
         ng = [ac for ac, r in ho.items() if not r.get("pass")]
         print(f"- **隠し受け入れテスト**: 合格 {len(ok)} / {len(ho)}" + (f"（不合格: {', '.join(ng)}）" if ng else ""))
     print()
+    print("## 検査の対象と鮮度")
+    for line in gate_source_lines(ctx):
+        print(line)
+    print()
     print("## 進め方の記録")
     print(f"- 時間: {m['run_sec'] // 60} 分 {m['run_sec'] % 60} 秒。Quality Gate {m['gate']['runs']} 回（不合格 {m['gate']['failed']}）、"
           f"独立レビュー {m['reviews']['runs']} 回（合格 {m['reviews']['passed']}）、修正ループ {m['fix_iterations']} 回")
@@ -966,6 +972,51 @@ def cmd_report(args):
         print(f"- レビュー担当のモデル: {models['reviewer']}")
     print()
     print("通常の gate の合格は「テストが欠陥を検出できることの証明」ではありません。未確認・証拠不足の項目は、確かめていない範囲です。")
+
+
+def gate_source_lines(ctx):
+    """最後の gate が何を検査したか（対象の識別子・各検査の結果・証跡の場所）と、今も有効か。"""
+    from . import verdict as V
+    from .state_policy import publish_problems
+    s = ctx.state
+    g = s.get("gate")
+    if not g:
+        return ["- Quality Gate は未実行"]
+    src = g.get("source") or {}
+    git = src.get("git") or {}
+    lines = [f"- 対象: 内容の指紋 {str(src.get('code_fp') or g.get('code_fp'))[:12]}"
+             + (f"（ファイル {src['files']} 件。未コミット・未追跡を含む）" if src.get("files") is not None else "")
+             + (f"・HEAD {git['head'][:10]}" + (f"（{git['branch']}）" if git.get("branch") else "") if git.get("head")
+                else "・HEAD の記録なし")
+             + (f"・gate の開始時の未コミット: ステージ済み {git.get('staged', 0)}・未ステージ {git.get('unstaged', 0)}・"
+                f"未追跡 {git.get('untracked', 0)}" if git else "")]
+    res = g.get("results") or {}
+    checks = res.get("checks") or {}
+    if checks:
+        lines.append("- チェック: " + "、".join(f"{n} {V.LABEL[V.status_of(r)]}" for n, r in checks.items())
+                     + "（チェックの合格は終了コードによる。実行されたテストの件数は数えていないので、"
+                       "すべてのテストが実行されたことの証明ではない）")
+    vres = res.get("verifications") or {}
+    if vres:
+        cnt = {}
+        for r in vres.values():
+            lab = V.LABEL[V.status_of(r)]
+            cnt[lab] = cnt.get(lab, 0) + 1
+        lines.append("- 検証: " + "・".join(f"{k} {v}" for k, v in cnt.items()) + f"（{len(vres)} 件）")
+    dc = res.get("diff_coverage")
+    if dc:
+        lines.append(f"- 差分カバレッジ（run の開始時点からの変更行が対象。全体ではない）: {V.LABEL[V.status_of(dc)]}"
+                     + (f" {dc['percent']}%（{dc.get('covered')}/{dc.get('total')} 行・ファイル {len(dc.get('files') or [])} 件・"
+                        f"基準 {dc.get('min')}%）" if dc.get("percent") is not None else "")
+                     + (f"・除外 {', '.join(ctx.cfg.get('quality', {}).get('diff_coverage', {}).get('exclude') or [])}"
+                        if (ctx.cfg.get("quality", {}).get("diff_coverage", {}).get("exclude")) else ""))
+    lines.append(f"- 証跡: .aq-dlc/runs/{s['run_id']}/gate/（gate {g.get('stamp')}・{g.get('ran_at')}）")
+    probs = publish_problems(ctx, G.git_state(ctx.project, ctx.cfg), "push")
+    if probs:
+        lines.append("- 鮮度: **期限切れ（stale）・使えない** — " + "／".join(p["msg"] for p in probs[:4]))
+    else:
+        lines.append("- 鮮度: 有効（gate の後にコード・チェック・設定・検証条件の変更なし、未コミットの変更なし）")
+    return lines
 
 
 def cmd_history(args):

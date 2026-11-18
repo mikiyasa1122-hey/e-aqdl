@@ -59,9 +59,13 @@ def cmd_gate(args):
                  "code_fp": G.code_fp(before), "code_fp_after": G.code_fp(after), "snapshot": before,
                  "checks_fp": out["fps"]["checks"], "config_fp": out["fps"]["config"], "graph_fp": ctx.graph_fp,
                  "checks_pass": ok, "results": results, "holdout_fp": out["holdout_fp"],
-                 "modified_during_gate": modified}
+                 "modified_during_gate": modified,
+                 # 検査の対象: 正の識別子は内容の指紋（code_fp。未コミット・未追跡を含む）。HEAD と作業ツリーの状態は参照用
+                 "source": {"code_fp": G.code_fp(before), "files": len(before),
+                            "git": out.get("git_before"), "git_after": out.get("git_after")}}
     s.setdefault("gate_history", []).append({"stamp": stamp, "pass": ok, "sec": dur, "after_merge": after_merge,
-                                             "modified": bool(modified)})
+                                             "modified": bool(modified), "code_fp": G.code_fp(before),
+                                             "head": (out.get("git_before") or {}).get("head")})
     if after_merge:
         s["after_merge_gate"] = True
     s["stop_blocks"] = 0
