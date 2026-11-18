@@ -11,6 +11,7 @@ import re
 import shutil
 import time
 
+from . import concurrency as CC
 from . import gate as G
 from . import verdict as V
 from . import counterfactual as CF
@@ -251,6 +252,7 @@ def _brief_requirements(ctx):
         "2. 受け入れ条件: `$AQ accept R1 AC1 \"<観察できる条件>\"`（全要求に1つ以上）",
         "3. Failure First: `$AQ risk R1 K1 \"<起こりうる失敗>\"`（重要な要求には必須。不正入力・権限・境界値・"
         "データ不整合・エラー時・秘密情報・同時操作の観点で洗い出す）",
+    ] + CC.REQUIREMENTS_LINES + [
         "4. 検証方法: `$AQ verify AC1 V1 \"<確かめ方>\" --level unit|integration|e2e|manual [--after-merge]`"
         "（受け入れ条件・リスクごとに1つ以上。実行コマンドは実装担当が後で設定する。"
         "人にしか確かめられないものは `--manual \"<手順>\"`、デプロイ後にしか確かめられないものは `--after-merge`）。"
@@ -342,7 +344,7 @@ def _brief_design(ctx):
         lines.append(f"- {v['id']}（{p['id']}）{v.get('method')} レベル: {v.get('level') or '未設定'}")
     if s.get("decisions"):
         lines += ["", "## 既存の設計判断"] + [f"- {d['id']} {d['text']}" for d in s["decisions"]]
-    lines += _dec_lines(s, "design")
+    lines += _dec_lines(s, "design") + CC.brief_lines(s, "design")
     rv = latest_review(s)
     if rv and rv.get("blocking", 0) > 0:
         df = [f for f in rv.get("findings", []) if f.get("category") == "設計"]
@@ -423,7 +425,7 @@ def _brief_implementer(ctx, compact=False):
 
 def _impl_tail(ctx, s, kind, items):
     """実装担当の引き継ぎのうち run 固有の部分（修正依頼・未設定の検証・要求・チェック）。省略しない。"""
-    lines = _dec_lines(s, "implementer")
+    lines = _dec_lines(s, "implementer") + CC.brief_lines(s, "implementer")
     if kind:
         what = {"review": f"レビュー#{kind[1]} の重大な指摘", "counterfactual": f"反証テスト {kind[1]} の見逃し",
                 "unowned": "担当外の変更の確認"}.get(kind[0], f"gate {kind[1]} の不合格")
@@ -653,7 +655,7 @@ def _brief_reviewer(ctx):
         "本当に確かめているか（正常系だけでなく異常系・境界値、モックしすぎ、弱いアサーション）を評価する。",
         "「重大」の基準: 受け入れ条件の未達、重要な要求の検証不足・空洞化、設計との重大な不整合、重大なセキュリティの穴、"
         "テストの改ざん・弱体化。スタイルや好みは「軽微」。重大が1件でもあれば判定は「要修正」、0件なら「合格」。",
-    ] + REVIEW_ACTION_RULES + _dec_lines(s, "reviewer")
+    ] + REVIEW_ACTION_RULES + _dec_lines(s, "reviewer") + CC.brief_lines(s, "reviewer")
     return lines
 
 
@@ -956,6 +958,7 @@ def validate(role, ctx, entry, message):
     elif role == "reviewer":
         rec, perrs = parse_review(message)
         errs += perrs
+        errs += CC.review_issues(s, message, rec["findings"], exact_section)
         # 証拠不足は、どの受け入れ条件・重要なリスクのための証拠かを対象に書く（その run にある ID）
         ev_ids = [a["id"] for r in s["requirements"] for a in r.get("acceptance", [])]
         ev_ids += [k["id"] for r in s["requirements"] for k in r.get("risks", [])]

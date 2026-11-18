@@ -209,6 +209,10 @@ def spec_hash(state, rd):
         **({"sheet": items} if (items := _sheet_fp_items(state.get("questions", []))) else {}),
         # 要求担当が出した設計方針の論点（選択肢と推奨）。選んだ案は入れない（design_decisions.spec_items）
         **({"dec": dec} if (dec := _dec_fp_items(state)) else {}),
+        # 並行・共有のリスクの分類（承認の後に外したら、承認し直す）。該当がなければ鍵ごと入れない
+        **({"conc": conc} if (conc := [[k["id"], k.get("concurrency"), k.get("scenario"), k.get("invariant")]
+                                       for r in state.get("requirements", []) for k in r.get("risks", [])
+                                       if k.get("concurrency") or k.get("scenario") or k.get("invariant")]) else {}),
     })
 
 

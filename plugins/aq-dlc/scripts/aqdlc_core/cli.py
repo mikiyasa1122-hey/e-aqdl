@@ -111,7 +111,8 @@ def cmd_req(args):
     mutate(args, fn)
 
 
-def _child(args, list_key, kind, usage):
+def _child(args, list_key, kind, usage, extra=None):
+    """extra: ノードに足す項目（None の値は変えない）。"""
     def fn(project, s, a):
         if len(a) < 3:
             die(usage)
@@ -122,9 +123,16 @@ def _child(args, list_key, kind, usage):
             log(s, project, f"{kind}.update", {"id": nid, "before": node["text"], "after": text})
             node["text"] = text
         else:
-            r.setdefault(list_key, []).append({"id": nid, "text": text, "verifications": []})
+            node = {"id": nid, "text": text, "verifications": []}
+            r.setdefault(list_key, []).append(node)
             log(s, project, f"{kind}.add", {"id": nid, "parent": r["id"], "text": text})
-        info(f"{'受け入れ条件' if kind == 'acceptance' else 'リスク'} {r['id']}/{nid}: {text}")
+        for k, v in (extra or {}).items():
+            if v is not None:
+                node[k] = v
+        if extra and any(v is not None for v in extra.values()):
+            log(s, project, f"{kind}.attrs", {"id": nid, **{k: v for k, v in extra.items() if v is not None}})
+        info(f"{'受け入れ条件' if kind == 'acceptance' else 'リスク'} {r['id']}/{nid}: {text}"
+             + (f"（並行・共有: {', '.join(node['concurrency'])}）" if node.get("concurrency") else ""))
     mutate(args, fn)
 
 
@@ -133,7 +141,16 @@ def cmd_accept(args):
 
 
 def cmd_risk(args):
-    _child(args, "risks", "risk", '使い方: risk <要求ID> <リスクID> "<起こりうる失敗>"')
+    from . import concurrency as CC
+    conc = pop_opt(args, "--concurrency")
+    extra = {"scenario": pop_opt(args, "--scenario"), "invariant": pop_opt(args, "--invariant"), "concurrency": None}
+    if conc is not None:
+        kinds, bad = CC.parse_kinds(conc)
+        if bad or (conc.strip() and not kinds):
+            die(f"--concurrency の種類が不正: {', '.join(bad) or conc}（{' / '.join(CC.KINDS)}。外すなら --concurrency \"\"）")
+        extra["concurrency"] = kinds
+    _child(args, "risks", "risk", '使い方: risk <要求ID> <リスクID> "<起こりうる失敗>" [--concurrency <種類,…> '
+           '--scenario "<状態遷移の順序>" --invariant "<不変条件>"]', extra)
 
 
 def _apply_vopts(v, o, project, s):
@@ -160,7 +177,7 @@ def _apply_vopts(v, o, project, s):
 def cmd_verify(args):
     o = {"level": pop_opt(args, "--level"), "manual": pop_opt(args, "--manual"),
          "command": pop_opt(args, "--command"), "checks": pop_opt(args, "--checks"),
-         "timeout_sec": pop_opt(args, "--timeout")}
+         "timeout_sec": pop_opt(args, "--timeout"), "ordering": pop_opt(args, "--ordering")}
     after = pop_flag(args, "--after-merge")
 
     def fn(project, s, a):
