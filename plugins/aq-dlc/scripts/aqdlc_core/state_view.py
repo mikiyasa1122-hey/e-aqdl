@@ -141,6 +141,19 @@ def spec_sheet(state):
         for q in answered:
             lines.append(f"- {q['id']} {q['text']} → {q.get('answer')}")
         lines.append("")
+    from . import design_decisions as DD
+    decs = [d for d in DD.all_decs(state) if d.get("origin") == "requirements" and d.get("status") != "superseded"]
+    if decs:
+        lines += ["## 設計方針の選択（この仕様の承認と一緒に決めます）", ""]
+        for d in decs:
+            if d.get("status") == "selected":
+                o = DD.selected_option(d) or {}
+                lines.append(f"- {d['id']} {d.get('topic')} → **{d.get('selected')}: {o.get('title')}**（決定済み）")
+            else:
+                lines += DD.table_lines(d) + [""]
+        if any(d.get("status") == "proposed" for d in decs):
+            lines += ["推奨でよければ書かなくてよい（承認で推奨に決まる）。別の案にするなら、承認と一緒に"
+                      "「DEC-001 = B」のように書く。", ""]
     open_q, manual = pending_by_sheet(state)
     if open_q or manual:
         lines += ["## 判断シート（この仕様の承認と一緒に、1回の返答で決められます）"]

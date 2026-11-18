@@ -29,7 +29,7 @@ class FakeCtx:
 
     def __init__(self, real, **over):
         for k in ("project", "state", "cfg", "config_fp", "rd", "spec_hash", "design_hash", "graph_fp", "checks",
-                  "checks_fp", "fresh"):
+                  "checks_fp", "fresh", "decisions_fp"):
             setattr(self, k, getattr(real, k))
         self.snap, self.code_fp = real.snap, real.code_fp
         self._facts = {"holdout_fp": real.holdout_fp(), "reviewer_role_fp": real.reviewer_role_fp(),

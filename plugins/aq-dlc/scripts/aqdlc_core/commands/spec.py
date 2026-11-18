@@ -70,6 +70,16 @@ def cmd_spec(args):
     if conflicts:
         die("承認の返答が、判断シートの推奨と違う回答かもしれないため、承認として扱いません（"
             + "；".join(conflicts) + "）。answer で回答を記録し、aq-dlc:requirements に反映を依頼してから、提示し直してください。")
+    from .decisions import apply_spec_approval
+    replies = [e.get("text") or "" for e in s.get("human_events", [])
+               if e.get("seq", 0) > sp.get("presented_seq", 0) and e.get("parsed", True)
+               and (not s.get("eaqdl") or AP.in_transcript(s, e))]
+    dec_done, dec_why = apply_spec_approval(s, replies)
+    if dec_why:
+        die("承認の返答の、設計方針の選択が曖昧なため、承認として扱いません（" + "；".join(dec_why)
+            + "）。「承認 " + target + "」と一緒に「DEC-001 = B」の形で選んでもらって、確認し直してください。")
+    for did, key, by in dec_done:
+        log(s, project, "dec.select", {"id": did, "selected": key, "by": by})
     AP.record(s, target, "approve", ev, ctx.rd, approve, "spec")
     for q in open_q:
         # 判断シートの質問は、仕様の承認で推奨に決まる（仕様は推奨を前提に書かれているので、反映済みとして扱う）
@@ -88,3 +98,5 @@ def cmd_spec(args):
     save_state(spath, s)
     nxt = "設計（aq-dlc:design）" if wf["stages"]["design"] else "実装（aq-dlc:implementer。この工程では設計担当を使わない）"
     info(f"仕様 {short(ctx.spec_hash)} の承認を記録しました。{WF.describe(s, ctx.cfg)}。次は{nxt}です。")
+    if dec_done:
+        info("設計方針: " + "、".join(f"{i} = {k}（{'人の選択' if b == 'human' else '推奨'}）" for i, k, b in dec_done))

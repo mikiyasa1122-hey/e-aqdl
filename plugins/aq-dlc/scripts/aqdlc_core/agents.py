@@ -212,6 +212,33 @@ def _req_lines(s, with_ac=True):
     return out or ["（まだ登録されていない）"]
 
 
+def _dec_lines(s, role):
+    """採用した設計方針（DEC）と、その扱いの規則（設計・実装・レビューの引き継ぎ）。"""
+    from . import design_decisions as DD
+    adopted = DD.adopted_lines(s)
+    pend = DD.pending(s)
+    if not adopted and not pend and role != "design":
+        return []
+    out = ["", "## 設計方針（DEC。人が選んだ制約。正本は `$AQ decisions`）"]
+    out += adopted or ["- 採用した DEC はない"]
+    if pend:
+        out += ["- 未決定: " + "、".join(f"{d['id']} {d.get('topic')}" for d in pend) + "（人の選択を待つ）"]
+    if role == "design":
+        out += ["- 設計書の「設計判断とトレードオフ」に、採用した DEC を「DEC-001 = B」の形で書き、採用しない案と理由を添える"
+                "（この行がない設計書は登録できない。選び直したら書き直す）。",
+                "- 採用した方針に沿って設計する。前提が崩れた・別の案に変えるべき新事実が出たら、無言で変えず "
+                "`$AQ dec-revisit DEC-001 \"<事実>\"` で再確認に戻して統括に返す。新しい重要な論点は `$AQ dec` で登録する。"]
+    elif role == "implementer":
+        out += ["- 採用した方針に沿って実装する。前提が崩れたら、方針を無言で変えず "
+                "`$AQ dec-revisit DEC-001 \"<事実>\"` で再確認に戻し、実装報告の「## 差し戻し」に書いて止める。"]
+    elif role == "reviewer":
+        out += ["- 実装が採用した方針と矛盾していないか、採用の前提（向いている条件）と実際の条件が食い違っていないか、"
+                "その方針で想定したリスクの対策とテストがあるかを確かめる。",
+                "- 別の案に変えるべき新事実があれば、根拠を示して区分「設計」の指摘に「DEC-001 の再検討」と書く"
+                "（人の選択を上書きしない。選び直すのは人）。"]
+    return out
+
+
 def _brief_requirements(ctx):
     s = ctx.state
     sp = doc_path(ctx.rd, "spec")
@@ -232,6 +259,16 @@ def _brief_requirements(ctx):
         "5. 不明点・矛盾点: `$AQ question Q1 \"<質問>\" --options \"<推奨案>（推奨）|<案2>|<案3>\"`（最大4問程度。重要な順）。"
         "**推奨を必ず1つ付け（印は選択肢の末尾の「（推奨）」。2つ以上は登録できない）、仕様書は推奨を前提に書く**（人間は仕様の承認と同じ返答で質問にも答えるので、往復が1回で済む。"
         "推奨と違う答えが来たら、そのとき直す）。推奨を決められない質問だけ、推奨なしで登録する（仕様の提示の前に人間に聞く）。",
+        "5b. 設計方針の選択（DEC）: アーキテクチャ・データ管理・通信・非同期処理・エラー処理・認可の境界・整合性の保証など、"
+        "**設計上のトレードオフが実際にあり、選択で仕様・実装・運用のコストが意味のある形で変わる論点だけ**を、"
+        "`$AQ dec DEC-001 \"<論点>\" --option \"A|<方針>|<利点>|<欠点>|<向いている条件>\" --option \"B|…\" "
+        "[--option \"C|…\"] --recommend A --affects R1,R2 --minimal A --assume \"<推奨の前提>\"` で登録する。"
+        "2〜3案（差が実質的にない案を数合わせで作らない）。少なくとも1案は現状踏襲・最小変更を検討し、そのキーを `--minimal` で示す"
+        "（不適切なら `--minimal-rejected \"<採らない理由>\"`）。推奨を1つ付け、その前提を書く。"
+        "選択を左右する制約・要求が足りなければ、先に question で聞く（勝手なデフォルトで埋めない）。"
+        "命名や自明な実装の詳細は登録しない（同時に未決定にできるのは3件まで）。"
+        "仕様の提示に表として載り、人は仕様の承認と同じ返答で選ぶ（書かなければ推奨）。仕様書は推奨を前提に書かず、"
+        "DEC の ID を参照する（どの案になっても仕様の要求は変わらないように書く）。",
         "6. 利用者に見える小さな決めごと（ほぼ確実なもの）: `$AQ assume \"<内容>\"`、作らないもの: `$AQ assume \"<内容>\" --out`",
         "7. 不要になった項目: `$AQ drop <ID>`（理由は仕様書に書く）",
         f"8. 仕様書を `{sp}` に書く。必須の見出し: 目的 / 機能要件 / 非機能要件 / 受け入れ条件 / リスク / "
@@ -282,7 +319,8 @@ def _brief_design(ctx):
         "   必須の見出し: 技術スタック / アーキテクチャ / ディレクトリ構成 / データモデル / エラーハンドリング / "
         "セキュリティ / テスト方針（単体・結合・E2E） / 要求との対応 / 設計判断とトレードオフ / 差し戻し（なければ「なし」）",
         "2. 要求と設計要素の対応: `$AQ design-map R1 \"<モジュール・ファイル・画面など>\"`（全要求）",
-        "3. 内部の設計判断: `$AQ decision \"<判断と理由>\"`",
+        "3. 内部の設計判断: `$AQ decision \"<判断と理由>\"`。人の選択が必要な重要な分岐（下の「設計方針（DEC）」）は"
+        "decision で決め打ちせず、`$AQ dec` で2〜3案を登録して統括に返す（人が選ぶまで設計を確定できない）。",
         "4. Quality Gate のチェック: `$AQ add-check <名前> \"<コマンド>\" --kind typecheck|lint|build|unit|integration|e2e"
         " [--needs <前提のチェック>]`",
         "   - 技術スタックに応じて、型チェック・Lint・単体・結合・ビルド・E2E（必要な場合）を登録する。",
@@ -304,6 +342,7 @@ def _brief_design(ctx):
         lines.append(f"- {v['id']}（{p['id']}）{v.get('method')} レベル: {v.get('level') or '未設定'}")
     if s.get("decisions"):
         lines += ["", "## 既存の設計判断"] + [f"- {d['id']} {d['text']}" for d in s["decisions"]]
+    lines += _dec_lines(s, "design")
     rv = latest_review(s)
     if rv and rv.get("blocking", 0) > 0:
         df = [f for f in rv.get("findings", []) if f.get("category") == "設計"]
@@ -384,7 +423,7 @@ def _brief_implementer(ctx, compact=False):
 
 def _impl_tail(ctx, s, kind, items):
     """実装担当の引き継ぎのうち run 固有の部分（修正依頼・未設定の検証・要求・チェック）。省略しない。"""
-    lines = []
+    lines = _dec_lines(s, "implementer")
     if kind:
         what = {"review": f"レビュー#{kind[1]} の重大な指摘", "counterfactual": f"反証テスト {kind[1]} の見逃し",
                 "unowned": "担当外の変更の確認"}.get(kind[0], f"gate {kind[1]} の不合格")
@@ -614,7 +653,7 @@ def _brief_reviewer(ctx):
         "本当に確かめているか（正常系だけでなく異常系・境界値、モックしすぎ、弱いアサーション）を評価する。",
         "「重大」の基準: 受け入れ条件の未達、重要な要求の検証不足・空洞化、設計との重大な不整合、重大なセキュリティの穴、"
         "テストの改ざん・弱体化。スタイルや好みは「軽微」。重大が1件でもあれば判定は「要修正」、0件なら「合格」。",
-    ] + REVIEW_ACTION_RULES
+    ] + REVIEW_ACTION_RULES + _dec_lines(s, "reviewer")
     return lines
 
 
@@ -650,11 +689,14 @@ def spawn_problem(role, ctx):
     if role == "design":
         if blocking:
             return "仕様が承認されていないため、設計に進めません: " + blocking[0]["msg"]
+        dec = [p for p in probs if p["code"] == "dec_pending"]
+        if dec:
+            return "設計方針が未決定のため、設計に進めません: " + dec[0]["msg"]
         return None
     if blocking:
         return "仕様が承認されていないため、進めません: " + blocking[0]["msg"]
     design_block = [p for p in probs if p["code"] in ("design_missing", "design_changed", "design_stale",
-                                                      "design_unmapped", "no_checks", "escalation")]
+                                                      "design_unmapped", "no_checks", "escalation", "dec_pending")]
     if role == "implementer":
         if design_block:
             return "設計が揃っていないため、実装に進めません: " + design_block[0]["msg"]
@@ -858,6 +900,14 @@ def validate(role, ctx, entry, message):
                 errs.append("設計書に必須の見出しがない: " + "、".join(mh))
             if not hash_line_ok(md, "仕様", ctx.spec_hash):
                 errs.append(f"設計書に、基にした仕様の指紋の行（仕様: {short(ctx.spec_hash)}）がない、または古い")
+            from . import design_decisions as DD
+            sel = [d for d in DD.all_decs(s) if d.get("status") == "selected"]
+            nmd = DD.normalize(md)
+            miss = [f"{d['id']} = {d['selected']}" for d in sel
+                    if not re.search(DD._id_re(d["id"]) + rf"\s*(?:=|:)\s*{d['selected']}(?![A-Z0-9])", nmd)]
+            if miss:
+                errs.append("設計書に、採用した設計方針の行がない（「設計判断とトレードオフ」に「DEC-001 = B」の形で、"
+                            "採用した案と、採用しない案の理由を書く。選び直したら書き直す）: " + "、".join(miss))
         unmapped = [r["id"] for r in s["requirements"] if r["id"] not in s["design"].get("map", {})]
         if unmapped:
             errs.append("設計に対応付いていない要求（design-map）: " + "、".join(unmapped))
@@ -959,7 +1009,8 @@ def register(role, ctx, entry, message):
     if role == "design":
         d = s["design"]
         d.update({"registered_hash": ctx.design_hash, "spec_hash": ctx.spec_hash, "registered_seq": seq,
-                  "version": int(d.get("version", 0)) + 1, "role_fp": entry.get("role_fp")})
+                  "version": int(d.get("version", 0)) + 1, "role_fp": entry.get("role_fp"),
+                  "decisions_fp": ctx.decisions_fp})
         _escalate(s, "design", read_text(doc_path(rd, "design")), seq)
         return f"設計 v{d['version']}（{short(ctx.design_hash)}）を登録"
     if role == "implementer":
@@ -971,7 +1022,7 @@ def register(role, ctx, entry, message):
         rec = {"n": n, "seq": seq, "at": now_iso(), "code_fp": ctx.code_fp, "snapshot": ctx.snap,
                "config_fp": ctx.config_fp, "design_hash": ctx.design_hash,
                "spec_hash": ctx.spec_hash, "report_hash": doc_hash(rd, "impl"), "fix": fix or None,
-               "role_fp": entry.get("role_fp")}
+               "role_fp": entry.get("role_fp"), "decisions_fp": ctx.decisions_fp}
         rounds.append(rec)
         if fix:
             s["fix_iterations"] = int(s.get("fix_iterations", 0)) + 1
@@ -998,6 +1049,7 @@ def register(role, ctx, entry, message):
             invalid = "判定を読み取れない"
         rec["passed"] = bool(rec.get("passed")) and invalid is None
         rec.update({"n": n, "seq": seq, "at": now_iso(), "code_fp": code_now, "graph_fp": ctx.graph_fp,
+                    "decisions_fp": ctx.decisions_fp,
                     "config_fp": ctx.config_fp,
                     "checks_fp": ctx.checks_fp, "spec_hash": ctx.spec_hash, "design_hash": ctx.design_hash,
                     "gate_stamp": (s.get("gate") or {}).get("stamp"), "report": os.path.relpath(path, ctx.project),
@@ -1102,7 +1154,13 @@ def on_subagent_stop(payload, project, state, spath):
         entry = running.get(aid, {"role": role, "since": now_iso(), "blocks": 0})
     message = payload.get("last_assistant_message") or _last_message(payload.get("agent_transcript_path"))
     ctx = Ctx(project, state, fresh=True)
-    errs = validate(role, ctx, entry, message)
+    # 設計方針（DEC）を人の選択に返して終える（新しい論点の登録・再確認）ときは、成果物の完成を求めず、登録もしない
+    from . import design_decisions as DD
+    t0 = entry.get("start_seq", 0)
+    returned = [d["id"] for d in DD.pending(state) if role in ("design", "implementer")
+                and ((d.get("revisit") or {}).get("seq", 0) > t0
+                     or (d.get("origin") == role and d.get("updated_seq", 0) > t0))]
+    errs = [] if returned else validate(role, ctx, entry, message)
     max_blocks = int(config(project)["automation"].get("max_agent_stop_blocks", 3))
     if errs and entry.get("blocks", 0) < max_blocks and not (role == "reviewer" and _tainted(entry, ctx)):
         entry["blocks"] = entry.get("blocks", 0) + 1
@@ -1119,7 +1177,10 @@ def on_subagent_stop(payload, project, state, spath):
         pass
     if errs and role == "reviewer":
         entry["format_errors"] = errs
-    if errs and role != "reviewer":
+    if returned:
+        summary = "設計方針の人の選択を求めて終了（登録しない）: " + "、".join(returned)
+        ok = True
+    elif errs and role != "reviewer":
         summary = "成果物が不完全なまま終了（登録しない）: " + "、".join(errs[:3])
         ok = False
     else:
@@ -1234,15 +1295,16 @@ def deny(reason):
 ENGINE_RE = re.compile(r"aqdlc\.py[\"']?\s+[\"']?([a-z][a-z-]*)")
 COMMON_READ = {"status", "next", "trace", "history", "show", "spec", "checks", "memory", "check", "escalation", "audit",
                "evidence", "roles",
-               "metrics", "report", "workflow"}
+               "metrics", "report", "workflow", "decisions"}
 ROLE_COMMANDS = {
-    "requirements": COMMON_READ | {"req", "accept", "risk", "verify", "assume", "question", "drop"},
-    "design": COMMON_READ | {"design-map", "decision", "add-check", "remove-check", "bind", "holdout"},
-    "implementer": COMMON_READ | {"bind", "impl-map", "add-check", "gate", "cf"},
+    "requirements": COMMON_READ | {"req", "accept", "risk", "verify", "assume", "question", "drop", "dec"},
+    "design": COMMON_READ | {"design-map", "decision", "add-check", "remove-check", "bind", "holdout", "dec",
+                             "dec-revisit"},
+    "implementer": COMMON_READ | {"bind", "impl-map", "add-check", "gate", "cf", "dec-revisit"},
     "reviewer": COMMON_READ,
 }
 WORK_COMMANDS = {"req", "accept", "risk", "verify", "assume", "question", "drop", "design-map", "decision",
-                 "add-check", "remove-check", "bind", "impl-map", "holdout"}
+                 "add-check", "remove-check", "bind", "impl-map", "holdout", "dec"}
 REVIEWER_BASH_DENY = re.compile(
     r"\bgit\s+(add|commit|push|checkout|switch|reset|stash|rebase|merge|restore|clean|rm|mv|apply|cherry-pick)\b"
     r"|(^|[\s;&|])(rm|mv|cp|touch|tee|truncate)\s|\bsed\s+-i|\bperl\s+-p?i"
@@ -1272,7 +1334,7 @@ def check_bash(role, cmd, project, state, cfg):
                      "verify": "requirements", "assume": "requirements", "question": "requirements",
                      "drop": "requirements", "design-map": "design", "decision": "design",
                      "add-check": "design", "remove-check": "design", "bind": "implementer", "holdout": "design",
-                     "impl-map": "implementer"}[sub]
+                     "impl-map": "implementer", "dec": "requirements"}[sub]
             return (f"`{sub}` は {ROLE_LABEL[owner]} の担当です。統括は直接編集せず、"
                     f"Agent ツールで aq-dlc:{owner} に依頼してください。")
     if role in ROLES and BRANCH_SWITCH.search(cmd):
