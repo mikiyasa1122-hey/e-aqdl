@@ -1,0 +1,49 @@
+{
+ "case": "CLN-08",
+ "rep": 2,
+ "sec": 27.4,
+ "exit": 0,
+ "cost_usd": 0.1295319,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21241,
+  "cache_read_input_tokens": 118219,
+  "output_tokens": 3273,
+  "output_tokens_details": {
+   "thinking_tokens": 1192
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21241,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1545,
+    "cache_read_input_tokens": 37991,
+    "cache_creation_input_tokens": 3879,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3879
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e0a1ceab\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: share.py の verify_link は、先頭に 0 を付けた数字（例: `007.…`）も受け付ける。署名は int 化した値に対して計算するため、同じ note_id と期限を表す別の綴りのリンクが有効になる。署名は偽造できず、仕様の「10進の数字だけ」にも反しないので欠陥ではない。 / 提案: 正規表現に先頭 0 を拒否する条件を足すと、リンクの形が一意になる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は、題名・本文・タグの境界、tags が文字列のときの拒否、途中の失敗（`create:tags` の hook）で何も残らないことを確かめている。実装は `_validate` と transaction で規則どおりで、妥当。\n- AC2: 見えないメモがすべて NotFound になること、NotFound のときは閲覧数が増えないこと、判定の後に変更されたときの NotFound、割り込み（interleave）、スレッドの並行閲覧を確かめている。実装は UPDATE と再判定を 1 つの BEGIN IMMEDIATE で行っており、妥当。\n- AC3: 範囲外の page・per_page・sort の拒否、`%` と `_` が普通の文字として扱われること、OR のタグ絞り込み、SQL 文字列を入れても値として扱われることを確かめている。実装は ESCAPE 句、プレースホルダー、`_like_escape` を題名と本文の両方に適用しており、妥当。\n- AC4: 認可（Forbidden と NotFound）、古い version の Conflict、読み出しと書き込みの間の更新による Conflict、トランザクション内での認可の再判定、更新時の入力検証、失敗時の巻き戻し、削除の失敗が呼び出し側に伝わることを確かめている。実装の UPDATE 条件に version があり、妥当。\n- AC5: 管理者以外・別の組織の拒否と、途中の失敗で元のままになることを確かめている。実装は全件を 1 つのトランザクションで移しており、妥当。\n- AC6: 8 文字未満・8 文字・それ以上の伏せ方を確かめている。実装は仕様どおりで、妥当。\n- AC7: 枠の境界、拒否した呼び出しが枠を延ばさないこと、複数スレッドの並行呼び出し、検査の途中への割り込み（hook）を、sleep に頼らず確かめている。実装は lock の中で判定しており、妥当。\n- AC8: 期限ちょうど・改ざん・形の崩れたリンクを確かめている。実装は `fullmatch`、ASCII の数字、`compare_digest`、`>=` で期限を判定しており、妥当。\n- AC9: ログと例外のメッセージに本文・署名・api_key が出ないことを確かめている。コードもログと例外に ID だけを出しており、妥当。\n- AC10: 例外の後に接続を使い続けられることを確かめている。`_rollback` は ROLLBACK 自体が失敗しても元の例外を隠さず、妥当。\n- エンジンが検出したテストの兆候はなし。履歴は `bind` のみで、検証の弱体化は見つからなかった。\n### E2E の要否\n- 不要（HTTP や UI がないライブラリで、SQLite を使った unittest が実経路を通っている）。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md、design.md、notes/*.py をすべて読み、R1〜R10 と設計（transaction、_visible・_can_modify、ESCAPE 句、プレースホルダー、楽観的ロック）が一致していることを確認した。\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件が全部成功した。\n- `aqdlc.py history --since 0` を確認し、`bind` 以外の変更はなかった。\n- 未確認: `list_notes` の COUNT と SELECT は別のクエリで、同時に書き込まれると total と items が少しずれる可能性がある。仕様に規定がないため指摘にはしない。",
+ "files_changed": [],
+ "valid": true
+}

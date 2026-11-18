@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 1,
+ "sec": 36.7,
+ "exit": 0,
+ "cost_usd": 0.1640705,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 27149,
+  "cache_read_input_tokens": 113885,
+  "output_tokens": 4407,
+  "output_tokens_details": {
+   "thinking_tokens": 1676
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 27149,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2459,
+    "cache_read_input_tokens": 38091,
+    "cache_creation_input_tokens": 5419,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5419
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, notes/share.py:11 / 対応区分: 改善提案 / 内容: `LINK_RE` は先頭にゼロが付いた数字（例: `007.…`）を通す。署名は `int` に直した値で計算するため、`7.…` と同じ署名で通る。メモの特定や期限の判定は変わらない。ただし、同じメモの有効なリンクの文字列が複数できる。 / 提案: 厳密に1通りにするなら、先頭ゼロを `Forbidden` にする。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1・VK4 は妥当。次の点を確認した。\n  - 題名・本文・タグの境界値、タグが文字列そのものの場合、タグの重複を重複を数えて保存は除く点を確認している。\n  - `hooks.before_write(\"create:tags\")` でタグ挿入の途中に失敗させ、メモ・タグ・監査ログがすべて残らないことを確認している。\n  - 実装は `_validate` と `transaction` で仕様どおり。\n- AC2: V2・VK1 は妥当。\n  - 他の組織・他人の非公開・存在しないメモが `NotFound` になる。\n  - 閲覧数の加算は `BEGIN IMMEDIATE` の中で `views = views + 1` と書いており、数え漏れが起きない。\n  - 可視性は書き込みと同じトランザクションの中で再確認している。\n- AC3: V3・VK2 は妥当。\n  - `page`・`per_page`・`sort` の範囲外、`bool` 型、巨大な `page` を検査している。\n  - 検索は `%`・`_`・`\\` をエスケープし、`ESCAPE` 句を付けている。題名と本文の両方に同じパターンを渡している。\n  - タグは `TAG_RE` で検査し、`IN (?, …)` のプレースホルダーで OR 検索している。\n  - SQL の動的な部分は定数のソート列と `?` の個数だけで、利用者の入力は埋め込まれていない。\n- AC4: V4・VK3 は妥当。\n  - 非公開メモは管理者にも `NotFound`、他の組織は `NotFound`、権限のない利用者は `Forbidden` になる。\n  - `UPDATE ... WHERE version = ?` と `rowcount` で `Conflict` を判定している。\n  - 認可と検証を、書き込みと同じトランザクションで読み直した行で行っている。\n  - 差し込み口を使った決定論的なテストで、競合・途中の失敗・削除の失敗が呼び出し側に伝わることを確認している。\n  - 部分更新で使う古い行の値は、`row.version` が呼び出し側の version 以上であり、途中で更新が入れば version が合わず `Conflict` になる。上書きは起きない。\n- AC5: V5・VK6 は妥当。\n  - 管理者だけが実行でき、管理者・移す元・移す先が同じ組織でなければ `Forbidden` になる。\n  - 1つのトランザクションで移し、`hooks.before_write` で途中に失敗させても元のまま残る。\n  - 対象の検索は `org_id` で絞っている。\n- AC6: V6・VK7 は妥当。8文字未満は全部伏せ、8文字以上は末尾4文字以外を伏せている。管理者以外は `Forbidden`。\n- AC7: V7 は妥当。\n  - 枠の境界（159.999 は拒否、160.0 は新しい枠）を確認している。\n  - 拒否された呼び出しが枠を延ばさないことを確認している。\n  - `Barrier` で20スレッドを同時に動かして許可が5件になることと、`hook` で判定の途中に別スレッドを割り込ませても直列化されることを確認している。`sleep` に頼らない作りになっている。\n  - 実装は `Lock` の中で判定と加算をしている。\n- AC8: V8・VK8 は妥当。期限ちょうどが無効になる点（`>=`）、改ざん、形の崩れ、`str` 以外の型を `Forbidden` にしている。`fullmatch` で末尾の改行を通さず、`compare_digest` で署名を比べている。\n- AC9: V9・VK5 は妥当。\n  - ログは ID だけを出している。\n  - 例外のメッセージにも本文・署名・`api_key` は出ない。\n- AC10: V10 は妥当。\n  - `_rollback` は、`ROLLBACK` 自体が失敗しても元の例外を隠さない。\n  - 例外の後の接続の再利用を確認している。\n- エンジンが検出したテストの兆候はなし。`skip`・`.only` は見つからなかった。`history` は `bind` の追加だけで、検証の弱体化はない。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、受け入れ条件は SQLite を使った unit テストで直接確かめられている。トランザクション・並行・途中の失敗も、実際の DB と差し込み口で再現している。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。62件すべて合格した。\n- `$AQ history --since 0` を確認した。`bind` のみで、検証条件の変更・弱体化はない。\n- `$AQ trace` を確認した。R1〜R10 と AC1〜AC10・K1〜K8 のすべてに検証が対応し、結果は合格だった。反証テストは無効なため「反証未実施」の状態。\n- `notes/service.py`・`db.py`・`ratelimit.py`・`share.py` を仕様・設計と突き合わせて読んだ。\n  - 認可は `_visible` と `_can_modify` に集約され、全経路に適用されている。\n  - 判定の後に別の操作が入る順序では、トランザクション内の再確認と `version` 条件で防げている。\n  - SQL はすべてプレースホルダーで、`LIKE` は `ESCAPE` 付き。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,28 @@
+{
+ "case": "TD-02",
+ "rep": 3,
+ "judge_cost_usd": 0.2524916,
+ "judge_raw": "# TD-02 判定：レビュー担当は埋め込んだ欠陥を捉えている（defect_detected: yes）\n\n**[重大1] matches_defect**\n- 箇所は埋め込んだ欠陥と同じ `list_notes` です。\n- 原因も同じです。OFFSET が SQLite の整数の上限を超えるかを確かめず、`MAX_OFFSET` も使っていません。\n- 影響も同じです。ValidationError でも空の結果でもなく、OverflowError が出ます。レビュー担当は再現スクリプトでこれを確かめています。\n- ただし、報告の行番号（241〜247行・121行）は、示されたコードの行番号（140〜143行・17行）と合っていません。内容は正確なので、分類は変えません。\n\n**[軽微1] real_other**\n- 仕様（R8）は note_id と期限を「10進の数字だけ」としていて、桁数の上限は決めていません。\n- `make_link` は桁数を確かめずにリンクを作ります。一方 `LINK_RE` は `{1,18}` 桁しか通しません。そのため note_id が 10^18 以上だと、自分で作った正しいリンクを `verify_link` が Forbidden にします。\n- SQLite の ID は19桁になり得るので、実際に起こり得る仕様違反です。レビュー担当は実行して確かめています。現実の ID では起きにくいため、軽微の扱いは妥当です。\n\n**[軽微2] test_gap**\n- `tests/test_ac3_list_search.py` は、`\\` を検索して「データにないので0件」になることしか確かめていません。\n- `\\` を含むデータが実際に当たることは確かめていないので、テストの不足は実在します。\n- 実装は正しく、レビュー担当も手元で当たることを確認しています。コードの欠陥の主張ではありません。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で MAX_OFFSET を使わず、OFFSET が SQLite の整数の範囲を超えると OverflowError になる、という原因と影響を、再現の結果とともに正しく指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"仕様は桁数を制限していないのに LINK_RE が18桁までしか通さず、make_link が作った note_id 10^18 以上のリンクを verify_link が拒否するという実在の不整合を、実行して確かめている。\"}, {\"label\": \"軽微2\", \"class\": \"test_gap\", \"reason\": \"バックスラッシュを含むデータが当たることを確かめるテストがない、というテストの不足だけの指摘で、実装は正しい。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1の行番号は示されたコードと合わないが、箇所・原因・影響は埋め込んだ欠陥と一致している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で MAX_OFFSET を使わず、OFFSET が SQLite の整数の範囲を超えると OverflowError になる、という原因と影響を、再現の結果とともに正しく指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "仕様は桁数を制限していないのに LINK_RE が18桁までしか通さず、make_link が作った note_id 10^18 以上のリンクを verify_link が拒否するという実在の不整合を、実行して確かめている。"
+   },
+   {
+    "label": "軽微2",
+    "class": "test_gap",
+    "reason": "バックスラッシュを含むデータが当たることを確かめるテストがない、というテストの不足だけの指摘で、実装は正しい。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1の行番号は示されたコードと合わないが、箇所・原因・影響は埋め込んだ欠陥と一致している。"
+ }
+}

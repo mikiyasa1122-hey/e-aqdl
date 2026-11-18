@@ -19,3 +19,5 @@
   - 計測: `run_bench.py build|review|judge|report --set clean --out DIR`（集計は `clean_report.py`）
 - **SQL の追加ケース**（EVAL-02）: `sql_cases.py`。`--set with-sql` で既存の40ケースに足す。
 - 結果: `results/eval01-clean-rev02/ANALYSIS.md`・`results/EVAL02-ANALYSIS.md`
+- **「検証あり・欠陥あり」のケース群**: `tested_cases.py`。テストは揃って合格するが、欠陥が1つある。`--set tested`。結果は `results/TESTED-ANALYSIS.md`
+- **モデルの固定**: `run_bench.py --model`（既定は `claude-sonnet-5-5`）。指定しないと `claude` の既定のモデルが使われ、条件が変わる

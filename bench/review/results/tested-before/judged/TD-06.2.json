@@ -1,0 +1,23 @@
+{
+ "case": "TD-06",
+ "rep": 2,
+ "judge_cost_usd": 0.1117462,
+ "judge_raw": "## 分類結果\n\n**重大1**: `get_note`（service.py:116-117）が、見られないメモに Forbidden を返している。この指摘は、埋め込んだ欠陥と箇所も原因も一致する。仕様 R2 は見えないメモをすべて NotFound にするよう求めている。報告は、存在しない ID は NotFound、存在するが見られない ID は Forbidden になる点を挙げている。そのため呼び出し側が ID の存在を判別できるという影響も、欠陥の記述と合っている。コードの該当行も正しく引用している。テスト不足への言及もあるが、実装の原因と影響を述べているので matches_defect になる。\n\n**軽微1**: `search_notes` のタグ検査が `_validate` と重複しているという指摘。これは欠陥の主張ではなく、保守性の提案なので style。実際、検査の内容は R1 の規則と同じで、動作上の問題はない。\n\n**欠陥検出**: yes。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し、存在しない ID の NotFound と区別できて存在が漏れる、という欠陥の原因と影響を同じ箇所（service.py:116-117）で正しく指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"search_notes のタグ検査の重複は保守性の提案であり、動作上の欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、埋め込んだ欠陥（get_note が Forbidden を返して非公開メモの存在が分かる）を原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し、存在しない ID の NotFound と区別できて存在が漏れる、という欠陥の原因と影響を同じ箇所（service.py:116-117）で正しく指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "search_notes のタグ検査の重複は保守性の提案であり、動作上の欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、埋め込んだ欠陥（get_note が Forbidden を返して非公開メモの存在が分かる）を原因・影響とも正確に指摘している。"
+ }
+}

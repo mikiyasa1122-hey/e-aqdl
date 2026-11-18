@@ -1,0 +1,28 @@
+{
+ "case": "TD-07",
+ "rep": 2,
+ "judge_cost_usd": 0.11238820000000001,
+ "judge_raw": "重大1は、埋め込まれた欠陥と同じ箇所(verify_link の期限比較)を指摘しています。原因は `>` の比較で、影響は期限ちょうどの時刻でリンクが有効になることです。どちらも正解データと一致するため、matches_defect です。\n\n重大2は、期限ちょうどを検証するテストが欠けているという指摘で、実際に test_ac8_share.py には now=1059 のケースしかありません。実装の欠陥そのものではなくテストの不足なので、test_gap です。\n\n軽微1は、sort に list などの hashable でない値を渡すと、`sort not in SORT_COLUMNS` が TypeError を出すという指摘です。dict に対する `in` は hashable でない値で実際に TypeError になります。仕様は範囲外を ValidationError とするため、実在する小さな欠陥として real_other にします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link の `> expires` により期限ちょうどが有効になるという、埋め込んだ欠陥の原因と影響を正しく指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"期限ちょうど(now=1060)が無効であることを確かめるテストが実際になく、テスト不足だけを指摘している。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"hashable でない sort は `in SORT_COLUMNS` で TypeError になり、仕様の ValidationError に反する実在の小さな欠陥である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が share.py verify_link の `>` による期限ちょうど有効という欠陥を、原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link の `> expires` により期限ちょうどが有効になるという、埋め込んだ欠陥の原因と影響を正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "期限ちょうど(now=1060)が無効であることを確かめるテストが実際になく、テスト不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "hashable でない sort は `in SORT_COLUMNS` で TypeError になり、仕様の ValidationError に反する実在の小さな欠陥である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が share.py verify_link の `>` による期限ちょうど有効という欠陥を、原因・影響とも正確に捉えている。"
+ }
+}

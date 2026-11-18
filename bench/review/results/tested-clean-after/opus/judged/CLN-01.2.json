@@ -1,0 +1,33 @@
+{
+ "case": "CLN-01",
+ "rep": 2,
+ "judge_cost_usd": 0.2812996,
+ "judge_raw": "## 判定\n\nこのケースには欠陥が埋め込まれていないため、matches_defect は使っていません。4件の指摘をコードと照らして分類しました。\n\n**[重大1] update_note の version の型 → real_other**\n- 文字列の `version=\"1\"` を渡す場合、SQLite は INTEGER 列との比較で数値に変換します。そのため `WHERE version = ?` が一致し、UPDATE・タグ・監査ログは COMMIT まで進みます。\n- その後、トランザクションの外にある `return version + 1` で TypeError が出ます。呼び出し側には失敗に見えるのに、データは書き換わっています。\n- 仕様は version の型を明記していません。ただ、例外を受けた呼び出し側は「何も変わっていない」と考えるのが自然で、R10・K4 が守ろうとする整合性に反します。経路はコードどおりに成立します。\n- 「重大」は言い過ぎで、型を間違えて呼んだときだけ起こります。それでも欠陥としては実在します。\n\n**[重大2] list_notes にハッシュできない sort → real_other**\n- `sort=[\"updated\"]` を渡すと、`sort not in SORT_COLUMNS`（dict の検索）で TypeError になります。\n- R3 は「sort は updated か title だけ。範囲外は ValidationError」と定めています。リストもこの範囲外なので、ValidationError にすべきところです。\n- page・per_page は型の違いも ValidationError に揃えており、sort だけが揃っていません。\n\n**[軽微1] 共有リンクの先頭の 0 → style**\n- R8 は「note_id と期限は10進の数字だけ」と定めています。`007` も10進の数字だけでできているので、仕様には反しません。\n- 署名の対象は int にした値なので、偽造にもなりません。レビュー担当も「改善提案」としています。表記を1つに揃えたいという提案です。\n\n**[軽微2] 別スレッドでの同時更新のテスト → test_gap**\n- 仕様は「同時」を「別々の接続・別々のスレッドからの操作」と定義しています。\n- 更新の競合のテストは、hook で同じ接続から割り込む形だけです。別接続・別スレッドの更新は実際には動かしていません。\n- 既存のテストを正しく認めたうえで、必須ではなく改善提案として出しているので、false_positive ではなく test_gap とします。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"version に \\\"1\\\" を渡すと SQLite が数値に変換して WHERE version = ? が一致し、COMMIT の後にトランザクションの外の return version + 1 で TypeError になる。例外なのに変更が残る経路が実在する（型を間違えて呼んだときだけなので、重大度は過大）。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"sort=[\\\"updated\\\"] のようなハッシュできない値で、sort not in SORT_COLUMNS が TypeError を出す。R3 の「範囲外は ValidationError」に反する。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭に 0 の付いた数字も仕様の「10進の数字だけ」に合っていて偽造にもならないので、表記を1つにするための提案にすぎない。\"}, {\"label\": \"軽微2\", \"class\": \"test_gap\", \"reason\": \"更新の競合は同じ接続の hook でだけ確かめていて、仕様の言う別接続・別スレッドの同時更新は実際に動かしていない。既存のテストを認めたうえで、改善提案として出している。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしの題材だが、作り手が見落とした実在の欠陥が2件（version の型によるコミット後の例外、ハッシュできない sort の TypeError）見つかった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "version に \"1\" を渡すと SQLite が数値に変換して WHERE version = ? が一致し、COMMIT の後にトランザクションの外の return version + 1 で TypeError になる。例外なのに変更が残る経路が実在する（型を間違えて呼んだときだけなので、重大度は過大）。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "sort=[\"updated\"] のようなハッシュできない値で、sort not in SORT_COLUMNS が TypeError を出す。R3 の「範囲外は ValidationError」に反する。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭に 0 の付いた数字も仕様の「10進の数字だけ」に合っていて偽造にもならないので、表記を1つにするための提案にすぎない。"
+   },
+   {
+    "label": "軽微2",
+    "class": "test_gap",
+    "reason": "更新の競合は同じ接続の hook でだけ確かめていて、仕様の言う別接続・別スレッドの同時更新は実際に動かしていない。既存のテストを認めたうえで、改善提案として出している。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしの題材だが、作り手が見落とした実在の欠陥が2件（version の型によるコミット後の例外、ハッシュできない sort の TypeError）見つかった。"
+ }
+}

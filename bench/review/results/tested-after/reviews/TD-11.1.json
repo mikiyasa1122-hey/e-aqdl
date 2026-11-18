@@ -1,0 +1,49 @@
+{
+ "case": "TD-11",
+ "rep": 1,
+ "sec": 18.6,
+ "exit": 0,
+ "cost_usd": 0.1048972,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 17959,
+  "cache_read_input_tokens": 118052,
+  "output_tokens": 2124,
+  "output_tokens_details": {
+   "thinking_tokens": 270
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 17959,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1415,
+    "cache_read_input_tokens": 37898,
+    "cache_creation_input_tokens": 690,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 690
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0af59235\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5, R9 / 対応区分: 修正必須 / 内容: `export_audit` が api_key を伏せずにそのまま返している。伏せる処理がコード全体にない。 / 成立条件: 管理者が `export_audit` を呼ぶと、監査ログに行が1件でもあれば必ず起きる。 / 影響: 組織内の全利用者の api_key が平文で出力に載る。仕様 R6（末尾4文字以外を `*` で伏せる。8文字未満はすべて伏せる）と R9 に違反し、秘密情報が漏れる。 / 根拠: notes/service.py の `export_audit` の戻り値で `\"actor_key\": r[\"api_key\"]` としている。`grep` で mask・`***` を探したが、notes にも tests にも該当がない。呼び出し元や上流で伏せる処理もない。 / 提案: `actor_key` を伏せた値にする。`len(k) < 8` なら `\"*\" * len(k)`、それ以外は `\"*\" * (len(k) - 4) + k[-4:]`。あわせて AC6 のテストを追加する（8文字以上、ちょうど8文字、7文字以下、空文字）。出力に生の鍵が含まれないことも確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: tests/test_ac1_create.py が入力検証とロールバックを確かめている。コードの経路も仕様どおりで、重複タグの保存・tags が文字列の拒否・`fullmatch` もある。妥当。\n- AC2: 閲覧数の加算と非公開の扱いを確かめている。コードは同一トランザクションで加算し、判定を読み直している。妥当。\n- AC3: 範囲外の入力、`%` と `_` と `\\` のエスケープ（ESCAPE 句、プレースホルダー）、タグ OR を確認した。SQL は値を埋め込んでいない。妥当。\n- AC4: 楽観的ロック（`WHERE version`）、認可の読み直し、削除のロールバックを確認した。妥当。\n- AC5: 管理者・同一組織の検査と、途中失敗時の全体ロールバックを確認した。妥当。\n- AC6: 不十分。テストは管理者だけが呼べることと、行が自組織のものだけであることしか確かめていない。api_key のマスクを確かめるアサーションが1つもなく、実装も未達（重大1）。\n- AC7: 枠の境界（`>=` で新しい枠）と、ロック下の同時呼び出しを `hook` で再現するテストがある。妥当。\n- AC8: 期限ちょうどの境界、改ざん、形の崩れ（`fullmatch`）を確認した。妥当。\n- AC9: ログは ID だけを出している。ただし AC9 は export の api_key の出力を検証していないため、重大1に含まれる。\n- AC10: ROLLBACK 後に接続を再利用できることを確認した。妥当。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、単体テストで足りる）。\n### 不足しているリスク\n- K7・K5: 監査ログからの api_key の漏えいは、実装もテストも未対策。\n### 確認したこと\n- spec.md、design.md、notes/*.py をすべて読んだ。\n- gate のログ（check-unit）は 61 件が OK だった。ただし api_key のマスクを確かめるテストがないため、AC6 については合格が欠陥のない証拠にならない。\n- `grep` で mask・`***` を探し、マスク処理が存在しないことを確認した。\n- `git status` では全ファイルが未追跡で、検証条件の弱体化を `git diff` で比べる対象がなかった。",
+ "files_changed": [],
+ "valid": true
+}

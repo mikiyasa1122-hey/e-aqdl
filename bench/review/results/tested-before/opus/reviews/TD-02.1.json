@@ -1,0 +1,49 @@
+{
+ "case": "TD-02",
+ "rep": 1,
+ "sec": 105.1,
+ "exit": 0,
+ "cost_usd": 0.7675972,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 16,
+  "cache_creation_input_tokens": 67423,
+  "cache_read_input_tokens": 324046,
+  "output_tokens": 8167,
+  "output_tokens_details": {
+   "thinking_tokens": 3007
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 67423,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3574,
+    "cache_read_input_tokens": 65331,
+    "cache_creation_input_tokens": 2092,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2092
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fda594\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3（notes/service.py `list_notes` 232〜248行） / 対応区分: 修正必須 / 内容: page が大きいと、結果を返さず ValidationError も出さずに、`sqlite3` の OverflowError が呼び出し側に漏れる。`MAX_OFFSET`（121行）は定義されていて、コメントにも「これを超える page は結果なしにする」とあるが、どこからも使われていない / 成立条件: page が1以上の整数で、`(page-1)*per_page` が 2**63-1 を超えるとき（例: page=2**62・per_page=20、page=2**63、page=10**30） / 影響: 仕様では、page が1以上なら範囲内なので結果を返し、範囲外なら ValidationError を出す。このどちらにもならず、想定外の例外が出る。呼び出し側は業務エラー（NotesError）として扱えない。データの漏えいや破損はなく、影響は低い / 確認した保証: 上流の検査は `page >= 1` と型だけで、上限も offset の上限もない。DB 層にも防ぐ仕組みはない。既存のテスト（test_paging・test_invalid_paging_and_sort）は大きい page を試していない / 根拠: 実際に実行した `service.list_notes(c, a, page=2**62)` が `OverflowError: Python int too large to convert to SQLite INTEGER` になった。経路は 244行の `offset = (page - 1) * per_page` から 247行で LIMIT/OFFSET に値を渡すところ / 提案: `offset > MAX_OFFSET` なら SQL を実行せずに `items=[]`（total は数える）を返す。または page の上限を決めて ValidationError にする。そのうえで、page=2**62 などの境界値のテストを追加する\n- [軽微1] 区分: 実装 / 対象: R3, AC3（notes/service.py:239） / 対応区分: 改善提案 / 内容: `sort` に list などのハッシュできない値を渡すと、`sort not in SORT_COLUMNS` が TypeError になり、ValidationError にならない（実行して確認した）。page・per_page は型の誤りも ValidationError にしているので、扱いがそろっていない / 提案: 先に `isinstance(sort, str)` を確かめてから ValidationError にする\n- [軽微2] 区分: 実装 / 対象: R8, AC8, K8（notes/share.py:348・370） / 対応区分: 改善提案 / 内容: 先頭に 0 が付いたリンク（`07.<期限>.<署名>`）も、元のリンクと同じ署名で検証に通る（実行して確認した）。note_id と期限は元と同じ値なので、別のメモや別の期限に変えて通すことはできず、セキュリティ上の影響はない。ただし、1つのメモに対して見た目の違うリンクが何通りも作れてしまう / 提案: 正規表現を `(0|[1-9][0-9]{0,17})` にして、正規の形だけを受け付ける\n- [軽微3] 区分: テスト / 対象: AC7（tests/test_ac7_ratelimit.py:579〜605） / 対応区分: 改善提案 / 内容: test_interleaving_inside_the_check_is_serialized は `b_done.wait(0.5)` の時間切れに頼っている。ロックが正しく効いていれば B はロックで待たされるので、0.5秒待ったあとに A が通る。結果の判定自体は決定論的だが、毎回0.5秒かかり、意図も読み取りにくい。同時呼び出しの上限は test_concurrent_calls_never_exceed_limit（Barrier で20スレッド）で別に確かめている / 提案: B がロックで待っていることを、時間に頼らない方法で確かめる。またはコメントで意図を説明する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1（test_ac1_create）は、題名・本文の境界値（0・100・101文字、空白だけ、型の誤り）、不正なタグ（大文字・改行・全角・`_`・文字列そのもの）、重複を数えて保存では除くこと、途中の失敗で notes・note_tags・audit が3つとも0件になることを確かめており、妥当\n- AC2: V2 は、他の組織・他の組織の管理者・他人の非公開・存在しないメモがどれも NotFound になること、確認の後に非公開になった場合、NotFound のときに閲覧数が増えないこと、ファイルの DB に4スレッド×10回の同時閲覧で40回と数えることを確かめており、妥当\n- AC3: 範囲・並び順・ページ送り・不正な入力（0・負・文字列・bool・float・51・不正な sort）、検索での % と _ とバックスラッシュの扱い、タグの OR、範囲（非公開・他の組織）は妥当。ただし、page の上限側の境界（offset のあふれ）を確かめるテストがなく、[重大1] の欠陥を見逃している\n- AC4: V4 は、作成者と同じ組織の管理者だけが変更できること、他人は Forbidden、他の組織と非公開は NotFound、古い version で Conflict、読み出しから書き込みの間に他の更新が入ったときの Conflict と、最新の行から値を取ること、判定の後の移管で Forbidden、R1 と同じ入力検証、削除の途中の失敗でロールバックして例外を伝えることを確かめており、妥当\n- AC5: V5 は、管理者だけ・同じ組織だけ（4通り）、途中の失敗で何も移らないこと、非公開のメモも移ること、監査ログ、version が増えることを確かめており、妥当\n- AC6: V6 は、末尾4文字だけを見せること、7文字・8文字・0文字の境界、管理者だけで自分の組織だけを出すことを確かめており、妥当\n- AC7: V7 は、上限、利用者ごとに数えること、枠の境界（159.999 と 160.0 ちょうど）、断られた呼び出しで枠が延びないこと、20スレッドの同時呼び出しでちょうど5回だけ通ることを確かめており、妥当（[軽微3] を参照）\n- AC8: V8 は、期限の時刻ちょうどとその前後、note_id・期限・署名・秘密鍵の改ざん、形の崩れ（大文字・改行・余分な桁・指数表記・全角や他の文字体系の数字・型の誤り）を確かめており、妥当\n- AC9: V9 は、ログ（notes と notes.share のロガー）・例外のメッセージ・監査ログの出力に、本文・署名・api_key・秘密鍵が出ないことを確かめており、妥当\n- AC10: V10 は、Conflict・ValidationError・挿入した例外・外部キー違反・自動ロールバックの後でも、元の例外がそのまま伝わり、接続がトランザクションの外に戻って次の操作に使えることを確かめており、妥当\n- K1（漏えい）: 閲覧・一覧・検索・更新・削除・移管のそれぞれで、他の組織と他人の非公開を試しており、妥当\n- K2（SQL インジェクション）: 値はすべてプレースホルダーで渡している。LIKE は `\\` をエスケープ文字にし、ESCAPE 句をタイトルと本文の両方の条件に付けている。`\\`・`%`・`_` は `_like_escape` で先に処理しており、`\\` が最初に置き換わる。並び順の列は許可リスト（SORT_COLUMNS）からだけ選ぶ。タグも検証してからプレースホルダーで渡す。テストもあり、妥当。SQLite の LIKE は ASCII の大文字小文字を区別しないが、仕様は部分一致なので問題ない\n- K3（同時実行）: 閲覧数は `views = views + 1` の原子的な更新、更新は BEGIN IMMEDIATE の中の `version = ?` 条件と rowcount、回数の制限はロックの中で数える。どれもテストがあり、妥当\n- K4・K6（途中の失敗・一部だけ移る）: hooks で失敗を挟んだテストがあり、妥当\n- K5・K7・K8: AC9・AC6・AC8 で確かめており、妥当\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは、目でも見つからなかった）\n### E2E の要否\n- 不要（HTTP の API や画面はなく、ライブラリだけが対象のため。同時実行はファイルの DB と複数のスレッドを使う結合寄りの単体テストで確かめている）\n### 不足しているリスク\n- R3: 一覧の page の上限側（offset のあふれ）の扱いが、テストでも実装でも抜けている（[重大1]）\n### 確認したこと\n- `python3 -m unittest discover -s tests -t . -q`（PYTHONDONTWRITEBYTECODE=1）: 62件すべて合格\n- 境界値を試すスクリプト（メモリ上の DB）:\n  - `list_notes(page=2**62 / 2**63 / 10**30)` → OverflowError\n  - `sort=[\"updated\"]` → TypeError\n  - `sort=None` → ValidationError\n  - タグに入れ子の list → ValidationError\n  - `verify_link` に先頭 0 のリンク → 7 を返す\n- `$AQ trace`: すべての要求・受け入れ条件・リスクが unit の検証に対応づけられ、gate 20261111-091515 で合格（反証テストは無効）\n- `$AQ history --since 0`: 検証条件は追加と bind だけで、削除や弱める変更はない\n- gate のログ（20261111-091515-check-unit.log）: exit=0、62件合格\n- ソースコード（notes/*.py）とテスト（tests/*.py）はすべて読んだ。コードはまだコミットされていないため、`git diff` で比べられる過去のテストはない",
+ "files_changed": [],
+ "valid": true
+}

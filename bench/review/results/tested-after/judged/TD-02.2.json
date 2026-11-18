@@ -1,0 +1,23 @@
+{
+ "case": "TD-02",
+ "rep": 2,
+ "judge_cost_usd": 0.11393020000000001,
+ "judge_raw": "## 分類\n\n**重大1**: `list_notes` で page に上限がなく、`offset = (page-1)*per_page` が SQLite の整数の上限を超えると OverflowError になる、という指摘です。これは埋め込んだ欠陥と同じ箇所（`list_notes`）で、原因（OFFSET の範囲を確かめずに SQL に渡している）も影響（ValidationError でも空の結果でもなく OverflowError）も一致しています。`MAX_OFFSET` が未使用という観察や、再現の根拠も正確です。よって matches_defect です。\n\n**軽微1**: `transfer_notes` が移管先の存在を確かめない、という指摘です。仕様は「利用者の dict は呼び出し側が確かめてから渡す」としているので、欠陥ではありません。レビュー担当自身も欠陥とはしていません。コードの実在する欠陥の主張ではなく、改善提案です。よって style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で巨大な page の OFFSET が SQLite の整数の上限を超えるのに確かめず、OverflowError になるという、埋め込んだ欠陥と同じ箇所・原因・影響の指摘。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"移管先の存在確認は仕様上は呼び出し側の責任で、レビュー担当も欠陥とせず改善提案としている。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥（巨大な page による OverflowError）を原因・影響とも正しく指摘し、再現も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で巨大な page の OFFSET が SQLite の整数の上限を超えるのに確かめず、OverflowError になるという、埋め込んだ欠陥と同じ箇所・原因・影響の指摘。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "移管先の存在確認は仕様上は呼び出し側の責任で、レビュー担当も欠陥とせず改善提案としている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥（巨大な page による OverflowError）を原因・影響とも正しく指摘し、再現も示している。"
+ }
+}

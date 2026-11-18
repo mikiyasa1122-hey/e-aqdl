@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 1,
+ "sec": 149.9,
+ "exit": 0,
+ "cost_usd": 0.7759718,
+ "num_turns": 9,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 18,
+  "cache_creation_input_tokens": 50631,
+  "cache_read_input_tokens": 427859,
+  "output_tokens": 14264,
+  "output_tokens_details": {
+   "thinking_tokens": 7515
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 50631,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 5604,
+    "cache_read_input_tokens": 70633,
+    "cache_creation_input_tokens": 578,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 578
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` は、変更しない欄（title・body）の値を、トランザクションの外で読んだ古い行 `row` から取っている。トランザクションの中では行を読み直しているが、読み直した結果は認可の確認（`_check_modify`）にしか使っていない。読み出しから書き込みまでの間に、同じ id の別のメモと入れ替わると、`WHERE version = ?` の条件を通ってしまう。その結果、Conflict にならず、新しいメモの題名・本文が古いメモの値で上書きされる / 成立条件: notes.id は `INTEGER PRIMARY KEY`（AUTOINCREMENT なし）なので、最大の id のメモを削除すると、その id が次の作成で再び使われる。update_note(version=1, body のみ指定) を呼んでから、トランザクションに入るまでの間（`hooks.before_write(\"update\")` の位置）に、対象のメモが削除され、同じ利用者が同じ id で新しいメモを作る（version=1）と起きる / 影響: 新しいメモの題名が、削除済みのメモの題名で黙って上書きされる。後から書いた側が先の内容を消すことになり、R4 の「読み出しから書き込みの間に他の変更が入ったら Conflict」に反する / 確認した保証: トランザクション内の `_check_modify` は認可だけを確かめ、内容の同一性は見ていない。version の条件は、新しいメモも version=1 なので素通りする。既存のテスト `test_concurrent_update_between_read_and_write_conflicts` は、更新が割り込む場合だけを確かめている / 根拠: notes/service.py:283-293（`new_title = row[\"title\"]` の `row` がトランザクション外の値）。再現: 引き継ぎで指定された hook で update の途中に delete_note → create_note(同じ利用者) を差し込んだ。新しいメモの id は元と同じで（reused True）、更新後の行は title='old', body='mine', private=1, version=2 になった（新しいメモの題名 'new' が消えた） / 提案: トランザクション内で読み直した行（`cur_row = _row(conn, note_id)`）から new_title・new_body を取る。あわせて、id を使い回さないよう `AUTOINCREMENT` にすることを検討する。この入れ替わりのテストを追加する\n- [重大2] 区分: 実装 / 対象: R3, AC3, R4, AC4, R10, AC10, K4 / 対応区分: 修正必須 / 内容: 引数の型を確かめていない箇所があり、仕様にない例外になる。(a) `update_note` の version が文字列のとき: SQLite の型変換で `version = '1'` が一致して UPDATE と監査ログがコミットされ、その後の `return version + 1` で TypeError になる。(b) `list_notes` の sort がハッシュできない値（list・dict）のとき: `sort not in SORT_COLUMNS` で TypeError になる / 成立条件: (a) `update_note(conn, alice, nid, \"1\", body=\"X\")`。(b) `list_notes(conn, alice, sort=[\"updated\"])` / 影響: (a) 呼び出し側には例外が返るのに、変更と監査ログは残っている。R10 の「例外が起きたらロールバック」と K4（途中の失敗による不整合）に反する。呼び出し側が失敗と判断して再試行すると、今度は Conflict になる。(b) R3 は「範囲外は ValidationError」と定めているが、別の例外が返る。ValidationError を捕まえる呼び出し側（入力エラーとして扱う側）をすり抜ける / 確認した保証: page・per_page には型の検査がある（service.py:233-238）。version と sort には上流にも下流にも検査がなく、既存のテストにもこの入力はない / 根拠: notes/service.py:239, 292-301。実行結果: `version str TypeError can only concatenate str (not \"int\") to str` の直後に、行は body='X', version=2、監査ログは2件（コミット済み）だった。`sort ['updated'] TypeError`、`sort {'title': 1} TypeError` / 提案: update_note の先頭で `isinstance(version, int) and not isinstance(version, bool)` を確かめ、満たさなければ ValidationError にする。list_notes では `not isinstance(sort, str) or sort not in SORT_COLUMNS` で判定する。どちらも型の違う値のテストを追加する\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `verify_link` は、先頭に 0 を付けた note_id・期限（例: `007.1060.<正しい署名>`）を、発行したリンクと同じものとして受け付けて 7 を返す。署名の対象は int に直した値なので、偽造にはならない。ただし、1つのリンクに複数の表記ができる / 提案: 正規表現を `(0|[1-9][0-9]{0,17})` にするか、`str(int(x)) == x` を確かめて、表記を1つに絞る\n- [軽微2] 区分: 実装 / 対象: R9, K5 / 対応区分: 改善提案 / 内容: share.py:369 の `raise ValueError(link)` は `from None` で表示を抑えている。それでも `Forbidden.__context__` にはリンク全体（署名を含みうる）が残る。標準の traceback には出ないが、`__context__` をたどるロガーやエラー収集ツールでは出る可能性がある / 提案: ValueError に link を渡さない（`raise ValueError()`）。あるいは、例外を使わず if で Forbidden を投げる\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1（test_ac1_create）は題名・本文・タグの境界値（0/1/100/101 文字、空白だけ、型違い、改行付きのタグ、重複を数えるか）を確かめている。途中の失敗（create:tags）と検証での拒否のどちらでも、notes・note_tags・audit が0件のままであることも見ており、妥当\n- AC2: V2 は、他の組織・他の組織の管理者・他人の非公開メモ・管理者から見た非公開メモ・存在しないメモが、どれも NotFound になることを確かめている。確認の後に非公開にされる場合と、閲覧数が数えられないことも確かめている。閲覧数は、hook で割り込ませる場合と、ファイルの DB に4スレッド×10回で同時に閲覧する場合（views=40）の両方で確かめており、妥当\n- AC3: V3 は一覧の範囲（他の組織・他人の非公開を含まない）、並び順、ページ送り、巨大な page、不正な page・per_page・sort（bool・float・文字列を含む）を確かめている。検索では % _ \\ を普通の文字として扱うこと、OR でのタグの絞り込み、範囲、不正な q・タグも確かめており、ほぼ妥当。ただし、sort にハッシュできない型を渡す場合が未検証で、実装にも欠陥がある（[重大2]）\n- AC4: V4 は、作成者・管理者による更新、Forbidden・NotFound、非公開は作成者だけ、古い version での Conflict、読み出しと書き込みの間の更新の割り込み、判定の後の移管（トランザクション内での再確認）、更新の入力検証、削除の途中の失敗でのロールバックを確かめている。認可と競合の主な経路は妥当。ただし、同じ id での入れ替わり（[重大1]）と、version の型違い（[重大2]）は確かめていない\n- AC5: V5 は、全部移すこと（非公開も含む）、管理者だけ、組織が混ざる4通りの拒否、途中（2件目）の失敗で元のままになり接続のトランザクションも閉じていること、version が増えることを確かめており、妥当\n- AC6: V6 は、末尾4文字だけを出すこと、7文字・8文字・0文字の鍵の境界、管理者だけ、自分の組織だけを確かめており、妥当\n- AC7: V7 は、枠の中の上限、ちょうど window 秒での切り替え（159.999 と 160.0）、拒否が枠を延ばさないこと、20スレッドを Barrier で同時に呼ぶ場合、hook で判定の途中に割り込ませる場合（直列になること）を確かめている。sleep に頼っておらず、妥当\n- AC8: V8 は、期限ちょうど（1060）での無効、署名・note_id・期限の改ざん、別の秘密鍵、多様な形の崩れ（改行、大文字の16進、アラビア数字、bytes など）を確かめており、妥当\n- AC9: V9 は、ログ・例外のメッセージ・監査ログに、本文・署名・api_key・秘密鍵が出ないことを確かめており、妥当（例外の `__context__` は対象外。[軽微2]）\n- AC10: V10 は、Conflict・ValidationError・注入した例外・IntegrityError・自動ロールバック済みの状態のそれぞれの後に、接続を使い続けられることを確かめている。ただし、コミットの後に例外が起きる経路（[重大2] の a）は確かめていない\n- K1: 一覧・検索・閲覧・更新・削除で、他の組織と他人の非公開を除くことを確かめている。WHERE 句に org_id と private の条件が実際に入っていることもコードで確かめた。妥当\n- K2: sort はホワイトリストの dict で選び、値はすべてプレースホルダーで渡している。LIKE は `ESCAPE '\\'` を付け、\\ % _ をエスケープしている。題名と本文の両方の条件に同じエスケープ済みの値が渡っていることも確かめた。テストに `' OR 1=1 --` もあり、妥当\n- K3: 閲覧数・RateLimiter は妥当。更新の競合は、version の割り込みは確かめているが、同じ id の入れ替わりが抜けている（[重大1]）\n- K4: 作成・削除・移管の途中の失敗は妥当。version の型違いで、コミットの後に例外になる経路が抜けている（[重大2]）\n- K5・K7・K8: 上記の AC6・AC8・AC9 のとおり妥当\n- K6: AC5 のとおり妥当\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは、目で見ても見つからなかった）\n### E2E の要否\n- 不要（HTTP や UI のない Python のライブラリで、仕様でも HTTP の API は対象外。公開されている関数を単体テストで直接呼んで確かめるのが、利用者が使う経路そのものになる）\n### 不足しているリスク\n- K3: 読み出しから書き込みまでの間に、同じ id の別のメモに入れ替わる場合（[重大1]）\n- K4: 型の違う version で、コミットの後に例外になる場合（[重大2]）\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py をすべて読んだ。`$AQ trace` で、すべての AC・K が unit に結び付き、合格していることを確かめた。`$AQ history --since 0` では、検証条件・チェックの削除や弱体化はなかった（check.add と bind だけ）。gate のログ（20261111-085527）は 62 件のテストすべてが OK\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t . -q` → Ran 62 tests OK\n- 一時的なスクリプト（メモリ上の DB、リポジトリは変更していない）で次を確かめた:\n  - sort=[\"updated\"]・{\"title\":1} は TypeError、None・1 は ValidationError\n  - version=\"1\" はコミットされた後に TypeError（行は version=2・body 'X'、監査ログは2件）。version=True は Conflict\n  - 削除の後に id が再び使われる（reused True）。hook で入れ替えると、題名 'old' で上書きされ、Conflict にならない\n  - 先頭に 0 を付けたリンクが受け付けられる（7 を返す）\n  - LIKE は ASCII の大文字小文字を区別しない（\"T\" で \"t\" が当たる。仕様に規定がないので指摘していない）\n- コードで確かめた範囲:\n  - transaction() は、BEGIN の失敗・本体の例外・COMMIT の失敗のどれでもロールバックし、元の例外を伝える\n  - get_note は、トランザクション内で再び見られるかを確かめ、見られなければロールバックする（閲覧数は増えない）\n  - delete はトランザクション内で認可を確かめ、例外を握りつぶさない\n  - transfer は、組織・役割の検査の後に1つのトランザクションで移す\n  - export_audit は org_id と role で絞り、伏せ字の境界も仕様どおり\n  - RateLimiter は、時計の読み取りから数の更新までを1つのロックの中で行う\n  - verify_link は fullmatch と compare_digest を使い、期限は `>=` で判定する",
+ "files_changed": [],
+ "valid": true
+}

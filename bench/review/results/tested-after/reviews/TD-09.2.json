@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 2,
+ "sec": 24.2,
+ "exit": 0,
+ "cost_usd": 0.0938436,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13018,
+  "cache_read_input_tokens": 124756,
+  "output_tokens": 2928,
+  "output_tokens_details": {
+   "thinking_tokens": 591
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13018,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1988,
+    "cache_read_input_tokens": 37884,
+    "cache_creation_input_tokens": 2600,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2600
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6, `notes/service.py` の `transfer_notes`（約 183〜190 行）, `tests/test_ac5_transfer.py` / 対応区分: 修正必須 / 内容: 移管が「全部移すか、何も移さないか」になっていない。メモごとに別々のトランザクションで UPDATE し、監査ログの記録はさらに別のトランザクションになっている。 / 成立条件: 移管の途中で失敗した場合。例: n 件目の UPDATE で例外が出る、ロック待ちが5秒を超える、プロセスが落ちる、別接続が途中で書き込む。`hooks.before_write(\"transfer:{i}\")` はまさにこの途中の失敗を再現できる差し込み口で、各トランザクションの外にある。 / 影響: 先に移った 1〜n-1 件は新しい所有者のまま残り、例外は呼び出し側に伝わる。仕様の「途中で失敗したら元のまま」に反し、一部だけ移った不整合が残る。監査ログの記録も、移管が終わった後の別トランザクションなので、移管だけ済んで監査ログが残らないことがある。 / 確認した保証: 呼び出し元の `transaction` はネストしない。`ids` の取得はトランザクションの外にある。DB の制約でも防げない。テストにも保証はなく、`test_ac5_transfer.py` には途中で失敗させて元のままを確認するテストがない。`test_moves_all_notes_of_the_user` は正常系だけを見ている。 / 根拠: `service.py` の `for i in ids: ... with transaction(conn): UPDATE` と、その後の `with transaction(conn): _audit(...)`。仕様 R5「全部移すか、何も移さないか（途中で失敗したら元のまま）」、AC5「失敗時に元のまま」、リスク K4。同じファイルの `create_note` と `delete_note` は、途中の失敗に備えて1つのトランザクションにまとめている。 / 提案: `ids` の取得、全件の UPDATE、監査ログの INSERT を1つの `with transaction(conn):` に入れる。ループ内の `hooks.before_write` はそのトランザクションの中に置く。あわせて、`before_write` で n 件目に例外を出し、全メモの `owner_id`・`version` と監査ログが元のままであること、接続が再利用できることを確かめるテストを追加する。このテストは、トランザクションを分ける実装なら失敗する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。入力検証の境界、tags が文字列そのものの場合、途中の失敗で何も残らないことを `before_write` で確かめている。\n- AC2: 妥当。可視性の規則、NotFound の統一、閲覧数の加算を確かめている。コード上も、加算と再確認が同一トランザクション内にある。\n- AC3: 妥当。ページ・並び順・`%` と `_` のエスケープ・タグ OR・プレースホルダーを確かめている。コードも `ESCAPE` と `?` を条件ごとに適用していることを確認した。\n- AC4: 妥当。認可、非公開メモの NotFound、楽観的ロック、競合を確かめている。コード上、書き込みと同じトランザクション内で行を読み直し、`WHERE version = ?` と rowcount で判定している。\n- AC5: 不十分。正常系と認可・組織の拒否は確かめている。しかし、途中の失敗で元のままになることを確かめるテストがなく、実装もそれを満たしていない（[重大1]）。\n- AC6: 妥当。8文字未満と8文字以上の伏せ方を確認した。\n- AC7: 妥当。枠の境界は `>=` で、ロック内で判定している。\n- AC8: 妥当。期限ちょうど、改ざん、形の崩れたリンクを確かめている。コードは fullmatch と `compare_digest` を使っている。\n- AC9: 妥当。\n- AC10: 妥当。`_rollback` で接続を使える状態に戻している。\n- テストの兆候: エンジンが検出した skip・only・アサーションなしの兆候はなし。`history` はすべて bind のみで、検証の弱体化は見当たらない。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体テストと SQLite の実接続でリスクを確かめられる。\n### 不足しているリスク\n- K4・K6: 移管の途中で失敗したときの不整合（[重大1]）。\n### 確認したこと\n- `python3 -m unittest discover -s . -t .` を実行し、62 件がすべて OK。\n- `spec.md`、`design.md`、`notes/*.py` 全体を読み、認可、SQL のプレースホルダーと `ESCAPE` 句、トランザクション境界、並行処理を仕様と突き合わせた。\n- `aqdlc.py history --since 0` で、検証条件の弱体化がないことを確認した。\n- `test_ac5_transfer.py` を読み、途中の失敗を再現するテストがないことを確認した。",
+ "files_changed": [],
+ "valid": true
+}

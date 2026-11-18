@@ -1,0 +1,49 @@
+{
+ "case": "TD-12",
+ "rep": 1,
+ "sec": 78.6,
+ "exit": 0,
+ "cost_usd": 0.4921312,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 40077,
+  "cache_read_input_tokens": 267196,
+  "output_tokens": 5901,
+  "output_tokens_details": {
+   "thinking_tokens": 1761
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 40077,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2895,
+    "cache_read_input_tokens": 56418,
+    "cache_creation_input_tokens": 3961,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3961
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d21222bf\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4（notes/service.py `_validate`・`create_note`・`update_note`） / 対応区分: 修正必須 / 内容: 作成と更新で、タグの個数の上限（5個まで、重複も数える）を確かめていない。`_validate` が見ているのは題名・本文・各タグの形式だけで、個数は見ていない。個数を確かめているのは `search_notes` だけ（service.py の search_notes 内 `if len(tags) > TAGS_MAX`）。 / 成立条件: `create_note(..., tags=['a','b','c','d','e','f'])` や `['a']*6`、`update_note(..., tags=list('abcdefg'))` のように、6個以上のタグを渡したとき（権限や並行処理に関係なく、どの利用者でも起きる） / 影響: 仕様 R1「タグは5個まで（重複も数える）」と、R4「更新でも R1 の入力検証を行う（タグを含む）」に反する。ValidationError にならずに保存されるので、上限を超えたタグがデータとして残る。 / 確認した保証: 呼び出し元の `_tag_list` は型を確かめるだけ。DB の制約にも個数の上限はない。既存のテスト（test_ac1_create.py の test_tag_rules、test_ac4_update_delete.py）にタグ数を超える場合の検査はなく、61件すべて合格している。 / 根拠: notes/service.py の `_validate`（171〜178行目付近）に個数の検査がない。再現: `python3 -c` で create_note に6個のタグを渡すと保存され、tags は `['a'..'f']` になった。`['a']*6` も保存された（tags は `['a']`）。update_note に7個のタグを渡すと、新しい version 2 が返った。 / 提案: `_validate` に `if len(tags) > TAGS_MAX: raise ValidationError(...)` を加える（重複を除く前の数で判定する）。あわせて、作成と更新で6個のタグ・重複を含む6個のタグを拒否し、5個（重複を含む）は通るテストを加える。\n- [軽微1] 区分: 実装 / 対象: R8（notes/share.py LINK_RE） / 対応区分: 改善提案 / 内容: 検証側の LINK_RE は note_id と期限を18桁までに制限しているが、make_link 側には制限がない。19桁以上の ID や期限から作ったリンクは、正しく署名されていても検証で Forbidden になる。いまの利用範囲では実害はない。 / 提案: make_link でも同じ範囲を確かめて ValueError にするか、制限の理由をコメントに書いておく。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文の境界値、タグの形式（大文字・改行・21文字・非 ASCII）、文字列の拒否、途中の失敗で何も残らないこと、監査ログの記録は確かめており、妥当。ただし「タグは5個まで（重複も数える）」の検証がなく、そのために実装の欠陥（[重大1]）を見逃している。\n- AC2: 他の組織・他人の非公開・存在しない ID がすべて NotFound になること、確認の後に非公開になったら NotFound になり閲覧数が増えないこと、差し込み口での割り込み、ファイル DB を使って4スレッド×10回の同時閲覧で閲覧数が40になることを確かめており、妥当。\n- AC3: 一覧（別ファイルの前半）・範囲外の入力の拒否、% `_` `\\` を普通の文字として探すこと、範囲（他人の非公開・他の組織）、タグの OR、SQL を含む文字列が値として扱われること、検索のタグ数の上限（6個）を確かめており、妥当。\n- AC4: 作成者・管理者の更新、Forbidden と NotFound の区別、非公開メモは作成者だけ、古い version での Conflict、読み出しから書き込みの間の割り込みでの Conflict、トランザクション内での再認可、削除の途中の失敗で巻き戻ること・例外が伝わることを確かめており、おおむね妥当。ただし更新時のタグ数の上限の検証がない（[重大1] に含める）。\n- AC5: 管理者だけ、4通りの組織の組み合わせでの Forbidden、非公開を含めて全部移ること、途中の失敗で元のままになること・トランザクションが残らないことを確かめており、妥当。\n- AC6: test_ac6_audit.py を実行し、合格を確認した。コードでは、8文字未満の鍵はすべて伏せ、8文字以上は末尾4文字だけを残しており、仕様どおり。\n- AC7: 枠の境界（159.999 では拒否、160.0 で新しい枠）、拒否された呼び出しで枠が延びないこと、Barrier を使って20スレッドを同時に呼び出しても上限を超えないことを確かめており、妥当（sleep には頼っていない）。\n- AC8: 期限ちょうどで無効、改ざん（ID・期限・署名・鍵）、多くの形の崩れ（大文字・改行・前の空白・全角などの数字・負の数・bytes・None）を確かめており、妥当。\n- AC9: ログ・例外のメッセージ・監査の出力に、本文・署名・api_key・秘密鍵が出ないことを確かめており、妥当。\n- AC10: 合格を確認した（test_ac10_recovery.py。外部キー違反や途中の失敗の後に接続を使い続けられる）。コードの transaction() と _rollback も、仕様どおりに巻き戻している。\n- K1〜K8: K2（プレースホルダー・LIKE の ESCAPE）、K3、K4、K6、K7、K8 は上記のテストで確かめている。K1 も、閲覧・更新・削除・検索・移管で確かめている。\n- エンジンが検出したテストの兆候: なし。skip・.only・アサーションのないテストは、私も見つけなかった。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、仕様でも HTTP の API は対象外。利用者が使う経路は関数の呼び出しで、単体テストで実際の SQLite を使って確かめている）\n### 不足しているリスク\n- R1: タグの個数の上限（5個まで、重複も数える）を作成・更新で守っていない。それを確かめるテストもない（[重大1]）。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した（PYTHONDONTWRITEBYTECODE=1）。61件すべて合格。\n- `python3 -c` でタグ数の上限の違反を再現した: 6個のタグでの create_note と `['a']*6` での create_note が保存された。7個のタグでの update_note は成功して version 2 を返した。\n- `$AQ trace` を実行した。R1〜R10 すべて unit で合格。反証テストは無効。\n- `$AQ history --since 0` を実行した。検証条件・チェックの削除や弱体化は見つからなかった（check.add は unit の1件だけ）。\n- `git status` を確認した。notes/ と tests/ は未追跡で、比べるコミットの差分がないため、テストの改ざんは history とテストの中身で判断した。\n- notes/*.py の全文と、tests の AC1〜AC5・AC7〜AC9 を読んだ。AC6 と AC10 は実行して合格を確かめた。",
+ "files_changed": [],
+ "valid": true
+}

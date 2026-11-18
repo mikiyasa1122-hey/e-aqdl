@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 1,
+ "sec": 21.6,
+ "exit": 0,
+ "cost_usd": 0.114371,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19408,
+  "cache_read_input_tokens": 116030,
+  "output_tokens": 2512,
+  "output_tokens_details": {
+   "thinking_tokens": 378
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19408,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1771,
+    "cache_read_input_tokens": 37331,
+    "cache_creation_input_tokens": 2428,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2428
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6 / 対応区分: 修正必須 / 内容: `transfer_notes` がメモ1件ごとに別のトランザクションで移している。仕様の「全部移すか、何も移さないか（途中で失敗したら元のまま）」を満たしていない。 / 成立条件: 移管の途中で2件目以降の UPDATE が失敗した場合（ロック待ちの5秒タイムアウト、他の接続との競合、プロセスの中断など）。 / 影響: 一部のメモだけが移った状態が残る。最後の監査記録も別のトランザクションなので、移管が起きたのに監査ログが残らないこともある。 / 根拠: `notes/service.py` の `transfer_notes` で、`for i in ids:` の中に `with transaction(conn):` がある。件数の確認を含め、対象の取得もトランザクションの外にある。`before_write(f\"transfer:{i}\")` は用意されているが、これを使った失敗のテストはない。上流や DB の制約でも防がれていない。 / 提案: 対象メモの取得、全件の UPDATE、監査の記録を1つの `transaction()` にまとめる。取得は BEGIN IMMEDIATE の後に行う。\n- [重大2] 区分: テスト / 対象: AC5, K4, K6 / 対応区分: 証拠不足 / 内容: 移管が途中で失敗したときに元のままであることを確かめるテストがない。 / 根拠: AC5 は「失敗時に元のまま」を求めている。`tests/test_ac5_transfer.py` にあるのは正常系・管理者以外・組織違い・version の増加だけで、`hooks.before_write` による途中の失敗を注入していない。その結果、重大1の欠陥を見逃したまま 62 件のテストがすべて通っている。 / 提案: `before_write` で2件目の移管時に例外を投げ、例外が伝わること、全メモの owner_id と version が元のままであること、監査が増えていないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R3, 保守性 / 対応区分: 改善提案 / 内容: `search_notes` の tags の検査（個数と形式）が `_validate` と重複している。 / 提案: タグの検査を共通の関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証は妥当。入力の拒否と、`create:tags` フックによる失敗時の巻き戻しの両方があり、実装も一致している。\n- AC2: 妥当。`_visible` の判定、NotFound への統一、閲覧数の加算が1つのトランザクションにあり、並行実行のテストもある。\n- AC3: 妥当。ESCAPE 句とプレースホルダーで LIKE を扱い、page・per_page・sort の範囲検査とタグの OR 絞り込みもコードで確認した。\n- AC4: 妥当。version を UPDATE の条件に入れ、認可と入力検証をトランザクション内で再確認しており、競合も扱っている。\n- AC5: 不十分。失敗時の全か無かが実装として満たされておらず（重大1）、テストもない（重大2）。\n- AC6: 妥当。コード上、8文字未満はすべて伏せ、それ以上は末尾4文字だけを残している。\n- AC7: 妥当。ロック内で枠を判定し、境界は `>=` で、フック経由で並行実行を再現している。\n- AC8: 妥当。形式は fullmatch で検査し、期限は `>=` で判定し、署名は `compare_digest` で比較している。\n- AC9: 妥当。ログに ID だけを出している。\n- AC10: 妥当。ROLLBACK が失敗しても元の例外を隠さない。\n- エンジンが検出したテストの兆候: なし。`history` を見ても、検証条件を弱めた変更はない。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest の統合テストが SQLite を直接使っているため。\n### 不足しているリスク\n- K4・K6: 移管の途中失敗による不整合に対する対策も検証もない（重大1・2）。\n\n### 確認したこと\n- `python3 -m unittest discover` を実行し、62 件がすべて通った。\n- `notes/*.py` を全文読み、`tests/test_ac5_transfer.py` と `history` を確認した。\n- spec.md と design.md を読み、`transfer_notes` のコードの経路をたどって、移管が1件ごとに別のトランザクションになっていることを確認した。移管の失敗は再現していない。",
+ "files_changed": [],
+ "valid": true
+}

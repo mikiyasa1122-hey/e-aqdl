@@ -1,0 +1,49 @@
+{
+ "case": "CLN-03",
+ "rep": 3,
+ "sec": 101.2,
+ "exit": 0,
+ "cost_usd": 0.5627076,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 38660,
+  "cache_read_input_tokens": 297758,
+  "output_tokens": 9691,
+  "output_tokens_details": {
+   "thinking_tokens": 4937
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 38660,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4399,
+    "cache_read_input_tokens": 65232,
+    "cache_creation_input_tokens": 872,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 872
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e7dd616c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, R10, AC10, K4 / 対応区分: 修正必須 / 内容: `update_note` が `version` の型を確かめていません。そのため、更新をコミットした後で例外が出ることがあります。成功した書き込みを、呼び出し側は失敗として受け取ります / 成立条件: `version` に数字の文字列（例 `\"1\"`）を渡し、値が最新の version と一致するとき。SQLite の INTEGER 列の型変換で、`WHERE version = '1'` は一致します / 影響: UPDATE・タグの置き換え・監査ログは COMMIT 済みです。その後 `return version + 1`（notes/service.py:197）で TypeError が出ます。呼び出し側は失敗と見て再試行し、Conflict を受け取ります。「例外が起きたらロールバックする」（R10）と、楽観的ロックの結果（R4）に反します。version は 1→2 に進んだまま残ります（実行して確認） / 確認した保証: 上流の型検査はありません。`_validate` は title・body・tags だけを見ます。スキーマにも型の制約はありません。既存のテストは int しか渡していません / 根拠: notes/service.py:177-197 の経路。`update_note(c, a, nid, \"1\", body=\"x\")` → `TypeError: can only concatenate str (not \"int\") to str`、DB の version=2 / 提案: 関数の入口で、bool 以外の int であることを確かめ、違えば ValidationError にする（トランザクションの前）。あわせて、文字列・bool・float の version を拒否し、何も書かれないことを確かめるテストを追加する\n- [重大2] 区分: 実装 / 対象: R3, AC3 / 対応区分: 修正必須 / 内容: `list_notes` の `sort` にハッシュできない値（list・dict）を渡すと、ValidationError ではなく TypeError になります / 成立条件: `sort=[\"x\"]` や `sort={\"a\":1}` のとき。`sort not in SORT_COLUMNS`（notes/service.py:135）で辞書のキーを探すときに TypeError が出ます / 影響: 仕様は「sort は updated か title だけ。範囲外は ValidationError」です。同じ関数の page・per_page では、型の違う値も ValidationError にしています（テストでも `page=\"1\"` を拒否）。sort だけが仕様と違う例外を出し、ValidationError を前提に処理する呼び出し側をすり抜けます。データの破損はありません / 確認した保証: 上流に型の検査はありません。テストは文字列の不正値（\"id\"・\"title; DROP\"）しか確かめていません / 根拠: 実行結果 `sort ['x'] TypeError`・`sort {'a': 1} TypeError`（None は ValidationError） / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS:` にし、list・dict の sort を拒否するテストを追加する\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: 共有リンクの数字の先頭に 0 を付けた形（例 `007.<期限>.<署名>`）も有効になります。署名は解析後の整数に対して確かめるので、同じメモ・同じ期限を指す別の書き方が通ります。権限が広がることはありません / 提案: 正規の形（先頭の 0 なし）だけを受け付ける。または、受け取った文字列そのものを署名と照合する\n- [軽微2] 区分: 実装 / 対象: R9, K5 / 対応区分: 改善提案 / 内容: `verify_link` は `raise ValueError(link)` を `from None` で隠しています。それでも Forbidden の `__context__` には、署名を含むリンク全体が残ります。通常のトレースバックには出ませんが、例外の連鎖をたどるログには出せてしまいます / 提案: `ValueError(link)` を投げずに、直接 `Forbidden` を投げる\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は次を確かめており妥当です。題名・本文・タグの境界（100/101、10000/10001、20/21、空白だけ、改行、型の違い）、タグの数え方（重複を数える）と保存（重複を除く）、文字列の tags の拒否、途中の失敗（hook で注入）のあと notes・note_tags・audit が 0 件であること、監査ログの内容\n- AC2 / K1: 他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しないメモが、すべて NotFound になることを確かめており妥当です。判定の後に非公開へ変わる場合と、NotFound で閲覧数が増えないことも確かめています。閲覧数は、割り込み（hook）と、実ファイルの DB に4スレッド×10回で 40 になることで確かめており妥当です\n- AC3 / K2: 範囲、並び順、ページ送り、巨大な page、不正な page・per_page（bool・文字列・float を含む）、% _ \\ を普通の文字として探すこと、SQL の文字列が値として扱われること、タグの OR を確かめており、おおむね妥当です。ただし、ハッシュできない sort が抜けています（[重大2]）。LIKE は ESCAPE '\\' とエスケープ関数（\\ を先に置き換える）を、題名・本文の両方に適用していることをコードで確認しました\n- AC4 / K3: 更新・削除の権限、非公開は作成者だけ、古い version、読み出しから書き込みの間の更新（hook で決定論的に再現）、書き込み時の認可の確認し直し、入力の検証、失敗時のロールバックを確かめており妥当です。ただし、型の違う version の検証がありません（[重大1]）\n- AC5 / K6: 管理者だけであること、組織の4通りの組み合わせ、途中の失敗で何も移らないこと、非公開のメモも移ることを確かめており妥当です\n- AC6 / K7: 長さ 7・8・0 の鍵の境界と、管理者だけであることを確かめており妥当です\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドの Barrier、hook による割り込みを確かめており妥当です。割り込みのテストは `wait(0.5)` を使いますが、ロックを外せば `[\"ok\",\"ok\"]` になって失敗するので、反証として成り立ちます\n- AC8 / K8: 期限ちょうどの境界、ID・期限・署名・鍵の改ざん、形の崩れたリンク 16 種（大文字、改行、アラビア数字、bytes、None など）を確かめており妥当です（先頭の 0 は [軽微1]）\n- AC9 / K5: ログ・例外のメッセージ・監査ログに、本文・署名・鍵が出ないことを確かめており妥当です（`__context__` は [軽微2]）\n- AC10: Conflict・ValidationError・IntegrityError・自動ロールバック済みの状態のあとに、接続を続けて使えることを確かめており妥当です。ただし、コミットの後に例外が出る経路（[重大1]）は対象になっていません\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは、私も見つけていません）\n\n### E2E の要否\n- 不要です。HTTP も UI もないライブラリで、仕様は HTTP を対象外にしています。並行性は、実ファイルの DB と別々の接続・スレッドによる結合テストで確かめています\n\n### 不足しているリスク\n- R4/R10: 型の違う入力（version）で、コミットの後に例外が出る経路（[重大1]）\n- R3: 型の違う sort（[重大2]）\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t . -q`: 63 件すべて合格（gate のログ 20261111-085223 と同じ結果）\n- `$AQ trace`: R1〜R10 と AC・K がすべて unit に対応していること\n- `$AQ history --since 0`: 検証条件は追加だけで、削除や弱体化はありません\n- 追加で実行した入力:\n  - `sort` が list・dict のとき TypeError、None のとき ValidationError\n  - `update_note(version=\"1\")` は TypeError になり、DB の version は 2 に進む\n  - 先頭に 0 を付けたリンクが通る\n  - タグに list を渡すと、作成・検索のどちらでも ValidationError\n- コードで追った範囲:\n  - 認可: `_visible` と `_can_modify` が、取得・更新・削除・一覧・検索のすべてで使われていること。更新・削除では、トランザクションの中で読み直した行で判定していること\n  - SQL: すべての値がプレースホルダーで渡されていること。f-string に入るのは、許可リストを通った ORDER BY と、`?` の個数だけ\n  - トランザクション: BEGIN IMMEDIATE で始め、BaseException のときにロールバックすること。ROLLBACK が失敗しても、元の例外を隠さないこと\n  - 移管: 組織の条件と原子性\n  - その他: 監査ログの JOIN の組織の絞り込み、RateLimiter のロックの範囲、共有リンクの fullmatch と compare_digest\n- 作業ツリーは変更していません（`git status` は開始時と同じ）",
+ "files_changed": [],
+ "valid": true
+}

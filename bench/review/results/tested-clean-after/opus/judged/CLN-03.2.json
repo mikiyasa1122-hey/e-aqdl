@@ -1,0 +1,28 @@
+{
+ "case": "CLN-03",
+ "rep": 2,
+ "judge_cost_usd": 0.27934359999999997,
+ "judge_raw": "## 判定結果（CLN-03：欠陥なしのケース）\n\nこのケースには欠陥を埋め込んでいないため、どの指摘も matches_defect にはしません。3件を順に見ます。\n\n**軽微1（version の型を検査しない）→ real_other**\n- **成立する入力:** `update_note(conn, alice, nid, \"1\", body=\"x\")` のように、version を文字列で渡す。\n- **起きること:**\n  - `notes.version` 列は INTEGER として扱われるので、SQLite が `'1'` を数の 1 に直して比べます。`WHERE version = ?` が一致して、更新は COMMIT されます。\n  - その後、`notes/service.py:197` の `return version + 1` で TypeError が出ます。\n- **欠陥とみなす理由:**\n  - 呼び出し側には失敗として伝わりますが、DB は更新済みです。\n  - R10 が想定する「例外が起きたら何も残らない」とずれており、実在する不整合です。\n- **限定事項:**\n  - 仕様は version の型を決めていません。\n  - レビュー担当も「仕様違反ではない」と書いています。\n  - そのため重大度は低いと考えます。\n\n**軽微2（先頭の 0 を許す）→ style**\n- R8 は「10進の数字だけ」と定めていて、`07` もこれに当てはまります。\n- 署名は `int()` で正規化した値で確かめています。note_id・期限・署名の意味は変わらず、権限も広がりません。\n- 仕様違反でもセキュリティの穴でもなく、リンクを正規形に揃える堅牢化の提案です。\n\n**軽微3（Forbidden の `__context__` にリンクが残る）→ style**\n- R9 が対象にしているのは、ログ・例外のメッセージ・出力です。Forbidden のメッセージには署名が入りません。\n- `from None` によって `__suppress_context__=True` になります。標準の traceback には出ず、`__suppress_context__` を見る一般的な報告ツールにも出ません。\n- そもそも、そのリンクは呼び出し側が渡した値です。\n- 「独自の直列化なら出るかもしれない」という仮定の上の堅牢化提案で、欠陥とまでは言えません。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"version=\\\"1\\\" を渡すと、INTEGER 列との比較で WHERE version = '1' が一致して更新が COMMIT された後、service.py:197 の version + 1 で TypeError になり、呼び出し側には失敗として伝わるのに更新は確定しているという実在の不整合（仕様は version の型を定めていないので重大度は低い）。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭の 0 も R8 の「10進の数字だけ」に当てはまり、署名は正規化した値で確かめるので権限は広がらず、仕様違反ではない正規形を揃えるための堅牢化の提案。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"Forbidden のメッセージに署名は入らず、__suppress_context__=True なので標準の出力にも出ないため、R9 違反ではなく、仮定の直列化を見越した堅牢化の提案。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビュー担当は合格と判定した。version を文字列で渡すと、更新を確定した後に例外になる入力検証の漏れが軽微な実在の問題として見つかった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "version=\"1\" を渡すと、INTEGER 列との比較で WHERE version = '1' が一致して更新が COMMIT された後、service.py:197 の version + 1 で TypeError になり、呼び出し側には失敗として伝わるのに更新は確定しているという実在の不整合（仕様は version の型を定めていないので重大度は低い）。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭の 0 も R8 の「10進の数字だけ」に当てはまり、署名は正規化した値で確かめるので権限は広がらず、仕様違反ではない正規形を揃えるための堅牢化の提案。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "Forbidden のメッセージに署名は入らず、__suppress_context__=True なので標準の出力にも出ないため、R9 違反ではなく、仮定の直列化を見越した堅牢化の提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は合格と判定した。version を文字列で渡すと、更新を確定した後に例外になる入力検証の漏れが軽微な実在の問題として見つかった。"
+ }
+}

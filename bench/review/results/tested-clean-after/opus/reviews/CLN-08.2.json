@@ -1,0 +1,49 @@
+{
+ "case": "CLN-08",
+ "rep": 2,
+ "sec": 94.0,
+ "exit": 0,
+ "cost_usd": 0.5913001999999999,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 16,
+  "cache_creation_input_tokens": 42090,
+  "cache_read_input_tokens": 366981,
+  "output_tokens": 9056,
+  "output_tokens_details": {
+   "thinking_tokens": 4161
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 42090,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2775,
+    "cache_read_input_tokens": 68741,
+    "cache_creation_input_tokens": 787,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 787
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e0a1ceab\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `LINK_RE`（notes/share.py:11）は先頭のゼロを許します。このため `07.1060.<署名>` や `7.01060.<署名>` のように、文字列だけ変えたリンクも有効になり、元のリンクと同じ note_id を返します（一時スクリプトで確認済み）。値は署名と結び付いているので、別のメモや別の期限には変えられません。権限を超えることはできず、仕様の形（10進の数字だけ）にも反しません。ただし、改ざんしたリンクの文字列が通る、という状態ではあります / 提案: `(0|[1-9][0-9]{0,17})` の形にして先頭のゼロを拒否し、テストに先頭ゼロの例を加える。\n- [軽微2] 区分: 実装 / 対象: R4, R10, AC4 / 対応区分: 改善提案 / 内容: `update_note` は version の型を検査していません。`version=\"1\"` を渡すと、SQLite の型変換で `WHERE version = ?` が一致して COMMIT まで進みます。その後、notes/service.py:197 の `version + 1` で TypeError になります。呼び出し側には例外が届くのに、更新は確定している状態です（一時スクリプトで確認済み: version=2、body が更新済み）。仕様は version の型を決めていないので、仕様違反ではありません / 提案: トランザクションの前に、version が int（bool は除く）であることを検査して ValidationError にする。\n- [軽微3] 区分: テスト / 対象: AC4, K3 / 対応区分: 改善提案 / 内容: 同時更新の Conflict は、同じ接続の中で hook から割り込ませる形でしか確かめていません。別々のスレッド・接続での同時更新のテストはありません。実装は BEGIN IMMEDIATE と `WHERE version = ?` と rowcount で正しく作られています。8スレッドで実際に試したところ、成功1件・Conflict 7件で、version は2でした / 提案: test_ac2 の同時閲覧のテストと同じく、ファイルの DB と複数スレッドで同時更新するテストを加える。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界値を両側から確かめており妥当です。確かめた入力は、空・空白だけ・101文字・型の違い、タグの大文字・改行・非 ASCII・21文字、重複を含む6個、文字列の tags です。途中の失敗（hook）と入力の拒否のどちらでも、notes・note_tags・audit が0件のままであることも確かめています。\n- AC2: 他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しないメモが、どれも NotFound になることを確かめており妥当です。判定の後に非公開に変わる場合と、NotFound のとき閲覧数が増えないことも確かめています。4スレッド×10回の実際の同時閲覧で、閲覧数が40になることも確かめています。\n- AC3: 範囲・並び順・ページ送り・不正な page / per_page / sort（bool・float・文字列を含む）を確かめており妥当です。% と _ と \\ がそのまま文字として探されること、タグの OR、範囲（他の組織・他人の非公開）も確かめています。\n- AC4: 作成者と管理者の許可、Forbidden / NotFound の振り分け、非公開は作成者だけ、を確かめており妥当です。古い version と読み出し後の割り込みでの Conflict、トランザクション内での再判定（判定の後の移管）、入力検証、削除の途中失敗のロールバックも確かめています。複数スレッドの検証は軽微3のとおりです。\n- AC5: 管理者だけであること、組織の4通りの組み合わせ、途中失敗で全件元のまま、非公開も移ることを確かめており妥当です。\n- AC6: 末尾4文字を残すこと、7文字・8文字・空の境界、管理者だけ・自分の組織だけを確かめており妥当です。\n- AC7: 時刻を固定した時計で、枠の境界（159.999 と 160.0）を確かめており妥当です。拒否された呼び出しで枠が延びないこと、Barrier を使った20スレッドの同時呼び出し、hook による割り込みの直列化も確かめています。\n- AC8: 期限ちょうどが無効になること、note_id・期限・署名の改ざん、別の秘密鍵、多数の形の崩れ（改行・大文字の16進・全角数字・型の違い）を確かめており妥当です。先頭ゼロは軽微1のとおりです。\n- AC9: ログ・例外のメッセージ・監査ログの出力に、本文・署名・秘密鍵・api_key が出ないことを、ハンドラで実際に記録して確かめており妥当です。\n- AC10: Conflict・ValidationError・注入した失敗・DB の外部キー違反・ROLLBACK できない状態のどれの後も、in_transaction が False になり、次の操作が成功することを確かめており妥当です。\n- K1〜K8: 上の各 AC のテストで確かめています。K2 は、SQL 文字列の入力と `sort=\"title; DROP\"` の拒否で確かめています。コード上も、利用者の値はすべてプレースホルダーで渡されています。f-string で組み立てているのは、固定の WHERE 句・`SORT_COLUMNS` の許可リストの値・タグの数だけの `?` だけです。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは見つかりませんでした）。\n\n### E2E の要否\n- 不要です（HTTP・UI のないライブラリで、仕様でも HTTP・認証は対象外です。公開された関数と本物の SQLite を使う単体テストが、利用者の経路そのものになっています）。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、63件すべて合格しました。gate のログ（20261111-085440-check-unit.log）も63件の合格で一致しています。\n- `$AQ trace` で、R1〜R10・AC1〜AC10・K1〜K8 がすべて unit の検証に対応していることを確認しました。`$AQ history --since 0` では、検証条件の弱体化や check の書き換えはありませんでした（check.add は1回だけ）。\n- 認可を、利用者の入力から書き込みまでたどりました。対象は `_visible` / `_can_modify` が get / update / delete のトランザクション内で読み直した行に使われていること、transfer の org の三者一致と `WHERE owner_id=? AND org_id=?`、export_audit の org による絞り込みです。\n- SQL を確認しました。LIKE は `\\`・`%`・`_` を `_like_escape` でエスケープし、題名と本文の両方の条件に同じ pattern と `ESCAPE '\\'` が付いています。SQLite の LIKE が ASCII の大文字小文字を区別しないことは確認しましたが、仕様に規定がないので欠陥ではありません。\n- 一時フォルダのスクリプト（`python3 -B`、メモリ上の DB と一時ファイルの DB）で、次を試しました。\n  - 先頭ゼロのリンクが通ること（軽微1）\n  - 文字列の version が確定した後に TypeError になること（軽微2）\n  - 8スレッドの同時更新で、成功1件・Conflict 7件・version 2 になること\n  - 全角空白だけの題名と検索語が拒否されること\n- `git status` で、レビュー中にコードの変更がないことを確認しました。",
+ "files_changed": [],
+ "valid": true
+}

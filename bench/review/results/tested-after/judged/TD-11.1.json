@@ -1,0 +1,18 @@
+{
+ "case": "TD-11",
+ "rep": 1,
+ "judge_cost_usd": 0.1091842,
+ "judge_raw": "判定: 重大1 は、埋め込んだ欠陥そのものを指摘している。\n\n- 場所は `notes/service.py` の `export_audit` で、埋め込んだ欠陥と同じ。\n- 原因は `\"actor_key\": r[\"api_key\"]` で api_key をそのまま返していること。これも一致する。\n- 影響は、組織内の全利用者の api_key が管理者の出力に平文で出ること。これも一致する。\n- 仕様 R6・R9 との違反も正しく述べている。\n- AC6 のテストにマスクを確かめるアサーションがない点にも触れているが、実装の原因と影響を述べているので test_gap にはならない。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずに actor_key として返す原因と、管理者の出力に全利用者の鍵が出る影響を、埋め込んだ欠陥と同じ箇所で指摘している。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"唯一の指摘が埋め込んだ欠陥の原因・影響・箇所に一致し、AC6 のテスト不足も補足している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずに actor_key として返す原因と、管理者の出力に全利用者の鍵が出る影響を、埋め込んだ欠陥と同じ箇所で指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "唯一の指摘が埋め込んだ欠陥の原因・影響・箇所に一致し、AC6 のテスト不足も補足している。"
+ }
+}

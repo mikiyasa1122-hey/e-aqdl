@@ -1,0 +1,33 @@
+{
+ "case": "TD-11",
+ "rep": 1,
+ "judge_cost_usd": 0.2599916,
+ "judge_raw": "## TD-11 判定結果\n\n埋め込んだ欠陥は検出できています（**defect_detected: yes**、該当は重大1）。\n\n**重大1 → matches_defect**\n- 箇所・原因・影響が正解データと一致しています。箇所は `notes/service.py` の `export_audit`、原因は `\"actor_key\": r[\"api_key\"]` で鍵をそのまま返していること、影響は利用者全員の api_key が管理者の出力に平文で出ることです。\n- 引用した行番号（333-336）は実際のコード（231-232 行目）と合いません。ただし、関数名と該当する式は正確に示しているので、分類は変えていません。\n\n**重大2 → test_gap**\n- `tests/test_ac6_audit.py` は、管理者だけが呼べることと組織での絞り込みしか確かめていません。`test_audit_detail_has_no_body` も本文しか見ていません。\n- api_key を伏せているかを確かめるテストが実際にないので、テストの不足として正しい指摘です。\n\n**軽微1 → real_other**\n- `version` に文字列 `'1'` を渡すと、SQLite の型変換で `version = ?` が一致し、更新がコミットされます。その後 `return version + 1`（197 行目。報告の 301 行目は誤り）で TypeError になります。\n- 呼び出し側には失敗に見えるのに、実際は更新済みという不整合なので、実在するバグです。\n- 仕様は version の型を決めておらず、呼び出し側の誤用ともいえるため、重大度は低いです。\n\n**軽微2 → style**\n- 先頭に 0 を付けたリンクも有効になる、という指摘です。\n- 署名は `int()` で正規化した値で検証されるので、偽造はできません。仕様の「10進の数字だけ」にも反しないと、レビュー担当自身が認めています。\n- 正規の表記に揃えるという改善提案にとどまるので、欠陥ではありません。\n\n**全体の注意点:** 報告中の行番号（333-336、301）は、実際のコードとずれています。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずに actor_key として返すという原因と、利用者全員の api_key が平文で出るという影響が、埋め込んだ欠陥と一致する（行番号 333-336 は実際の 231-232 とずれる）。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"test_ac6_audit.py と test_audit_detail_has_no_body が api_key を伏せているかを確かめていないのは事実で、テストの不足だけを指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"文字列の version は SQLite の型変換で一致して COMMIT され、その後 version + 1 で TypeError になる。失敗に見えて実際は更新済みという実在の不整合だが、仕様は型を決めていないので軽微。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭に 0 を付けた表記が通っても、署名は正規化した値で検証され、仕様にも反しないとレビュー担当自身が認めており、表記を揃える提案にとどまる。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"埋め込んだ欠陥は重大1で正しく検出された。報告中の行番号（333-336、301）は実際のコードとずれている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずに actor_key として返すという原因と、利用者全員の api_key が平文で出るという影響が、埋め込んだ欠陥と一致する（行番号 333-336 は実際の 231-232 とずれる）。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "test_ac6_audit.py と test_audit_detail_has_no_body が api_key を伏せているかを確かめていないのは事実で、テストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "文字列の version は SQLite の型変換で一致して COMMIT され、その後 version + 1 で TypeError になる。失敗に見えて実際は更新済みという実在の不整合だが、仕様は型を決めていないので軽微。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭に 0 を付けた表記が通っても、署名は正規化した値で検証され、仕様にも反しないとレビュー担当自身が認めており、表記を揃える提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "埋め込んだ欠陥は重大1で正しく検出された。報告中の行番号（333-336、301）は実際のコードとずれている。"
+ }
+}

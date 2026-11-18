@@ -1,0 +1,18 @@
+{
+ "case": "TD-02",
+ "rep": 2,
+ "judge_cost_usd": 0.11069419999999999,
+ "judge_raw": "指摘は1件のみで、埋め込んだ欠陥と同じ箇所・同じ原因・同じ影響を述べています。\n\n- **重大1**: `list_notes` で巨大な page を渡すと、OFFSET が SQLite の整数上限を超えて OverflowError になる点を指摘しています。上限 `MAX_OFFSET` が未使用であることも原因として挙げています。再現例（`page=10**30`）もあり、埋め込んだ欠陥と一致します。テスト不足への言及は補足にとどまり、主張の中心は実装の欠陥です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で OFFSET が SQLite の整数上限を超えるかを確かめず、巨大な page で OverflowError になる点を、原因（MAX_OFFSET 未使用）と影響つきで指摘している。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"埋め込んだ欠陥と同じ箇所・原因・影響を、再現手順つきで正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で OFFSET が SQLite の整数上限を超えるかを確かめず、巨大な page で OverflowError になる点を、原因（MAX_OFFSET 未使用）と影響つきで指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "埋め込んだ欠陥と同じ箇所・原因・影響を、再現手順つきで正しく指摘している。"
+ }
+}

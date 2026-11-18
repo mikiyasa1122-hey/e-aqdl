@@ -1,0 +1,23 @@
+{
+ "case": "TD-06",
+ "rep": 3,
+ "judge_cost_usd": 0.11202820000000001,
+ "judge_raw": "## 分類\n\n- **重大1**: 埋め込んだ欠陥そのものです。`get_note` が見えないメモに `Forbidden` を返し、存在しないメモの `NotFound` と区別できる点を指摘しています。箇所（notes/service.py の `get_note`）、原因、影響（例外の種類で非公開メモや他組織のメモの存在を推測できる）がすべて正解データと一致します。実行での再現と、`_check_modify` との不整合という根拠も挙げています。\n- **重大2**: 埋め込んだ欠陥の箇所に対するテストの不足だけを述べた指摘です。実際に、他組織・他人の非公開・存在しない id が `NotFound` になることを確かめるテストは `test_ac2_view.py` にありません。確認の後に非公開へ変わる場合のテストだけがあり、指摘は実在します。コードの欠陥の主張ではないため test_gap です。\n\n欠陥の検出は yes で、重大1が該当します。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し NotFound と区別できるという、埋め込んだ欠陥の箇所・原因・影響が一致している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"他組織・他人の非公開・存在しないメモが NotFound になるテストが実際になく、テスト不足だけの指摘である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が欠陥の箇所・原因・影響を正しく特定しており、重大2はテスト不足の指摘として妥当。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し NotFound と区別できるという、埋め込んだ欠陥の箇所・原因・影響が一致している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "他組織・他人の非公開・存在しないメモが NotFound になるテストが実際になく、テスト不足だけの指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が欠陥の箇所・原因・影響を正しく特定しており、重大2はテスト不足の指摘として妥当。"
+ }
+}

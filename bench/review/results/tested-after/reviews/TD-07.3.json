@@ -1,0 +1,49 @@
+{
+ "case": "TD-07",
+ "rep": 3,
+ "sec": 25.7,
+ "exit": 0,
+ "cost_usd": 0.1078705,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 15145,
+  "cache_read_input_tokens": 168605,
+  "output_tokens": 3041,
+  "output_tokens_details": {
+   "thinking_tokens": 880
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15145,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1498,
+    "cache_read_input_tokens": 41747,
+    "cache_creation_input_tokens": 881,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 881
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7dd26fa8\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 修正必須 / 内容: `verify_link` は期限の時刻ちょうどのリンクを有効として通してしまう。仕様 R8 は「期限の時刻ちょうど以降は無効」と定めている。 / 成立条件: `int(now) == expires` のとき。たとえば `make_link(s, 1, ttl_sec=100, now=1000)` で作ったリンクを `verify_link(s, link, now=1100)` で検証する。 / 影響: 期限切れのリンクが、期限の1秒間だけ通る（K8）。docstring には「期限の時刻ちょうどを含む」とあり、コードの動作と食い違っている。 / 確認した保証: 呼び出し元や上流で補う検証はない。署名検証は期限の比較とは無関係。 / 根拠: notes/share.py:140 が `> expires` になっている。実際に実行すると、now=1100 で note_id の `1` が返り、Forbidden にならなかった。 / 提案: `>=` に直す。\n- [重大2] 区分: テスト / 対象: AC8, K8 / 対応区分: 証拠不足 / 内容: 期限の境界（now == 期限、now == 期限 - 1）を確かめるテストがない。AC8 は「期限の境界を含む」と明記している。 / 根拠: tests/test_ac8_share.py の有効側は now=1059（期限は 1060）だけ。期限切れ側の検証は now=1001 の改ざんの確認だけで、期限切れでそもそも拒否される値（now が期限以上）を一度も渡していない。そのため重大1の欠陥を 62 件のテストが見逃した。 / 提案: 期限が 1060 のリンクに now=1059 は成功、now=1060 と now=1061 は Forbidden になるテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。題名・本文・タグの境界、途中の失敗、ロールバックは設計どおりのフックで確かめている。コードの経路も確認した。\n- AC2: 妥当。NotFound に統一されている。閲覧数はトランザクション内の `views = views + 1` で、判定後の削除や変更も読み直している。\n- AC3: 妥当。ページング、sort の拒否、LIKE の ESCAPE、`%` と `_` の扱い、プレースホルダー、タグの検査をコードで確認した。\n- AC4: 妥当。version を条件にした UPDATE で、認可と入力検証はトランザクション内で読み直している。\n- AC5: 妥当。同じ組織の確認と一括のトランザクションを確認した。\n- AC6: 妥当。8文字未満は全部伏せ、8文字以上は末尾4文字だけ残している。\n- AC7: 妥当。枠の境界は `>=` で、ロックの内側で判定している。\n- AC8: 不十分。重大1と重大2のとおり、期限の境界が未達で、検証もない。\n- AC9: 妥当。ログと例外に本文・署名・api_key は出ていない。\n- AC10: 妥当。ROLLBACK 失敗時も元の例外を保つ実装になっている。\n- テストの兆候: エンジンの検出はなし。history を確認し、検証条件の弱体化は見当たらない。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、単体テストが公開 API を直接確かめている）。\n### 不足しているリスク\n- K8: 期限の境界の検証が不足している（重大2）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行し、62 件が OK だった。\n- `notes/share.py` で `verify_link(s, link, now=expires)` が通ることを実際に実行して確認した。\n- `notes/*.py` のコード全体と `tests/test_ac8_share.py` を、仕様・設計と突き合わせて読んだ。\n- `aqdlc history --since 0` で検証条件の変更履歴を確認した。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 3,
+ "sec": 79.4,
+ "exit": 0,
+ "cost_usd": 0.49166599999999994,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 36021,
+  "cache_read_input_tokens": 291710,
+  "output_tokens": 7255,
+  "output_tokens_details": {
+   "thinking_tokens": 3101
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 36021,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3439,
+    "cache_read_input_tokens": 62925,
+    "cache_creation_input_tokens": 528,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 528
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, R2, AC4, K3 / 対応区分: 修正必須 / 内容: `update_note` の中で、トランザクション内で読み直した行の存在と認可を確かめていない。権限の判定（トランザクションの前）から `BEGIN IMMEDIATE` までの間にメモが削除されると、`row` が None になる。そのため `row[\"title\"]` で `TypeError` が起き、仕様の NotFound にならない。コードのコメント（`notes/service.py:286`「認可と入力の検証は…読み直した行で行う」）とも食い違っている / 成立条件: 呼び出し側の update が `_check_modify`（`notes/service.py:283`）を通った後、トランザクションが始まる前に、別の接続から同じメモが `delete_note` される。かつ `title` か `body` が省略されている（どちらも渡すと、rowcount 0 で Conflict になる） / 影響: 存在しないメモに想定外の例外の型（TypeError）が返り、ライブラリの例外の取り決め（ValidationError・NotFound・Forbidden・Conflict）が崩れる。呼び出し側で NotesError として扱えない。ロールバックはされるので、データの破損はない / 確認した保証: 所有者の変更（transfer）は version を上げるため、UPDATE の version 条件で Conflict になり、この経路では認可の抜けにはならない。削除は version で守られていない。既存のテスト（`test_concurrent_update_between_read_and_write_conflicts` など）は、更新が割り込む場合だけを確かめており、削除が割り込む場合はない / 根拠: `notes/service.py:283-290`。再現: hooks.before_write(\"update\") の中で admin が `delete_note` → `update_note(c, alice, nid, 1, body='x')` が `TypeError: 'NoneType' object is not subscriptable`（in_transaction=False）。title と body を両方渡すと Conflict / 提案: トランザクション内の `row = _row(conn, note_id)` の直後に `_check_modify(user, row, note_id, \"更新\")` を呼ぶ（`delete_note` と同じ形）。あわせて、hook で削除を割り込ませ NotFound を期待するテストを追加する\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `LINK_RE` が先頭の0を許し、署名は `int` にした値で計算される。そのため `007.<期限>.<署名>` が note 7 として有効になる。得られる権限は元と同じなので、実害はない。ただし、リンクの書き方が1通りに決まっていない / 提案: `(0|[1-9][0-9]{0,17})` のように先頭の0を拒否するか、受け取った文字列そのものを署名の対象にする\n- [軽微2] 区分: テスト / 対象: AC4, K3 / 対応区分: 改善提案 / 内容: 同時更新の競合は、同じ接続の hook で順序を割り込ませて確かめているだけで、閲覧数（`test_concurrent_views_from_threads`）のような別スレッド・別接続での確認がない。`UPDATE … WHERE version = ?` は原子的に実行されるので、必須ではない / 提案: ファイルの DB に別の接続から並行して更新し、成功が1件・残りが Conflict になることを確かめるテストを追加する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界値（100/101、10000/10001、20/21、改行、型の違い、重複を数えること、文字列の拒否）と、途中の失敗で notes・note_tags・audit が0件になることを確かめており、妥当\n- AC2: 他の組織・他人の非公開・存在しない ID が NotFound になること、NotFound のとき閲覧数が増えないこと、判定の後に非公開へ変わる場合、4スレッド×10回で閲覧数が40になることを確かめており、妥当\n- AC3: 範囲（他の組織・他人の非公開）、並び順、ページの境界、巨大な page、不正な入力（bool・float・文字列）、% _ \\ を普通の文字として扱うこと、タグの OR、SQL の文字列を渡す場合を確かめており、妥当。コードでも、題名と本文の両方に ESCAPE 付きのパターンを渡していること、sort はホワイトリストの辞書から選ぶこと、タグは `?` で渡すことを確認した\n- AC4: 権限（作成者・管理者・他人・他の組織・非公開）、古い version、割り込んだ更新、最新の行から値を引き継ぐこと、更新時の入力検証、削除の失敗時のロールバックを確かめている。ただし、判定の後に削除が割り込む場合がなく、[重大1] の欠陥を見逃している。この点で不十分\n- AC5: 管理者だけであること、組織の4通りの組み合わせ、途中の失敗で元のままになること、非公開も移ること、version が上がることを確かめており、妥当\n- AC6: 末尾4文字だけ残すこと、7文字・8文字・空の境界、管理者だけであること、自分の組織だけであることを確かめており、妥当\n- AC7: 枠の境界（159.999 / 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドを Barrier で同時に呼ぶこと、hook で判定中の割り込みを再現することを確かめており、妥当（hook の待ちは Event のタイムアウトに頼るが、ロックの中なので結果は決まる）\n- AC8: 期限ちょうど、改ざん（ID・期限・署名・鍵）、形の崩れ（大文字、改行、前の空白、負の数、アラビア数字、bytes、None、int）を確かめており、妥当\n- AC9: ログ・例外のメッセージ・監査ログに、本文・署名・api_key・秘密の鍵が出ないことを確かめており、妥当\n- AC10: Conflict・ValidationError・RuntimeError・IntegrityError・SQLite が先にロールバックした場合で、in_transaction が False になること、その後も接続を使えることを確かめており、妥当\n- K1〜K8: 上記のとおり。K3 は閲覧数と回数の制限では妥当。更新は同じ接続の hook でだけ確かめている（[軽微2]）。K4 の更新と削除が重なる場合は検証がない（[重大1]）\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは、目で見ても見つからなかった）\n### E2E の要否\n- 不要（HTTP・UI は対象外のライブラリで、公開している関数を unittest で直接呼んで確かめられる）\n### 不足しているリスク\n- K3/K4: 判定と更新の間に削除が割り込む場合（[重大1]）\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）→ 62件合格。gate のログ 20261111-085409-check-unit.log の結果（62件合格・exit=0）と一致\n- `$AQ trace`: R1〜R10 がそれぞれ V*/VK* の unit に対応し、すべて合格（反証テストは無効）\n- `$AQ history --since 0`: 検証条件の変更は bind（before: null → unit）だけで、弱められた形跡はない。`git status` ではコードはすべて未追跡（初期コミットからの新規）\n- 再現スクリプト（メモリ上の DB、ファイルは書き換えていない）: 更新の hook の中で削除 → body だけ渡すと TypeError、title と body を渡すと Conflict\n- コードを読んで確認: すべての SQL がプレースホルダーであること（f-string の部分は固定の where 句・ホワイトリストの ORDER BY・`?` の並びだけ）。LIKE の ESCAPE '\\'（Python のリテラルからみて1文字）と、\\ % _ のエスケープの順序。`_visible` と `_can_modify` が get・update・delete で使われていること。transfer は org_id で行を絞り、利用者の dict を信用すること（仕様の対象外の取り決めどおり）。RateLimiter は判定と記録の全体をロックの中で行うこと。verify_link は fullmatch・compare_digest・`>=` で期限を判定すること。ログに出すのは ID と期限だけであること",
+ "files_changed": [],
+ "valid": true
+}

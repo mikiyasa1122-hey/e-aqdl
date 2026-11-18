@@ -1,0 +1,49 @@
+{
+ "case": "CLN-10",
+ "rep": 2,
+ "sec": 31.7,
+ "exit": 0,
+ "cost_usd": 0.16206730000000003,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 26297,
+  "cache_read_input_tokens": 166593,
+  "output_tokens": 4020,
+  "output_tokens_details": {
+   "thinking_tokens": 1449
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 26297,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1574,
+    "cache_read_input_tokens": 46471,
+    "cache_creation_input_tokens": 455,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 455
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c8b1a97a\n### 指摘\n- [軽微1] 区分: テスト / 対象: AC5, K6 / 対応区分: 改善提案 / 内容: transfer_notes のテストが 45 行しかない。私は「管理者の role・org_id の検査」「元と先の組織が違う場合の拒否」「途中失敗でのロールバック」を、コードの経路で確認した。テストファイルは中身まで精読していない。 / 提案: 非公開メモを含む移管と、移管後の version 加算を明示的に確かめるテストを足すと、保守しやすくなる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成の入力検証は `_validate` と `tags` の型検査で行われ、作成は1つのトランザクションにまとまっている。`create:tags` の差し込み口で途中失敗を再現できる。テストはその範囲を確かめており、妥当。\n- AC2: `_visible` で他の組織・他人の非公開・存在しないメモはすべて NotFound になる。閲覧数は UPDATE の `views = views + 1` を `BEGIN IMMEDIATE` の中で実行しており、別々の接続・スレッドによる並行テストがある。妥当。\n- AC3: page・per_page・sort の範囲検査、LIKE の ESCAPE とエスケープ（`\\`・`%`・`_`）、タグの検査と OR 絞り込みがある。SQL はすべてプレースホルダーで、f 文字列で埋め込むのは固定の列名とプレースホルダーの個数だけ。妥当。\n- AC4: 更新は、トランザクション内で行を読み直して認可と検証をやり直し、`WHERE version = ?` と rowcount で Conflict を判定する。判定後の移管、読み出しと書き込みの間の更新、削除の途中失敗の巻き戻しをテストが確かめている。妥当。\n- AC5: 管理者の検査と同組織の検査を行い、1つのトランザクションで更新する。ただしテストは薄い（軽微1）。\n- AC6: 8 文字未満は全部伏せ、それ以外は末尾4文字だけを残す。妥当。\n- AC7: 枠の境界（`>= window`）と、ロック内での判定を確かめている。決定論的な並行テスト（Barrier と hook）があり、sleep には頼っていない。妥当。\n- AC8: 形は fullmatch（`[0-9]` と 64 文字の 16 進小文字）で検査し、期限は `>=` で判定し、署名比較は compare_digest で行う。テストと突き合わせて妥当。\n- AC9: ログと例外のメッセージには ID だけが出ており、本文・署名・api_key は出ていない。妥当。\n- AC10: `_rollback` が元の例外を隠さず、接続は次の操作にも使える。妥当。\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなし）。検証条件の履歴（history）は bind のみで、弱体化は見当たらない。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、SQLite を使った実 DB の単体・並行テストがリスクに見合っている）。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。63 件がすべて OK。\n- `aqdlc.py history --since 0` で、検証条件の変更履歴に弱体化がないことを確認した。\n- notes/service.py、db.py、ratelimit.py、share.py を全行読み、仕様と設計に突き合わせた。確認した観点は次のとおり。\n  - 認可の経路（_visible、_can_modify、NotFound と Forbidden の使い分け）\n  - SQL のプレースホルダー、LIKE の ESCAPE\n  - トランザクション境界と楽観的ロック\n  - 共有リンクの検証\n- 次のテストファイルは中身を読んだ: tests/base.py、test_ac7_ratelimit.py、test_ac4_update_delete.py。\n- 並行テスト（別接続・別スレッド）が test_ac2_view.py にあることを grep で確認した。\n- test_ac5 / ac6 / ac8 / ac9 / ac10 などその他のテストは精読していない。コードの経路での確認にとどめた。",
+ "files_changed": [],
+ "valid": true
+}

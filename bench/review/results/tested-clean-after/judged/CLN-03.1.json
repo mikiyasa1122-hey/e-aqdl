@@ -1,0 +1,18 @@
+{
+ "case": "CLN-03",
+ "rep": 1,
+ "judge_cost_usd": 0.1124882,
+ "judge_raw": "指摘は軽微1の1件です。\n\n**軽微1**（transfer_notes が updated_at を更新しない）: 仕様 R5 には updated_at に関する規定がありません。報告自身も「欠陥ではない」と書いています。コードの誤りでも仕様違反でもなく、挙動の好みに関する改善提案なので style とします。\n\nこのケースは欠陥なしです（api_key を伏せる処理を `_mask_key` に分けただけ）。確認したところ、`_mask_key` は 8 文字未満をすべて伏せ、8 文字以上は末尾 4 文字だけを残します。テスト `test_short_keys_fully_masked` の期待値（7文字→`*******`、8文字→`****5678`、空→空）とも一致し、振る舞いは変わっていません。レビューの「合格」判定は妥当です。\n\n```json\n{\"findings\": [{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"transfer_notes が updated_at を更新しないことは仕様に規定がなく、報告自身も欠陥ではないと述べる改善提案にとどまる。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビューは正しく合格と判定し、誤検出（false_positive）も実在する別の欠陥もなかった。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "transfer_notes が updated_at を更新しないことは仕様に規定がなく、報告自身も欠陥ではないと述べる改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビューは正しく合格と判定し、誤検出（false_positive）も実在する別の欠陥もなかった。"
+ }
+}

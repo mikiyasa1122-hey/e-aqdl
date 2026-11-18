@@ -1,0 +1,38 @@
+{
+ "case": "CLN-10",
+ "rep": 1,
+ "judge_cost_usd": 0.2862356,
+ "judge_raw": "## 判定結果（CLN-10、欠陥なしのケース）\n\nこのケースには欠陥を埋め込んでいないので、matches_defect に当たる指摘はありません。報告の5件を、コードとテストに照らして1件ずつ確かめました。\n\n### 重大1（version の型）: real_other\n指摘のとおり成立します。\n- **成立する入力:** `version=\"1\"` を渡す。\n- **原因:** 呼び出し側が渡した値には型がなく、SQLite は INTEGER の列と比べるときに数値として扱います。そのため `'1'` は 1 になり、`WHERE version = ?` が一致して UPDATE と COMMIT が通ります。\n- **結果:** その後の `return version + 1`（203行）で TypeError が起きます。呼び出し側には失敗に見えるのに、更新は残ります。\n- **評価:** 仕様は version の型を決めていません。ただ、R10・K4 は「例外の後に書き込みを残さない」ことを求めています。その性質がここで崩れているので、実在する欠陥と判断しました。型違いの入力が前提なので、重大度は報告より低いと考えます。\n\n### 重大2（sort の型）: real_other\n- **成立する入力:** `list_notes(..., sort=[\"x\"])`。\n- **原因:** `sort not in SORT_COLUMNS` が、ハッシュできない list に対して TypeError を出します。\n- **評価:** R3 の「範囲外は ValidationError」に反するので、実在する欠陥です。許可リストの検査は効いているので、SQL インジェクションにはなりません。\n\n### 軽微1（先頭に0を付けたリンク）: style\n- `007.1060.<署名>` は、`int` にした値で署名を比べるので通ります。\n- 仕様の「10進の数字だけ」には反しておらず、偽造もできません。同じリンクを1通りの書き方に揃える、という改善の提案です。\n\n### 軽微2（`__context__` に残るリンク）: style\n- `from None` を使っても、`__context__` にはリンク全体が残ります。\n- ただし `__suppress_context__` により、標準の traceback やログには出ません。R9 の対象である「メッセージ・ログ・出力」に漏れていないので、守りを固める提案です。\n\n### 軽微3（スレッドをまたぐ同時更新のテスト）: style\n- AC4・K3 の競合は、hook を使った割り込みのテストで確かめられています。テストの不足とまでは言えません。\n- 報告自身も必須ではないとしており、追加を勧める提案にとどまります。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"version に文字列 \\\"1\\\" を渡すと、SQLite が INTEGER の列と比べるときに数値にするため、WHERE version = ? が一致して COMMIT まで進み、その後の return version + 1 で TypeError が起きるので、例外なのに更新が残り、R10・K4 の性質に反する（型違いの入力が前提）。\"}, {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"sort=[\\\"x\\\"] のようなハッシュできない値で、sort not in SORT_COLUMNS が ValidationError ではなく TypeError を出し、R3 の「範囲外は ValidationError」に反する。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭に0を付けた ID・期限も通るが、整数にした値で署名を比べるので偽造にはならず、仕様の「10進の数字だけ」にも反しない、書き方を1通りにする提案である。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"__context__ に ValueError(link) は残るが、__suppress_context__ により標準の traceback やログには出ず、R9 の対象のメッセージ・ログ・出力に漏れていないので、守りを固める提案である。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"AC4・K3 の競合は hook を使った割り込みのテストで確かめられており、レビュー担当も必須ではないとした、テストを足す提案である。\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、題材の作り手が見落とした実在の欠陥（version の型による確定後の例外、sort の型による TypeError）が2件ある。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "version に文字列 \"1\" を渡すと、SQLite が INTEGER の列と比べるときに数値にするため、WHERE version = ? が一致して COMMIT まで進み、その後の return version + 1 で TypeError が起きるので、例外なのに更新が残り、R10・K4 の性質に反する（型違いの入力が前提）。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "sort=[\"x\"] のようなハッシュできない値で、sort not in SORT_COLUMNS が ValidationError ではなく TypeError を出し、R3 の「範囲外は ValidationError」に反する。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭に0を付けた ID・期限も通るが、整数にした値で署名を比べるので偽造にはならず、仕様の「10進の数字だけ」にも反しない、書き方を1通りにする提案である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "__context__ に ValueError(link) は残るが、__suppress_context__ により標準の traceback やログには出ず、R9 の対象のメッセージ・ログ・出力に漏れていないので、守りを固める提案である。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "AC4・K3 の競合は hook を使った割り込みのテストで確かめられており、レビュー担当も必須ではないとした、テストを足す提案である。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、題材の作り手が見落とした実在の欠陥（version の型による確定後の例外、sort の型による TypeError）が2件ある。"
+ }
+}

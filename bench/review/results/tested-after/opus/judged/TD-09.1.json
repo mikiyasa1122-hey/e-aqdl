@@ -1,0 +1,33 @@
+{
+ "case": "TD-09",
+ "rep": 1,
+ "judge_cost_usd": 0.2518396,
+ "judge_raw": "## 判定結果（TD-09）\n\n**[重大1] matches_defect**\n埋め込んだ欠陥そのものです。箇所は `transfer_notes` で、原因（メモごとに別々の `with transaction(conn)` でコミットしている）も、影響（途中で失敗すると一部のメモだけが移り、R5 に反する）も正解データと一致しています。報告の行番号（313〜327行）は実際の位置（209〜223行）と違いますが、関数名で箇所を特定できているので分類には影響しません。根拠として、実際に再現して持ち主が `[2, 1, 1]` になったことも示しています。\n\n**[重大2] test_gap**\n`test_ac5_transfer.py` には正常系・管理者だけ・同じ組織の中だけ・version が増えることのテストしかありません。途中で失敗したら元のまま残る、というテストは実際にありません。この指摘はテストの不足だけを述べているので test_gap です。\n\n**[軽微1] real_other**\n`sort` に list のようなハッシュできない値を渡すと、`sort not in SORT_COLUMNS` が TypeError を投げます。R3 では範囲外の値は ValidationError と決めているので、実在する小さな仕様違反です。報告の行番号（239行）は実際の位置（135行）と違いますが、内容は正しいです。\n\n**[軽微2] style**\n`from None` を付けても `__context__` に ValueError（リンク全体を含む）が残る、という事実は正しいです。ただし `__suppress_context__` が立つのでトレースバックには出ず、Forbidden のメッセージにもリンクは入りません。R9 が禁じる「ログ・例外のメッセージ・出力」への露出は起きていないので、欠陥ではなく防御を固める提案と判断しました。\n\n**結論**\n埋め込んだ欠陥は重大1で検出されています（defect_detected: yes）。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"transfer_notes でメモごとに別トランザクションでコミットしているため途中失敗で一部だけ移る、という原因と影響が埋め込んだ欠陥と一致し、再現の根拠もある。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"test_ac5_transfer.py には移管の途中失敗で元のまま残ることを確かめるテストが実際になく、テスト不足だけを述べている。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"sort に list などハッシュできない値を渡すと `in SORT_COLUMNS` が TypeError になり、R3 の ValidationError にならないのは実在する仕様違反である。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"__context__ にリンクが残るのは事実だが、from None でトレースバックには出ず、例外メッセージにも含まれないので R9 違反ではなく、防御を固める提案にとどまる。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1・軽微1の行番号は実際のコードとずれているが、関数名と内容で箇所を特定できる。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "transfer_notes でメモごとに別トランザクションでコミットしているため途中失敗で一部だけ移る、という原因と影響が埋め込んだ欠陥と一致し、再現の根拠もある。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "test_ac5_transfer.py には移管の途中失敗で元のまま残ることを確かめるテストが実際になく、テスト不足だけを述べている。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "sort に list などハッシュできない値を渡すと `in SORT_COLUMNS` が TypeError になり、R3 の ValidationError にならないのは実在する仕様違反である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "__context__ にリンクが残るのは事実だが、from None でトレースバックには出ず、例外メッセージにも含まれないので R9 違反ではなく、防御を固める提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1・軽微1の行番号は実際のコードとずれているが、関数名と内容で箇所を特定できる。"
+ }
+}

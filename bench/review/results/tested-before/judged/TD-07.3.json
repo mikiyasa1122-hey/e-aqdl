@@ -1,0 +1,18 @@
+{
+ "case": "TD-07",
+ "rep": 3,
+ "judge_cost_usd": 0.1095462,
+ "judge_raw": "重大1は、埋め込んだ欠陥そのものを指摘しています。箇所は notes/share.py の verify_link で、原因は期限の比較が `>` になっていること、影響は期限ちょうどの時刻でリンクが有効になることです。レビューは `>=` への修正と境界テストの追加も提案しており、実装の原因と影響の両方を述べています。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link の期限比較が > で、now == 期限のリンクが有効になるという埋め込み欠陥の原因と影響を、実行による再現つきで指摘している。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"唯一の指摘が埋め込み欠陥と箇所・原因・影響のすべてで一致している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link の期限比較が > で、now == 期限のリンクが有効になるという埋め込み欠陥の原因と影響を、実行による再現つきで指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "唯一の指摘が埋め込み欠陥と箇所・原因・影響のすべてで一致している。"
+ }
+}

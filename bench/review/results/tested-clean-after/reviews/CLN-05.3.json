@@ -1,0 +1,49 @@
+{
+ "case": "CLN-05",
+ "rep": 3,
+ "sec": 33.3,
+ "exit": 0,
+ "cost_usd": 0.1395101,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21641,
+  "cache_read_input_tokens": 120001,
+  "output_tokens": 4093,
+  "output_tokens_details": {
+   "thinking_tokens": 1443
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21641,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1901,
+    "cache_read_input_tokens": 39340,
+    "cache_creation_input_tokens": 2930,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2930
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fba595\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:139 の list_notes / 対応区分: 修正必須 / 内容: sort に updated・title 以外の値を渡すと ValidationError にするべきところ、辞書のキーにできない値（list・dict など）では `sort not in SORT_COLUMNS` が TypeError を投げる。 / 成立条件: `list_notes(conn, user, sort=[])` のように、sort にハッシュできない型を渡す。 / 影響: 仕様は「範囲外は ValidationError」と定めている。呼び出し側は NotesError を捕まえても TypeError を取りこぼす。page・per_page は型違いでも ValidationError になるので、sort だけ扱いが揃っていない。 / 根拠: 実際に `sort=[]` を渡して TypeError になることを確認した。同じ検査の `page=1.0` は ValidationError になる。上流に sort の型検査はなく、既存テストもこの入力を通していない。 / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS:` に直し、list を渡すテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証と作成の流れはトランザクションの中で行われる。途中で失敗する場合は `hooks.before_write(\"create:tags\")` で再現し、何も残らないことを確かめている。タグの上限・重複・文字列そのものの拒否も実装で確認した。妥当。\n- AC2: 同じ組織の判定と非公開メモの扱いがコードどおり。閲覧数の加算は `BEGIN IMMEDIATE` の中で行われる。確認した後に非公開へ変えられる場合も hook で再現している。数え漏れの検証も妥当。\n- AC3: SQL はすべてプレースホルダーで、LIKE は ESCAPE 付きで `\\`・`%`・`_` を退避している。題名と本文の両方に同じ pattern が渡っている。タグは OR で、R1 の規則で検査される。一方、sort の型違いは検証されておらず、重大1のとおり不十分。\n- AC4: 認可を書き込みのトランザクション内で読み直した行で行い、`UPDATE ... WHERE version = ?` の rowcount で Conflict を判定している。管理者に見えない非公開メモは NotFound になる。削除も同じトランザクション内で行い、例外はそのまま伝わる。妥当。\n- AC5: 管理者であること・同じ組織であることを確認し、全件移すか何もしないかをトランザクションで保証している。途中の失敗は hook で再現している。妥当。\n- AC6: api_key は末尾4文字以外を伏せ、8文字未満は全部伏せている。妥当。\n- AC7: ロックの内側で判定している。枠の境界は `>=` で、ちょうど window 秒たったら新しい枠になる。並行実行は Barrier と hook で再現しており、sleep に頼っていない。妥当。\n- AC8: fullmatch で形を検査している。期限は「ちょうど以降は無効」で、署名の比較は compare_digest。型違い・改ざん・期限切れはどれも Forbidden になる。妥当。\n- AC9: ログと例外のメッセージにメモの本文・署名・api_key は含まれていない。妥当。\n- AC10: ROLLBACK は失敗しても元の例外を隠さず、`BEGIN IMMEDIATE` の失敗時もトランザクションは残らない。接続の再利用はテストで確認している。妥当。\n- エンジンが検出したテストの兆候はなし。`history` には bind の追加だけがあり、検証の弱体化は見つからなかった。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、SQLite への実接続を使う単体テストが全受け入れ条件を直接確かめているため）。\n### 不足しているリスク\n- K2: sort は SORT_COLUMNS の固定の値だけを ORDER BY に使うため、SQL に埋め込まれる経路はない。ただし重大1のとおり、型違いの入力の検査が欠けている。\n- そのほか（K1・K3〜K8）は、コードの経路をたどって確かめた範囲では不足なし。\n### 確認したこと\n- 仕様・設計・全ソース（notes/*.py）を読み、認可・トランザクション・LIKE エスケープ・楽観的ロックの経路をたどった。\n- `python3 -m unittest discover -s tests -t .` → 63件すべて OK。\n- `list_notes(sort=[])` → TypeError（再現）。`page=1.0` → ValidationError。\n- `aqdlc.py history --since 0` で、検証条件の弱体化がないことを確認した。\n- コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

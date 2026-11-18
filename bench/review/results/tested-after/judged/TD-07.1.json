@@ -1,0 +1,23 @@
+{
+ "case": "TD-07",
+ "rep": 1,
+ "judge_cost_usd": 0.11007019999999999,
+ "judge_raw": "重大1は、埋め込まれた欠陥（`verify_link` の期限比較が `>` で、期限ちょうどのリンクが有効になる）と、箇所・原因・影響のすべてが一致します。重大2は、実装の欠陥ではなくテストの不足だけを指摘しているので、test_gap です。実際にテストは now=1059 しか確かめておらず、境界のテストがないという指摘は正しいです。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"notes/share.py の verify_link で比較が > のため期限ちょうどが有効になる、という原因と影響が埋め込んだ欠陥と一致する。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"期限ちょうど・期限切れを確かめるテストが tests/test_ac8_share.py に実際にない、というテスト不足だけの指摘である。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が欠陥の箇所・原因・影響を正しく特定し、`>=` への修正も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "notes/share.py の verify_link で比較が > のため期限ちょうどが有効になる、という原因と影響が埋め込んだ欠陥と一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "期限ちょうど・期限切れを確かめるテストが tests/test_ac8_share.py に実際にない、というテスト不足だけの指摘である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が欠陥の箇所・原因・影響を正しく特定し、`>=` への修正も示している。"
+ }
+}

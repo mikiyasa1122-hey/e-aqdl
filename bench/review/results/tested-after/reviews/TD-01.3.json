@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 3,
+ "sec": 42.6,
+ "exit": 0,
+ "cost_usd": 0.12366039999999999,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 13688,
+  "cache_read_input_tokens": 165484,
+  "output_tokens": 5234,
+  "output_tokens_details": {
+   "thinking_tokens": 2068
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13688,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1859,
+    "cache_read_input_tokens": 40558,
+    "cache_creation_input_tokens": 613,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 613
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, R2, K1, K4, AC4 / 対応区分: 修正必須 / 内容: `notes/service.py` の `update_note` は、事前チェック（`_check_modify`）をトランザクションの外で行う。トランザクション内で行を読み直したあとは、認可を再確認せず、行の有無も確かめない。コード内のコメントは「トランザクション内で認可と検証を行う」と書いているが、実際には `_check_modify` を呼んでいない。 / 成立条件: (a) 事前チェックの後、トランザクションに入る前に、他の操作がそのメモを削除した場合。(b) 事前チェックの後に、管理者がメモを別の利用者へ移管した場合。このとき移管前の所有者が、移管後の最新 version を渡して更新を呼ぶ。 / 影響: (a) 存在しないメモの扱いは NotFound でなければならない（R2・R4）が、`TypeError: 'NoneType' object is not subscriptable` になる。ロールバックは行われ、接続は使える状態に戻る。(b) 所有者でも管理者でもなくなった利用者の更新が成功する（R4 の Forbidden に反し、K1 に当たる）。 / 根拠: `service.py` の `update_note` で、`with transaction(conn):` の直後に `row = _row(...)` の結果をそのまま `row[\"title\"]` で参照している。`delete_note` は認可をトランザクション内で行っており、`update_note` と一貫していない。(a) は、`before_write(\"update\")` で行を DELETE する再現スクリプトで TypeError を確認した。(b) は、`before_write(\"update\")` で `transfer_notes` を実行し、元の所有者が version=2 で更新を呼ぶ再現スクリプトで更新が成功し、戻り値 3 が返り、title が書き換わることを確認した。どちらも既存のテストには含まれていない。 / 提案: トランザクション内で `row = _row(...)` を読んだ直後に `_check_modify(user, row, note_id, \"更新\")` を呼ぶ。これで行がない場合は NotFound、権限がない場合は Forbidden になる。あわせて、(a) 削除との競合と (b) 移管との競合を再現する回帰テストを `before_write` フックで追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成・拒否・途中失敗のロールバックを `before_write(\"create:tags\")` で確かめている。タグの型・個数・文字の境界も含み、妥当。\n- AC2: 可視性、NotFound の統一、閲覧数の並行カウントを確かめている。コードも、トランザクション内の再確認と ROLLBACK で閲覧数が戻る作りになっており、妥当。\n- AC3: 範囲外の入力、LIKE の `%` `_`、ESCAPE、タグの OR を確かめている。SQL はすべてプレースホルダーを使っており、`sort` は許可リストで制限されている。妥当。\n- AC4: version の競合と、更新中に他の更新が入るケースは確かめている。しかし更新中の削除・更新中の移管というケースが空洞になっており、重大1のとおり不十分。\n- AC5: 移管・拒否・途中失敗で元に戻ることを確かめており、実装も同じ組織だけに絞っていて妥当。\n- AC6: 8文字未満はすべて伏せ、8文字以上は末尾4文字を残す。実装はこのとおりで、妥当。\n- AC7: 枠の境界は注入できる clock で、同時呼び出しは `hook` で決定論的に確かめており、妥当。\n- AC8: 期限の境界、改ざん、形の崩れ（改行・全角数字）を確かめている。実装の fullmatch と `compare_digest` も妥当。\n- AC9: ログと例外のメッセージに本文・署名・api_key が出ないことを確かめている。コードを見ても出していない。妥当。\n- AC10: 例外の後に接続を使い続けられることを確かめており、妥当。\n- エンジンが検出したテストの兆候はなし。62 件のテストはすべて成功した。skip や弱いアサーションは見当たらない。\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、単体・結合テストで全経路を確かめられる）。\n### 不足しているリスク\n- K1・K3: `update_note` の更新中に起きる削除・移管は未検証で、重大1に書いた欠陥がある。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` を実行した。62 件がすべて成功した。\n- 仕様・設計と、`service.py`・`ratelimit.py`・`share.py`・`db.py` を通読した。LIKE のエスケープ、プレースホルダー、認可の適用箇所をたどった。\n- 重大1の再現スクリプトをスクラッチパッドに置いて実行した。(a) 更新中の削除で TypeError、(b) 更新中の移管で権限のない更新が成功。\n- `git status` を確認した。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

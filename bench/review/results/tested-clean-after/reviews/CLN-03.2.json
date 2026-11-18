@@ -1,0 +1,49 @@
+{
+ "case": "CLN-03",
+ "rep": 2,
+ "sec": 32.2,
+ "exit": 0,
+ "cost_usd": 0.13919979999999998,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21914,
+  "cache_read_input_tokens": 126978,
+  "output_tokens": 3883,
+  "output_tokens_details": {
+   "thinking_tokens": 1556
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21914,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1837,
+    "cache_read_input_tokens": 39440,
+    "cache_creation_input_tokens": 9969,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9969
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e7dd616c\n### 指摘\n- なし\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。タイトル・本文・タグの境界と型違い（tags に文字列、末尾が改行のタグ）を拒否することを確認している。`create:tags` で失敗を起こし、メモ・タグ・監査ログのどれも残らないことも確かめている。実装は `_validate` と `transaction` で仕様どおり。\n- AC2: 妥当。他の組織・他人の非公開・存在しない ID がすべて NotFound になる。NotFound のときは閲覧数が増えない。確認の後に非公開へ変わるケースと、別の閲覧が割り込むケースも確かめている。4 スレッド×10 回を別接続で実行し、閲覧数がちょうど 40 になる。コード上も `UPDATE views = views + 1` を `BEGIN IMMEDIATE` の中で行っており、数え漏れは起きない。\n- AC3: 妥当。page・per_page・sort の範囲外と bool の拒否、`%` `_` `\\` の検索、タグ OR、タグの検査を見た。SQL はプレースホルダーと `ESCAPE '\\'` で、`_like_escape` が題名・本文の両方に同じパターンで渡る。`ORDER BY` は固定表から選ぶので、インジェクションの余地はない。page が非常に大きい場合は `MAX_OFFSET` で OverflowError を避けている。\n- AC4: 妥当。作成者・同組織の管理者・他の組織・非公開の各ケースを確認している。古い version と、読み出しから書き込みの間の更新で Conflict になる。判定後に移管された場合は、トランザクション内で読み直して Forbidden にする。削除の途中失敗では、タグとメモの両方が巻き戻り、例外も伝わる。version を `UPDATE` の条件に入れており、競合に強い。\n- AC5: 妥当。管理者以外・他の組織を Forbidden にする。途中失敗では `transfer:{i}` の hook で全件が元に戻る。実装も `BEGIN IMMEDIATE` の中で全件を移している。\n- AC6: 妥当。8 文字未満はすべて伏せ、8 文字以上は末尾 4 文字だけ残す。管理者以外は Forbidden になる。\n- AC7: 妥当。枠の境界は 159.999 で制限され、160.0 で新しい枠になる。拒否された呼び出しは枠を延ばさない。20 スレッドを Barrier で同時に実行すると、許可はちょうど 5 件。ロック内の hook で割り込ませても直列化される。sleep に頼る検証ではない。\n- AC8: 妥当。形式は `fullmatch` と ASCII の `[0-9]` で厳密に検査する。期限の判定は `>=`、署名は `compare_digest` で比べる。期限切れ・改ざん・形の崩れはすべて Forbidden で、メッセージに署名は出ない。\n- AC9: 妥当。ログ・例外メッセージ・監査ログの detail に、本文・署名・api_key・secret が含まれないことを確かめている。コードもログには ID だけを出している。\n- AC10: 妥当。例外後の ROLLBACK と、同じ接続での再利用を確かめている。`_rollback` は `in_transaction` を見て二重の失敗を避ける。\n- 重要なリスク: K1〜K8 は上の各 AC の検証でカバーされている。\n- エンジンが検出したテストの兆候はなし（skip・`.only`・アサーションなし）。テストが弱められた形跡もない。\n\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリである。SQLite の実ファイルを使った複数スレッドのテスト（AC2）と、単体の hook による割り込み再現で、リスクに見合う検証になっている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- spec.md、design.md、`notes/*.py` の全ファイルを読んだ。認可、トランザクション境界、SQL の組み立て、LIKE のエスケープ、競合の経路をコード上でたどった。\n- `python3 -m unittest discover -s tests -t .`（`PYTHONDONTWRITEBYTECODE=1`）を実行し、63 件が成功した。\n- `aqdlc history --since 0` を確認した。検証条件を弱める変更はなく、bind と impl-map だけだった。\n- `$AQ trace` と `$AQ gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

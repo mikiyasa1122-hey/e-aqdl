@@ -1,0 +1,49 @@
+{
+ "case": "TD-08",
+ "rep": 3,
+ "sec": 68.5,
+ "exit": 0,
+ "cost_usd": 0.5035654,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 39864,
+  "cache_read_input_tokens": 275787,
+  "output_tokens": 6472,
+  "output_tokens_details": {
+   "thinking_tokens": 1781
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 39864,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3121,
+    "cache_read_input_tokens": 56244,
+    "cache_creation_input_tokens": 3922,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3922
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c3a94d21\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3（notes/service.py `get_note` 220〜223行） / 対応区分: 修正必須 / 内容: 閲覧数をトランザクションの外で読んでいます（`views = row[\"views\"]`、自動コミットの接続での SELECT）。その後 `BEGIN IMMEDIATE` の中で、その古い値を使って `UPDATE notes SET views = ? ...`（views + 1）と書き込みます。読み出しと書き込みの間に別の接続の閲覧が入ると、その1回分を上書きして消してしまいます / 成立条件: 同じメモを、別々の接続・スレッドから同時に閲覧したとき（仕様の「同時」の定義どおりの使い方） / 影響: R2「同時に閲覧されても数え漏れがないこと」を満たしません。閲覧数が実際より少なくなります / 確認した保証: `transaction()` は書き込みを直列にしますが、加算に使う値はトランザクションの前に読んだもので、ロックの中で読み直していません。DB の制約でも防げません。AC2 のテスト（tests/test_ac2_view.py）には並行の閲覧のテストがなく、`threading`・`tempfile` を import しているのに使っていません。設計で用意した `hooks.before_write(\"view\")` も、割り込みの再現には使われていません / 根拠: スクラッチパッドの race.py で再現しました。(1) \"view\" のフックで、Alice の閲覧の途中に別の接続から Bob の閲覧を1回割り込ませると、2回閲覧した後の views が **1** になる。(2) ファイルの DB に 8 スレッド × 50 回閲覧すると、期待の 400 に対して **50** / 提案: `UPDATE notes SET views = views + 1 WHERE id = ?` にして、トランザクションの外での読み出しをやめる（または読み出しをトランザクションの中に移す）。あわせて、AC2/K3 のテストを追加する: ファイルの DB と2つ目の接続を使い、\"view\" フックで別の接続の閲覧を割り込ませて views == 2 を確かめる、決定論的なテスト。\n- [軽微1] 区分: 実装 / 対象: R8, K8（notes/share.py 349・371行） / 対応区分: 改善提案 / 内容: 署名は int に変換した値（`7:1060`）で計算しています。このため `007.1060.<正しい署名>` のような先頭に 0 を付けた別の表記も有効と判定されます。期限や対象は変わらないので安全性への実害はありませんが、同じリンクに複数の表記ができます / 提案: 先頭の 0 を拒否する（`(0|[1-9][0-9]*)`）か、受け取った文字列そのものに署名する。\n- [軽微2] 区分: 設計 / 対象: R1〜R10（trace の impl-map） / 対応区分: 改善提案 / 内容: trace では、すべての要求の実装ファイルが `notes/__init__.py` になっています。設計の対応（service.py・ratelimit.py・share.py）と合っていません / 提案: impl-map を実際のファイルに直す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は、題名・本文・タグの境界値（101文字、空白だけ、改行付きのタグ、型の誤り、重複を含めて6個）と、\"create:tags\" での途中の失敗後に notes・note_tags・audit の3つとも 0 件であることを確かめています。妥当です。\n- AC2: 見え方（他の組織・他の組織の管理者・他人の非公開・管理者から見た非公開・存在しない）がすべて NotFound になることと、確認後に非公開になった場合は確かめています。一方、**同時の閲覧で数え漏れがないことの検証がなく**、実装も実際に数え漏れます（[重大1]）。この点で不十分です。\n- AC3: 範囲（他の組織・他人の非公開）、並び順、ページ、巨大な page、不正な page・per_page・sort、LIKE の % _ \\ を文字どおりに扱うこと、OR のタグ絞り込み、不正なタグを確かめています。妥当です。SQL はすべてプレースホルダーで、sort はホワイトリストの値だけを埋め込んでいます。題名と本文の両方に、エスケープ済みの値と ESCAPE '\\' が渡っていることをコードで確かめました。\n- AC4: 認可（Forbidden と NotFound の区別）、非公開は作成者だけ、古い version での Conflict、読み出しと書き込みの間の更新での Conflict、変更しない欄を最新の行から取ること、書き込み中の認可の再確認、更新時の入力検証、削除の途中の失敗のロールバックと例外の伝播を、フックで決定論的に確かめています。妥当です。\n- AC5: 管理者だけであること、組織をまたぐ4通りの拒否、途中の失敗で何も移らないこと、非公開のメモも移ること、監査ログを確かめています。妥当です。\n- AC6: 末尾4文字、7文字と8文字の境界、空の鍵、管理者だけ、自分の組織だけを確かめています。妥当です。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドが同時に呼んでも上限の5回、フックでの割り込みの直列化を確かめています。妥当です（待ち時間は Event のタイムアウトで、sleep には頼っていません）。\n- AC8: 期限ちょうどで無効、改ざん（note_id・期限・署名・鍵）、形の崩れたリンク（大文字、改行、アラビア数字、型）を確かめています。妥当です。\n- AC9: ログ・例外のメッセージ・監査の detail に、本文・署名・api_key・秘密鍵が出ないことを確かめています。妥当です。\n- AC10: Conflict・ValidationError・注入した例外・IntegrityError・自動でロールバックされた後のそれぞれで、in_transaction が False になり、続けて操作できることを確かめています。妥当です。\n- K1: AC2〜AC5 で網羅されています。妥当です。\n- K2: AC3 のとおり妥当です。\n- K3: 更新（AC4）と RateLimiter（AC7）は妥当です。**閲覧数は未検証で、実際に失われます**（[重大1]）。\n- K4〜K8: 上の AC1・AC5・AC6・AC8〜AC10 のとおり妥当です。\n- エンジンが検出したテストの兆候: なし。git では全ファイルが未追跡で比較できる差分はありません。history にも、検証条件を弱めた記録はありませんでした。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、仕様でも HTTP API は対象外です。単体テストで実際の SQLite を使っているので、リスクに見合っています。ただし、閲覧数の並行性は2つの接続を使った統合的なテストが必要です（[重大1]）。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）: 61件すべて合格。\n- スクラッチパッドの再現スクリプト（`/tmp/claude-0/-tmp-claude-0-td-before-work-aqdlc-test-e28-14---app/7fcc2003-1063-4f8e-8655-1cafc4f9f87c/scratchpad/race.py`、一時フォルダのファイル DB を使用）:\n  - フックで割り込ませた2回の閲覧の後、views が 1 になった\n  - 8スレッド × 50回の閲覧で、期待の 400 に対して 50 になった\n- `$AQ history --since 0`・`$AQ trace` を確認しました。gate のログ（20261111-091819-check-unit.log）は 61件合格です。\n- notes/*.py と tests/*.py をすべて読みました。",
+ "files_changed": [],
+ "valid": true
+}

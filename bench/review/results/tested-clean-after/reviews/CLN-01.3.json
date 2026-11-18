@@ -1,0 +1,49 @@
+{
+ "case": "CLN-01",
+ "rep": 3,
+ "sec": 37.8,
+ "exit": 0,
+ "cost_usd": 0.195439,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 32891,
+  "cache_read_input_tokens": 173850,
+  "output_tokens": 4647,
+  "output_tokens_details": {
+   "thinking_tokens": 1646
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 32891,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2110,
+    "cache_read_input_tokens": 50743,
+    "cache_creation_input_tokens": 2777,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2777
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6454e556\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` で、タグの検査（`TAGS_MAX` と `TAG_RE`）が `_validate` と重複して書かれている（notes/service.py:159-164）。仕様の動作は満たしている。 / 提案: タグ検査だけを取り出した共通関数にして、作成・更新・検索で共有する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。コード上は、題名・本文・タグの検査がトランザクションの前にあり、メモ・タグ・監査ログの挿入は `transaction()` の中にある。`hooks.before_write(\"create:tags\")` で途中失敗を再現するテストがある。範囲外の値（空白だけ、101 文字、改行付きのタグ、文字列の tags）もテストしている。\n- AC2: 妥当。他の組織・他人の非公開・存在しないメモはどれも NotFound になる。閲覧数の増加は `BEGIN IMMEDIATE` の中で行い、書き込み側で可視性を再確認している。閲覧の途中に別の閲覧が割り込むテストと、別接続・4 スレッドで 40 回閲覧して 40 になるテストがあり、数え漏れを確かめている。\n- AC3: 妥当。page・per_page・sort の範囲外、型の違う値（bool・文字列・float）、巨大な page をテストしている。検索では `%`・`_`・`\\` をリテラルとして扱うことを確かめている。LIKE には ESCAPE 句があり、`%` と `_` に加えて `\\` 自体もエスケープしている。題名と本文の両方に同じ pattern を渡している。タグ絞り込みの OR・注入文字列・他組織・他人の非公開も検証している。\n- AC4: 妥当。作成者・同じ組織の管理者・同僚・他組織・非公開の各場合を検証している。読み出しから書き込みの間に更新や移管が入る場合は、トランザクション内で行を読み直して再判定するため、Conflict または Forbidden になる。この経路をフックでテストしている。削除の途中失敗のロールバックと、例外が呼び出し側に伝わることも検証している。\n- AC5: 妥当。管理者以外、組織をまたぐ 4 通りの組み合わせ、途中失敗時に元のままであること、非公開メモも移ることをテストしている。\n- AC6: 妥当。コードは仕様どおり、8 文字未満をすべて伏せ、8 文字以上は末尾 4 文字以外を伏せる。実際のテストは 28 行と短く、全文は読んでいない。実装の読解で確認した。\n- AC7: 妥当。枠の境界（159.999 で拒否、160.0 で許可）、拒否された呼び出しが枠を延ばさないこと、20 スレッドの同時呼び出しで成功が 5 回になること、判定の途中に別スレッドが入る場合を、フックと Event で決定論的に再現している。sleep には頼っていない。\n- AC8: 実装の読解で、仕様の規則どおりであることを確認した。`fullmatch` と ASCII の数字で形の崩れを弾き、`now >= expires` で期限ちょうどを無効にし、`hmac.compare_digest` で署名を比べる。いずれも Forbidden になる。テストファイル（41 行）は全文を読んでいない。\n- AC9: 妥当。ログ（本文・署名・api_key・secret）と例外メッセージと監査ログの detail に、機密が出ないことを確かめている。コード上も ID だけを出している。\n- AC10: 実装の読解で確認した。`transaction()` は `BaseException` でロールバックし、ROLLBACK 自体の失敗で元の例外を隠さない。テストファイル（53 行）は全文を読んでいない。\n- エンジンが検出したテストの兆候: なし。`history` を見ても、検証条件を弱めた変更はない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、SQLite と複数スレッドの挙動まで unittest で直接検証している。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `spec.md` と `design.md` を全文読み、`notes/*.py` の全ソースを読んだ。\n- `tests/` のうち ac2・ac3・ac4・ac5・ac7・ac9 と `base.py` を全文または主要部分を読み、ac1・ac6・ac8・ac10 は読んでいない。\n- `aqdlc.py trace` と `history --since 0` を実行した。変更履歴は工程の登録と紐付けだけで、検証の弱体化は見当たらない。\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件がすべて成功した。\n- SQL は、値をすべてプレースホルダーで渡している。f 文字列で埋め込んでいるのは、固定の `where` 句、`SORT_COLUMNS` の許可リスト、`?` の個数だけ。\n- 認可は `_visible` と `_can_modify` にまとまっている。更新と削除では、トランザクション内で読み直して再判定している。\n- テストが書いていない入力として、閲覧中にメモが削除された場合を確かめた。`UPDATE` は 0 行になり、`_row` が None で NotFound になる。先頭ゼロ付きの note_id（`007`）は `int()` で正規化され、そのまま 7 に対する署名の検証になる。署名しているのは正規化後の値なので、別のメモを開けるわけではない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-03",
+ "rep": 3,
+ "sec": 37.8,
+ "exit": 0,
+ "cost_usd": 0.1437791,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21509,
+  "cache_read_input_tokens": 126771,
+  "output_tokens": 4505,
+  "output_tokens_details": {
+   "thinking_tokens": 1933
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21509,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2052,
+    "cache_read_input_tokens": 39318,
+    "cache_creation_input_tokens": 9666,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9666
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7eb7e992\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, AC4, notes/service.py:323-333 / 対応区分: 改善提案 / 内容: update_note は、トランザクションの外で読んだ行 `row` から、未指定の title・body を補っている。トランザクション内で読み直した行は、認可の判定にしか使っていない。 / 提案: 補完にはトランザクション内で読み直した行を使うと、より堅い。ただし、呼び出し側が渡す version は、読み出しの後に他の更新で上がった値と一致する場合にだけ問題になる。通常の使い方では、古い version は Conflict になる。そのため仕様違反とは断定せず、改善提案にとどめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。コードでは、題名・本文・タグの検証（文字列そのもの、改行つきの末尾、重複、個数）と、`create:tags` での途中失敗の ROLLBACK を確認した。tests/test_ac1_create.py は、拒否のケースと、失敗時に何も残らないことを検証している。\n- AC2: 妥当。\n  - 他の組織・他人の非公開・存在しないメモはすべて NotFound になる。\n  - 判定の後に非公開へ変わった場合は、閲覧数が増えずに NotFound になる。\n  - 割り込み閲覧と、別接続・別スレッドでの同時閲覧（40回）で、数え漏れがない。\n  - どれも sleep に頼らず、決定論的な差し込み口（hooks）で再現している。\n- AC3: コード上は妥当と判断した。\n  - 範囲外・bool 型・不正な sort は ValidationError になる。\n  - LIKE は `ESCAPE '\\'` を題名と本文の両方に適用し、`\\`・`%`・`_` をエスケープしている。\n  - 値はすべてプレースホルダーで渡している。ORDER BY は固定の辞書から選ぶ。\n  - タグは OR で、R1 の規則による検査がある。\n  - テストファイルは通読していないが、全62件が合格した。\n- AC4: 妥当。\n  - 作成者・同じ組織の管理者・他人・他の組織・非公開の各ケースを検証している。\n  - 古い version と、読み出しから書き込みの間の割り込みで Conflict になる。\n  - 判定の後に移管された場合は、トランザクション内で認可を再検査して Forbidden になる。\n  - 削除の途中失敗は、ROLLBACK され、例外が伝わる。\n- AC5: コードを確認した。管理者だけ、3者が同じ組織のときだけ、全件が1トランザクション、という規則を満たしている。tests/test_ac5_transfer.py は通読していないが、全62件が合格した。\n- AC6: 8文字未満はすべて伏せ、8文字以上は末尾4文字だけを出す実装になっている。tests/test_ac6_audit.py は通読していない。\n- AC7: 妥当。枠の境界（159.999 は拒否、160.0 は新しい枠）、拒否が枠を延ばさないこと、20スレッド同時で上限5件ちょうど、をテストしている。ロック内に差し込み口を置いた割り込みの直列化も検証している。\n- AC8: コード上は妥当と判断した。fullmatch、数字と16進の限定、期限の判定（`>=`）、`hmac.compare_digest`、すべて Forbidden という挙動を確認した。tests/test_ac8_share.py は通読していない。\n- AC9: ログ・例外・監査の出力に、本文・署名・api_key を出していないことをコードで確認した。tests/test_ac9_secrets.py は通読していない。\n- AC10: `transaction()` は、例外のときに ROLLBACK して例外をそのまま伝える。ROLLBACK 自体の失敗も、元の例外を隠さない。tests/test_ac10_recovery.py は通読していない。\n- 検証条件の弱体化は見つからなかった。`history` では、`unit` チェックの追加と bind だけで、緩和や削除はなかった。エンジンが検出したテストの兆候はなし。\n\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、SQLite（ファイル DB とメモリ DB）を使った統合的なテストで、同時実行と途中失敗の経路を直接確かめている。\n\n### 不足しているリスク\n- なし。\n  - 未確認の点が1つある。`_visible` が許す「同じ組織・非公開で作成者本人」以外の経路（ID 直指定の `_can_modify`）は、`_check_modify` が先に `_visible` を通すため塞がっている。これはコードで確認した。\n  - 共有リンクで、先頭ゼロの別表記が同じ署名で通る点は、仕様の範囲内であり、指摘にしていない。\n\n### 確認したこと\n- 仕様書・設計書、`notes/*.py` の全ファイルを通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。62件が合格した。\n- `history --since 0` で、検証条件が弱められていないことを確認した。\n- コードを追って、次の点を確認した。\n  - 非公開・組織の漏えい経路\n  - 認可の再検査\n  - 楽観的ロック\n  - LIKE のエスケープ\n  - プレースホルダー\n  - ROLLBACK\n  - 機密の出力",
+ "files_changed": [],
+ "valid": true
+}

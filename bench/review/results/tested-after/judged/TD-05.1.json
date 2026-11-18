@@ -1,0 +1,23 @@
+{
+ "case": "TD-05",
+ "rep": 1,
+ "judge_cost_usd": 0.1110762,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込み欠陥そのもの。`search_notes` の SQL に `private = 0 OR owner_id = ?` がなく、同じ組織の他人の非公開メモが検索結果に出る点を、原因（条件の欠落）と影響（題名・id の漏えい）の両方で指摘している。コードの該当箇所（service.py の search_notes、154〜155行）とも一致する。→ matches_defect\n\n**重大2**: 検索で他人の非公開メモの除外を確かめるテストがない、という指摘。テストを見ると `secret 100%` は作成されているが、検索結果の除外は確認していないので、指摘は実際の不足と合っている。コードの欠陥ではなくテストの不足だけを述べている。→ test_gap\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes の WHERE に非公開メモの除外（private = 0 OR owner_id = ?）がなく、同じ組織の他人の非公開メモが出るという、埋め込み欠陥の原因と影響に一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"検索で他人の非公開メモが除外されることを確かめるテストが実際になく、テスト不足だけを指摘している。\"}\n],\n\"defect_detected\": \"yes\",\n\"matched_label\": \"重大1\",\n\"note\": \"重大1が箇所・原因・影響とも埋め込み欠陥と一致し、再現も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes の WHERE に非公開メモの除外（private = 0 OR owner_id = ?）がなく、同じ組織の他人の非公開メモが出るという、埋め込み欠陥の原因と影響に一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "検索で他人の非公開メモが除外されることを確かめるテストが実際になく、テスト不足だけを指摘している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が箇所・原因・影響とも埋め込み欠陥と一致し、再現も示している。"
+ }
+}

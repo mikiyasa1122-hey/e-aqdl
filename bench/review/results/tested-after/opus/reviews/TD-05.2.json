@@ -1,0 +1,49 @@
+{
+ "case": "TD-05",
+ "rep": 2,
+ "sec": 85.6,
+ "exit": 0,
+ "cost_usd": 0.5250708000000001,
+ "num_turns": 9,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 16,
+  "cache_creation_input_tokens": 36018,
+  "cache_read_input_tokens": 345314,
+  "output_tokens": 8390,
+  "output_tokens_details": {
+   "thinking_tokens": 2775
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 36018,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3682,
+    "cache_read_input_tokens": 61383,
+    "cache_creation_input_tokens": 2042,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2042
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 78281336\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1（notes/service.py `search_notes` 151〜167行） / 対応区分: 修正必須 / 内容: 検索の SQL の条件が `org_id = ?` と LIKE だけで、`(private = 0 OR owner_id = ?)` がありません。このため、同じ組織の他人の非公開メモが検索結果に入ります。仕様 R3 の「他人の非公開メモは含めない」に違反しています / 成立条件: 同じ組織の別の利用者（一般の利用者でも管理者でも）が、非公開メモの題名か本文に含まれる語で search_notes を呼んだとき。タグを指定しても絞り込みは OR で足されるだけなので、同じように漏れます / 影響: 非公開メモの id と題名が作成者以外に漏れます。本文の語でも当たるため、本文の内容があるかどうかを推測できます。get_note・list_notes では NotFound や件数から除外されているのに、検索の経路だけ R2 の「存在を明かさない」が破れています（K1） / 確認した保証: 上流に可視性を絞る層はありません（search_notes は利用者の dict と q をそのまま SQL に渡しています）。設計では認可を `_visible` にまとめるとしていますが、検索では使われていません。既存のテスト SearchTest は bob の非公開メモ「secret 100%」を用意しているものの、alice の検索語（\"done\"・\"name\"・\"o\"・\"e\"・\"' OR 1=1 --\"・\"x\"+tag a）がどれもこのメモに当たらないため、漏れを検出できません / 根拠: スクラッチの確認スクリプトで、bob が非公開で作った「bob secret plan」に対し、alice の `search_notes(c, alice, \"secret\")` が `[{'id': 1, 'title': 'bob secret plan'}]` を返しました。本文の語 \"confidential\" にタグ x を付けた検索でも、管理者の検索でも同じく返りました。一方、同じメモへの get_note は NotFound、list_notes の total は 0 でした / 提案: search_notes の WHERE に `AND (private = 0 OR owner_id = ?)` を加え、user[\"id\"] をプレースホルダーで渡す（list_notes と同じ条件）。あわせて、同じ組織の他人（一般の利用者と管理者）が、非公開メモの題名・本文に当たる語で検索しても結果に入らず、作成者本人では入ることを確かめるテストを追加する（条件を外すと失敗するもの）\n- [軽微1] 区分: 実装 / 対象: R4（notes/service.py `update_note` 189・197行） / 対応区分: 改善提案 / 内容: version の型を検査していません。コードを読んだうえでの推定で、実行はしていません: 文字列 \"1\" を渡すと、SQLite の INTEGER 型への変換で WHERE が一致してコミットされ、その後 `version + 1` で TypeError になります。更新は成功しているのに、呼び出し側には例外が返ります。仕様に version の型の規定はありません / 提案: 関数の入口で bool ではない int であることを確かめ、違えば ValidationError にする\n- [軽微2] 区分: 実装 / 対象: R8（notes/share.py 11・33行） / 対応区分: 改善提案 / 内容: 先頭に 0 を付けた \"007.<期限>.<署名>\" も、\"7.<期限>.<署名>\" と同じ値に解釈されて通ります。署名は解釈した後の値に結び付いているため、別のメモへのなりすましにはなりません。ただし、1つの値に対して見た目の違うリンクが複数作れます / 提案: 正規化した形（先頭の0を許さない）だけを受け付ける\n- [軽微3] 区分: 設計 / 対象: R1〜R10（trace の impl-map） / 対応区分: 改善提案 / 内容: impl-map がすべて `notes/__init__.py`（空のファイル）を指していて、設計の対応（service.py・ratelimit.py・share.py）と合っていません。トレーサビリティの記録として不正確です / 提案: impl-map を実際のファイルに直す\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界値（100/101文字、10000/10001文字、20/21文字、末尾の改行、型の違う値）、重複を数えることと保存時に除くこと、文字列のタグの拒否、途中の失敗で notes・note_tags・audit の3つとも0件になることを確かめており、妥当です。\n- AC2: 他の組織・他人の非公開・存在しないメモがすべて NotFound になること、確かめた後に非公開にされたケース、閲覧数（割り込み・4スレッド×10回で40）を確かめており、妥当です。\n- AC3: 一覧の範囲・並び順・ページ・入力の拒否（bool・float・文字列）は妥当です。検索については、% と _ をただの文字として扱うことと、SQL の文字列が値として扱われることは確かめています。しかし「他人の非公開メモを含めない」を確かめる入力がなく、テストが空洞化しています。その結果、実装の欠陥（重大1）を見逃しています。不十分です。\n- AC4: 作成者・管理者・他人・他の組織、非公開は作成者だけ、古い version での Conflict、読み出しと書き込みの間の更新、移管後の認可の再判定、更新時の入力検証、削除途中の失敗での巻き戻しを確かめており、妥当です。\n- AC5: 管理者だけ・同じ組織だけの4通り、途中の失敗で元のままになること、非公開のメモも移ることを確かめており、妥当です。\n- AC6: 末尾4文字以外を伏せること、7文字・8文字・空の鍵の境界、管理者だけ・自分の組織だけを確かめており、妥当です。\n- AC7: 枠の境界（159.999 秒と 160 秒）、拒否された呼び出しで枠が延びないこと、20スレッドを Barrier で同時に呼ぶこと、hook による判定中の割り込みを確かめており、妥当です。\n- AC8: 期限ちょうどで無効になること、note_id・期限・署名の改ざん、別の秘密鍵、形の崩れたリンク（大文字・改行・全角数字・指数表記・型の違う値）を確かめており、妥当です。\n- AC9: ログ・例外のメッセージ・監査ログの出力に、本文・署名・秘密鍵・api_key が出ないことを確かめており、妥当です。\n- AC10: Conflict・ValidationError・注入した例外・外部キー違反・自動でロールバックされた後のそれぞれで、in_transaction が False に戻り、次の操作ができることを確かめており、妥当です。\n- K1: get_note・list_notes・update_note・delete_note については妥当です。search_notes については検証が空洞化しており、実際に漏えいしています（重大1）。\n- K2: プレースホルダーと LIKE の ESCAPE を、% ・ _ ・バックスラッシュで確かめました（私の追加の確認でも正しく動きました）。妥当です。\n- K3・K4・K6・K7・K8: それぞれ上の AC で確かめられており、妥当です。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは見つかりませんでした）。\n### E2E の要否\n- 不要です（HTTP・UI は仕様の対象外のライブラリで、単体テストで公開関数を直接確かめられるため）。\n### 不足しているリスク\n- K1: 検索の経路で、同じ組織の他人の非公開メモが除外されることの検証がありません（重大1と同じ根本原因）\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py をすべて読み、仕様の各要求とコードの経路を突き合わせました\n- `python3 -m unittest discover -s tests -t .`（バイトコードは書き出さない設定）→ 61件すべて合格。gate のログ（20261111-085628-check-unit.log）でも61件合格でした\n- スクラッチの確認スクリプト probe.py: 同じ組織の他人の非公開メモが search_notes で返ることを確認しました（一般の利用者・管理者・タグ付きのどれでも）。同じメモが get_note では NotFound、list_notes では除外されることも確認しました\n- スクラッチの確認スクリプト probe2.py: 検索語 `%`・`_`・`\\`・`50%`・`a_b` が、それぞれその文字を含むメモにだけ一致することを確認しました（ESCAPE が正しく適用されている）\n- `$AQ trace`: すべての要求に検証が結び付いていました。反証テストは無効です\n- `$AQ history --since 0`: 検証条件・チェックは追加だけで、弱めた変更や削除はありませんでした。git は main で初期コミットだけで、notes/・tests/ は未追跡のため、差分による改ざんの確認は該当しません\n- コードを読んで確かめた範囲: transaction() のロールバックと例外の伝わり方、閲覧数の原子的な加算、update_note の version 条件と rowcount、トランザクションの中での認可の再判定、delete・transfer の WHERE とトランザクションの範囲、RateLimiter のロックの範囲と枠の境界、share の fullmatch・compare_digest・期限の比較、export_audit の伏せ方と組織での絞り込み",
+ "files_changed": [],
+ "valid": true
+}

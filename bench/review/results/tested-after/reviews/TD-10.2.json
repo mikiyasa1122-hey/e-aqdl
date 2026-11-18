@@ -1,0 +1,49 @@
+{
+ "case": "TD-10",
+ "rep": 2,
+ "sec": 30.2,
+ "exit": 0,
+ "cost_usd": 0.1303704,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20117,
+  "cache_read_input_tokens": 126564,
+  "output_tokens": 3723,
+  "output_tokens_details": {
+   "thinking_tokens": 1253
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20117,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1906,
+    "cache_read_input_tokens": 39207,
+    "cache_creation_input_tokens": 8376,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 8376
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 68583c30\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `verify_link` は、先頭が 0 の note_id（例 `007.<期限>.<署名>`）を `int()` で 7 に直して署名を検証する。そのため、同じ署名で別の文字列のリンクが有効になる。仕様の「10進の数字だけ」は満たしており、権限の拡大にもならない。 / 提案: 正規形（`str(int(x)) == x`）だけを受け付けると、リンクの形が一意になる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は、題名・本文・タグの境界値、tags が文字列の場合、タグ作成途中の失敗（`create:tags` に hook で例外を起こす）で何も残らないことを確かめている。妥当。コードでも `create_note` が 1 つのトランザクション内で note・tags・audit を書くことを確認した。\n- AC2: V2 / VK1 は、他組織・他人の非公開・存在しないメモがすべて NotFound になることと、閲覧数が数え漏れなく増えることを確かめている。妥当。コードでは `UPDATE views = views + 1` が BEGIN IMMEDIATE の内側で行われ、トランザクション内で可視性を再判定している。\n- AC3: V3 / VK2 は、一覧の範囲外の値（bool・文字列・float・巨大な page）、検索語の `%` と `_`、SQL 文字列、タグの OR、範囲外のタグを確かめている。妥当。コードでは LIKE に ESCAPE 句があり、`\\` `%` `_` をエスケープしている。title と body の両方に同じ pattern を渡し、値はすべてプレースホルダーで渡している。`ORDER BY` はホワイトリストの辞書から選んでいる。\n- AC4: V4 / VK3 は、Forbidden と NotFound の区別、version の競合、判定後に他の更新や移管が入る場合、削除途中の失敗を確かめている。妥当。コードでは認可と検証を書き込みと同じトランザクション内で再判定し、`UPDATE ... WHERE version = ?` の rowcount で競合を判定している。\n- AC5: V5 / VK6 は、管理者以外・他組織・途中の失敗で元のままになることを確かめている。妥当。\n- AC6: V6 / VK7 は、api_key の伏せ字を確かめている。コードも妥当（8 文字未満は全て伏せ、8 文字以上は末尾 4 文字だけ残す）。\n- AC7: V7 は、枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、20 スレッドの同時呼び出し、ロック内の hook による順序の再現を確かめている。妥当。sleep に頼らず Barrier と Event を使っている。\n- AC8: V8 / VK8 は、期限の境界、改ざん、形の崩れたリンクを確かめている。妥当。コードでは `fullmatch` と `compare_digest` を使い、期限の時刻ちょうど以降は無効にしている。\n- AC9: V9 / VK5 は、ログと例外に本文・署名・api_key が出ないことを確かめている。妥当。コードでもログには ID だけを出している。\n- AC10: V10 は、例外の後に接続が使えることを確かめている。妥当。`_rollback` は `in_transaction` を確認し、ROLLBACK の失敗で元の例外を隠さない。\n- エンジンが検出したテストの兆候（skip・`.only`・アサーションなし）: なし。\n- 検証条件の改ざん・弱体化: `history` に check の追加と bind だけがあり、弱める変更はない。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite と複数スレッドの挙動は単体テストで直接確かめられている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様・設計と `notes/*.py` 全体を読み、利用者の入力から SQL・認可・トランザクションまでの経路をたどった。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。62 件がすべて OK。\n- `$AQ history --since 0` と `$AQ trace` を確認した。テストや検証条件を弱める変更はなく、すべての要求に検証が対応している。\n- 反証テストは無効のため、通常の合格が欠陥検出の証明にならない点を踏まえ、実装を仕様と突き合わせて読んだ。",
+ "files_changed": [],
+ "valid": true
+}

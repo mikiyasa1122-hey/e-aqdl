@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 1,
+ "sec": 80.1,
+ "exit": 0,
+ "cost_usd": 0.5067699999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 37757,
+  "cache_read_input_tokens": 270590,
+  "output_tokens": 7527,
+  "output_tokens_details": {
+   "thinking_tokens": 2555
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 37757,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3328,
+    "cache_read_input_tokens": 56775,
+    "cache_creation_input_tokens": 1562,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1562
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1, K3 / 対応区分: 修正必須 / 内容: `update_note` では、認可（`_check_modify`）をトランザクションの外で古い行に対して1回行うだけです。トランザクションの中で読み直した行（`row`）に対しては、認可も存在の確認もしていません。286行目のコメントには「読み直した行で行う」とありますが、実際の処理はそうなっていません。このため次の2つが起きます。(a) 判定と書き込みの間に、管理者の移管で所有者が変わっても、元の所有者のまま更新できてしまう（非公開のメモでも同じ）。(b) 判定と書き込みの間にメモが削除されると、`row[\"title\"]` が `TypeError: 'NoneType' object is not subscriptable` になる。本来は NotFound か Conflict であるべきです / 成立条件: (a) メンバー A が自分のメモの更新を呼び、事前の判定を通った後に、管理者が `transfer_notes(A→B)` をコミットする。このとき A が移管後の version（version は連番の整数で推測できる。また、既存のテスト `test_unchanged_fields_come_from_the_latest_row` は、呼び出し側が最新の version を渡す使い方を前提にしている）を渡している。(b) 事前の判定と BEGIN IMMEDIATE の間に、別の接続がそのメモを削除する / 影響: (a) 仕様 R4「できるのは作成者と同じ組織の管理者だけ。非公開は作成者だけ」に反します。元の所有者が、他人（B）の非公開メモを書き換えられます（認可の欠陥、K1）。(b) 仕様が決めていない種類の例外が呼び出し側に漏れます / 確認した保証: 移管は version を +1 するので、古い version を渡した場合だけは Conflict で防げます。しかし UPDATE の WHERE は `id AND version` だけで、owner_id・org_id・private を見ていないので、version が一致すれば防げません。BEGIN IMMEDIATE で直列化されるのは書き込み同士だけで、事前の判定は対象外です。上流（呼び出し側）が所有者を保証する仕組みもありません / 根拠: notes/service.py:283（トランザクションの外の判定）、287〜292（読み直した後に判定がなく、そのまま UPDATE）。hooks.before_write(\"update\") で移管を差し込んで再現しました。結果は `update -> 3`、DB は `{'owner_id': 2, 'private': 1, 'body': 'overwritten', 'version': 3}` で、A は同じメモを get_note すると NotFound です。削除を差し込むと `TypeError 'NoneType' object is not subscriptable` になりました / 提案: 287行目の `row = _row(conn, note_id)` の直後に `_check_modify(user, row, note_id, \"更新\")` を呼ぶ（行が None なら NotFound、所有者が変わっていれば Forbidden になる）。delete_note と同じ形です\n- [重大2] 区分: テスト / 対象: AC4, K1, K3 / 対応区分: 証拠不足 / 内容: 更新で、判定の後に移管・削除が入る場合のテストがありません。削除には `test_permission_is_checked_inside_the_delete` がありますが、それも移管の後に呼ぶ順の確認で、判定と書き込みの間に割り込ませてはいません。更新の並行テストは、他の更新が割り込む場合（version の競合）だけです / 根拠: K1（漏えい・権限のない操作）と K3（同時の更新）は重要なリスクです。[重大1] は既存の 62 件がすべて合格したまま残っています。認可をトランザクションの中で確かめていることを外しても失敗するテストがなく、security と database の検証条件を満たしていません / 提案: `hooks.before_write(\"update\")` で `transfer_notes` と `delete_note` を差し込むテストを追加する。移管なら Forbidden（非公開なら NotFound）になり本文が変わらないこと、削除なら NotFound（または Conflict）になり、どちらでも `in_transaction` が False であることを確かめる\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `list_notes` の sort にリストなどハッシュできない値を渡すと、`sort not in SORT_COLUMNS` で ValidationError ではなく TypeError になります（実行して確認済み）。仕様の「範囲外」は値の範囲を指していると読めるので、改善提案にとどめます / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS` にする\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグの境界、重複を数えること、文字列の tags を拒否すること、途中の失敗（create:tags）でメモ・タグ・監査ログが0件になることを確かめており、妥当です\n- AC2: 見えないメモの3種類がすべて NotFound になること、NotFound のときに閲覧数が増えないこと、判定の後に非公開へ変えた場合、ファイル DB に4スレッドから40回閲覧して数え漏れがないことを確かめており、妥当です\n- AC3: 範囲・型・真偽値・巨大な page の扱い、% `_` `\\` を普通の文字として探すこと、タグの OR、範囲外の拒否、SQL の文字列が値として扱われることを確かめており、妥当です（実装もプレースホルダーと ESCAPE '\\' を、題名・本文の両方に適用しているのを確認しました）\n- AC4: 権限・非公開・古い version・更新同士の割り込み・削除の巻き戻しは確かめています。しかし、更新での判定の後の移管・削除を確かめていないので不十分です（[重大2]）。実装にも欠陥があります（[重大1]）\n- AC5: 管理者だけであること、4通りの組織の組み合わせ、途中の失敗で元のままになること、version の加算を確かめており、妥当です\n- AC6: 末尾4文字以外を伏せること、8文字未満と空の鍵、管理者だけ・自分の組織だけであることを確かめており、妥当です\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier で20スレッドを同時に呼んで5回だけ通ること、hook でロックの中の判定に割り込んでも直列化されることを確かめており、妥当です\n- AC8: 期限ちょうどが無効になること、改ざん3種類と別の秘密鍵、形の崩れた16種類（改行・大文字・全角数字・型違いを含む）を確かめており、妥当です\n- AC9: ログ・例外のメッセージ・監査ログに本文・署名・api_key が出ないことを確かめており、妥当です\n- AC10: 失敗の種類ごとに in_transaction が False になること、IntegrityError、ROLLBACK 自体が失敗しても元の例外が隠れないことを確かめており、妥当です。ただし [重大1](b) の TypeError の経路は未確認です（ロールバックはされることを実行で確認しました）\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは見つかりませんでした）\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、公開している関数を実際の SQLite（メモリとファイル）に対して呼ぶテストが、利用の経路をそのまま確かめているためです\n### 不足しているリスク\n- K1/K3: 更新での判定の後の移管・削除（[重大1]・[重大2]）\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（バイトコードは一時フォルダへ出力）: 62件すべて合格。gate のログ 20261111-085409-check-unit.log も 62件 OK\n- hooks で再現するスクリプトを実行した: 判定の後に移管すると、元の所有者が非公開メモの本文を書き換えられる。判定の後に削除すると TypeError。どちらもその後の in_transaction は False。sort=[\"x\"] は TypeError\n- `$AQ trace`: R1〜R10 と AC・K のすべてが check unit に結び付いている。`$AQ history --since 0`: 検証の削除・弱体化はない（追加と紐付けだけ）\n- コードを読んで確かめたこと: SQL はすべてプレースホルダー。f-string で埋め込んでいるのは固定の where 句・SORT_COLUMNS の値・`?` の列だけ。LIKE は `\\` → `%` → `_` の順でエスケープし、題名・本文の両方に ESCAPE を付けている。閲覧数は `views = views + 1` で原子的に増え、NotFound のときは巻き戻る。delete と transfer はトランザクションの中で判定・取得している。RateLimiter はロックの中で判定し、時刻を取得している。共有リンクは fullmatch・期限・compare_digest の順に確かめ、例外は Forbidden に統一されている。export_audit で鍵を伏せる処理は、8文字未満と8文字以上で分かれている",
+ "files_changed": [],
+ "valid": true
+}

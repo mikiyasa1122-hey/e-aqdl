@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 2,
+ "sec": 92.5,
+ "exit": 0,
+ "cost_usd": 0.553816,
+ "num_turns": 8,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 39023,
+  "cache_read_input_tokens": 308380,
+  "output_tokens": 8995,
+  "output_tokens_details": {
+   "thinking_tokens": 3718
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 39023,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3402,
+    "cache_read_input_tokens": 64396,
+    "cache_creation_input_tokens": 2059,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2059
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1, K3, notes/service.py update_note（179〜186行） / 対応区分: 修正必須 / 内容: update_note では、認可と存在の判定（`_check_modify`）をトランザクションの外で1回だけ行っている。トランザクションの中では行を読み直すが、その行に対して認可も存在も確かめていない。183行のコメント「認可と入力の検証は…読み直した行で行う」と食い違っており、delete_note（トランザクションの中で `_check_modify` を呼ぶ）とも作りが揃っていない。 / 成立条件: (a) 179行の判定の後、BEGIN IMMEDIATE より前に、管理者が transfer_notes で所有者を移す。元の所有者（作成者ではなくなった一般の利用者）は、移管後の version（+1 されるので予測できる）を渡す。非公開メモなら NotFound にすべき相手にあたる。(b) 同じ隙間で、メモが削除される。 / 影響: (a) 作成者でも管理者でもない利用者が、他人のメモを更新できる。R4「できるのは作成者と、同じ組織の管理者だけ」に反する認可の抜けで、非公開メモでも起きる。(b) 183〜184行で `row` が None のまま `row[\"title\"]` を読み、TypeError になる。仕様で決まった例外（NotFound または Conflict）にならない。ロールバックはされるので、データは壊れない。 / 確認した保証: version の条件（WHERE version = ?）は、古い version を渡した呼び出しは止める。しかし移管後の version を渡す呼び出しは止められない。上流の検証はない（仕様で、利用者の dict はそのまま信用する）。既存のテスト test_permission_is_checked_inside_the_delete は削除だけを確かめており、更新についてのテストはない。 / 根拠: hooks.before_write(\"update\") に移管・削除を差し込む再現スクリプトを一時フォルダで実行した。(a) alice が `update_note(c, alice, nid, 2, body=\"by-a\")` を呼ぶと 3 が返り、DB は owner_id=2（bob）、body='by-a' になった。(b) `TypeError 'NoneType' object is not subscriptable` が出た（in_transaction=False）。 / 提案: トランザクションの中で読み直した `row` に対して `_check_modify(user, row, note_id, \"更新\")` を呼ぶ。これで None なら NotFound、権限がなければ Forbidden になる。あわせて、hooks を使って「判定の後に移管されたら Forbidden」「判定の後に削除されたら NotFound」になることを確かめるテストを足す。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py LINK_RE / 対応区分: 改善提案 / 内容: note_id と期限に先頭の0があっても受け付ける（例: `07.1060.<署名>` は `7.1060.<署名>` と同じ扱いになる）。署名の対象になる値は同じなので、期限の延長やほかのメモへのすり替えはできない。ただし、正しい形のリンクが1つに決まらない。 / 提案: 正規表現を `(0|[1-9][0-9]{0,17})` にして、正規の形だけを受け付ける。\n- [軽微2] 区分: 設計 / 対象: R1〜R10 の impl-map / 対応区分: 改善提案 / 内容: trace では、すべての要求の実装ファイルが中身の空な notes/__init__.py になっている。実際の実装は service.py・ratelimit.py・share.py にある。 / 提案: impl-map を設計の「要求との対応」に合わせて直す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当と判断した。題名・本文・タグの境界値を確かめている（101文字、空白だけ、改行を含むタグ、型の違う値、文字列そのもの、重複を数えること）。途中の失敗（hooks の create:tags）で3つの表も空のままであることも、件数で確かめている。\n- AC2: V2 はおおむね妥当と判断した。NotFound の4通り（他の組織・他の組織の管理者・他人の非公開・存在しない）と、判定の後に非公開になった場合を確かめている。閲覧数は、割り込みと、4スレッドが別々の接続でファイルの DB を使う場合（40回）を確かめている。\n- AC3: V3 は妥当と判断した。範囲（他の組織・他人の非公開・管理者）、並び順、ページ、巨大な page、型の違う引数（bool・str・float）、% と _ とバックスラッシュの扱い、タグの OR、SQL を含む文字列、タグの検査を確かめている。\n- AC4: V4 は不十分と判断した。古い version・読み出しと書き込みの間に他の更新が入る場合・権限・非公開・入力検証・ロールバックは確かめている。しかし、更新の判定の後に移管や削除が入る場合を確かめていない（[重大1]）。削除側の再判定にはテストがある。\n- AC5: V5 は妥当と判断した。管理者だけであること、組織の4通りの組み合わせ、途中の失敗で何も移らないこと、非公開メモも移ること、version が増えることを確かめている。\n- AC6: V6 は妥当と判断した。末尾4文字を残すこと、7文字・8文字・空の鍵、管理者だけであること、組織での絞り込みを確かめている。\n- AC7: V7 は妥当と判断した。枠の境界（159.999 と 160.0）を偽の時計で決定的に確かめている。同時の呼び出しも、Barrier で20スレッドを揃え、5回ちょうどになることを確かめている。hook のテストは wait(0.5) に頼っているが、ロックで直列になることを示している。\n- AC8: V8 は妥当と判断した。期限ちょうどが無効になること、3通りの改ざん、別の秘密鍵、多数の形の崩れ（改行・大文字・全角の数字・型の違う値）を確かめている。\n- AC9: V9 は妥当と判断した。ログ・例外のメッセージ・監査ログの出力に、本文・署名・秘密鍵・api_key が含まれないことを確かめている。\n- AC10: V10 は妥当と判断した。Conflict・ValidationError・注入した例外・外部キー違反・SQLite がすでにロールバックした後のそれぞれで、in_transaction が False に戻り、次の操作ができることを確かめている。\n- K1: 閲覧・一覧・検索・更新・削除・移管の範囲は確かめている。ただし、更新の判定の後に移管が入ると権限が抜ける（[重大1]）。\n- K2: プレースホルダーと LIKE の ESCAPE は、題名と本文の両方の条件に同じ pattern が渡っている。sort はホワイトリストの辞書で決まる。妥当と判断した。\n- K3: 閲覧数・楽観的ロック・回数の制限は確かめている。更新と削除が並んで起きる場合は [重大1] に含める。\n- K4・K5・K6・K7・K8: 上の各受け入れ条件のとおり妥当と判断した。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは見つからなかった。目で見ても同じ）。\n\n### E2E の要否\n- 不要。HTTP や画面のないライブラリで、ファイルの DB と別々の接続・スレッドを使う結合テストが、すでに単体テストの中にあるため。\n\n### 不足しているリスク\n- K1/K3: 更新の判定の後に、移管や削除が入る場合（[重大1]）。\n\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/*.py をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` を、pycache を一時フォルダに出して実行した。62件すべて OK。gate のログ（20261111-085409）も 62件 OK。\n- 一時フォルダの再現スクリプトで update_note の競合を確かめた。移管が入ると、元の所有者が更新できてしまった。削除が入ると TypeError になった。\n- `$AQ history --since 0`: 検証条件・チェックは追加だけで、削除や弱めた変更はなかった。`$AQ trace`: すべて合格（反証テストは無効）。\n- コードの経路でたどった範囲:\n  - get_note のトランザクションの中での再判定\n  - delete_note のトランザクションの中での認可\n  - transfer_notes の組織の条件とロールバック\n  - search_notes の LIKE のエスケープ（バックスラッシュも含む）と ESCAPE 句、タグの IN のプレースホルダー\n  - list_notes の bool・巨大な page の扱い\n  - export_audit の8文字の境界\n  - RateLimiter の `>=` の境界とロックの範囲\n  - verify_link の fullmatch・`>=` の期限・compare_digest\n  - transaction() の COMMIT の失敗と、ROLLBACK の失敗の扱い\n- `git status`: 作業ツリーは変えていない（notes/ と tests/ はまだ追跡されていない状態のまま）。",
+ "files_changed": [],
+ "valid": true
+}

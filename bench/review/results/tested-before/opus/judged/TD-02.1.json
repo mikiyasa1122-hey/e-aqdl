@@ -1,0 +1,33 @@
+{
+ "case": "TD-02",
+ "rep": 1,
+ "judge_cost_usd": 0.26097159999999997,
+ "judge_raw": "## 判定（TD-02）\n\n**[重大1] matches_defect（埋め込んだ欠陥そのもの）**\n- 箇所が一致しています。`notes/service.py` の `list_notes` です。報告の行番号（232〜248行）は実際の行（128〜144行）とずれていますが、指している関数と処理（`offset = (page - 1) * per_page` を LIMIT/OFFSET に渡すところ）は同じです。\n- 原因が一致しています。`MAX_OFFSET` を定義しているのに使っておらず、offset が SQLite の整数の範囲を超えるかを確かめないまま SQL に渡しています。\n- 影響が一致しています。巨大な page を渡すと、ValidationError でも空の結果でもなく OverflowError が呼び出し側に出ます。報告では page=2\\*\\*62 などで実際に起きることも確かめています。\n- 重大度は「重大」とされ、正解の medium より重く付いていますが、分類には影響しません。\n\n**[軽微1] real_other（埋め込んだもの以外の実在する欠陥）**\n- `sort` に list を渡すと、dict に対する `in` がハッシュできない値で TypeError になります。これはコードどおり実際に起きます。\n- R3 は sort の範囲外を ValidationError にすると定めているので、軽微ですが仕様に反しています。\n\n**[軽微2] style（欠陥の主張ではない）**\n- 先頭に 0 が付いた note_id のリンクは、int に直すと元と同じ値になるので、同じ署名で通ります。この挙動は事実です。\n- ただし R8 は「10進の数字だけ」と定めているだけで、先頭の 0 を禁じていません。報告自身もセキュリティ上の影響はないと述べています。\n- 仕様違反とまでは言えず、正規の形だけを受け付けるようにする強化の提案にとどまります。\n\n**[軽微3] style（欠陥の主張ではない）**\n- テストは存在し、判定も決定論的です。\n- 指摘の中身は、0.5秒の待ちに頼っていることと意図が読み取りにくいことで、テストの書き方・保守性の提案です。テストの不足（test_gap）ではありません。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で offset が SQLite の整数の範囲を超えるかを確かめず（MAX_OFFSET を使っていない）、巨大な page で ValidationError でも空の結果でもなく OverflowError になるという、原因と影響の両方が正解と一致している。\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"sort にハッシュできない値を渡すと TypeError になり、R3 が求める ValidationError にならないという、実在する軽微な仕様違反である。\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"先頭に 0 が付いたリンクが通るのは事実だが、R8 は先頭の 0 を禁じておらずセキュリティ上の影響もないため、正規の形にそろえる強化の提案にとどまる。\"}, {\"label\": \"軽微3\", \"class\": \"style\", \"reason\": \"テストは存在し判定も決定論的で、時間待ちに頼る書き方の改善というテストの保守性の提案であり、テスト不足ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 は行番号がずれているが、関数・原因・影響が埋め込んだ欠陥と一致している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で offset が SQLite の整数の範囲を超えるかを確かめず（MAX_OFFSET を使っていない）、巨大な page で ValidationError でも空の結果でもなく OverflowError になるという、原因と影響の両方が正解と一致している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "sort にハッシュできない値を渡すと TypeError になり、R3 が求める ValidationError にならないという、実在する軽微な仕様違反である。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "先頭に 0 が付いたリンクが通るのは事実だが、R8 は先頭の 0 を禁じておらずセキュリティ上の影響もないため、正規の形にそろえる強化の提案にとどまる。"
+   },
+   {
+    "label": "軽微3",
+    "class": "style",
+    "reason": "テストは存在し判定も決定論的で、時間待ちに頼る書き方の改善というテストの保守性の提案であり、テスト不足ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 は行番号がずれているが、関数・原因・影響が埋め込んだ欠陥と一致している。"
+ }
+}

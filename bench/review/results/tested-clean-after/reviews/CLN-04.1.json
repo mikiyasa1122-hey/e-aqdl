@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 1,
+ "sec": 36.8,
+ "exit": 0,
+ "cost_usd": 0.1829459,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 30907,
+  "cache_read_input_tokens": 167779,
+  "output_tokens": 4252,
+  "output_tokens_details": {
+   "thinking_tokens": 1851
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 30907,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1722,
+    "cache_read_input_tokens": 49607,
+    "cache_creation_input_tokens": 1929,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1929
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: notes/share.py の verify_link は、先頭にゼロを付けた note_id・期限（例: `007.123.sig`）を、署名の計算前に int に変換して `7:123` として検証する。そのため、同じ署名で表記違いのリンクが複数通る。仕様は「10進の数字だけ」としか決めておらず、仕様違反ではない。 / 提案: 署名の対象を文字列のまま扱うか、先頭ゼロを拒否する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当。tests/test_ac1_create.py は、題名・本文・タグの境界値、タグの型違い（文字列そのもの、末尾の改行）、途中の失敗（hook `create:tags`）での巻き戻しを確かめている。実装 notes/service.py:79-94 とも一致する。\n- AC2: V2 は妥当。見えない場合（他組織・他人の非公開・存在しない）がすべて NotFound になることを確かめている。割り込みの閲覧が数え漏れしないこと（hook）と、複数スレッド・別接続・ファイルDB での 4×10 回の閲覧が 40 になることも確かめている。\n- AC3: V3 は妥当。範囲外・型違い（bool・float・文字列）・巨大な page、`%` `_` `\\` のリテラル検索、タグの OR 絞り込み、SQL 文字列の値扱い、他組織・他人の非公開の除外を確かめている。実装は ESCAPE 句、プレースホルダー、題名・本文の両方への同じパターンの適用を確認した（service.py:134-153）。\n- AC4: V4 は妥当。読み出しと書き込みの間の更新で Conflict になること、最新の version を渡しても先の更新を消さないこと、判定後の移管で Forbidden になること、削除途中の失敗の巻き戻し、非公開メモの NotFound を確かめている。実装の認可と検証は、`BEGIN IMMEDIATE` の中で読み直した行に対して行っている。\n- AC5: V5 は、移管の対象が組織内に限られること、途中の失敗（hook `transfer:N`）で元のままになることを確かめており、実装（service.py:196-209）とも一致する。\n- AC6: V6 は、8 文字未満をすべて伏せること、末尾 4 文字だけを残すこと、管理者以外の拒否を確かめており、実装と一致する。\n- AC7: V7 は妥当。clock を差し替えて枠の境界（159.999 と 160.0）を確かめ、拒否された呼び出しで枠が延びないことも確かめている。複数スレッドの同時呼び出しと、hook による割り込みも確かめている。実装は lock の中で判定と更新を行っている。\n- AC8: V8 は、期限ちょうどでの無効、改ざん、形の崩れたリンク（fullmatch）を確かめている。\n- AC9: V9 は、ログと例外メッセージに本文・署名・api_key・secret が出ないことを確かめている。\n- AC10: V10 は、例外の後も接続を使い続けられることを確かめている。\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなし）。`history --since 0` で検証条件の弱体化は見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のない Python ライブラリで、SQLite は実物（メモリとファイル）を使うテストで確かめており、リスクに見合っている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- notes/*.py の全ソースを、仕様 R1〜R10 と設計書の記述（認可の関数、プレースホルダー、ESCAPE）に照らして通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件が OK だった（bytecode を書かない設定で、リポジトリは変更していない）。\n- `aqdlc trace` と `history --since 0` を確認した。全 AC・K の検証が unit に結び付いており、検証条件の改変はなかった。\n- 確かめていない入力・順序の経路もコードでたどった。判定後の削除（update は NotFound、delete は `_check_modify` で NotFound）、transaction 内の例外（BaseException を含む）での ROLLBACK、`BEGIN IMMEDIATE` の失敗、巨大な page、タグが文字列そのもののとき。いずれも仕様どおりだった。\n- 軽微な点として、list_notes の COUNT と SELECT が別々のトランザクションにある。仕様に規定はないため指摘にはしていない。",
+ "files_changed": [],
+ "valid": true
+}

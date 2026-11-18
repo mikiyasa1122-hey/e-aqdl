@@ -1,0 +1,49 @@
+{
+ "case": "TD-09",
+ "rep": 2,
+ "sec": 26.4,
+ "exit": 0,
+ "cost_usd": 0.08950880000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 11951,
+  "cache_read_input_tokens": 122588,
+  "output_tokens": 2943,
+  "output_tokens_details": {
+   "thinking_tokens": 632
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 11951,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2020,
+    "cache_read_input_tokens": 37345,
+    "cache_creation_input_tokens": 1516,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1516
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード aa33286e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R5, AC5, K4, K6（`notes/service.py` の `transfer_notes`、138〜144行付近） / 対応区分: 修正必須 / 内容: 移管がメモ1件ごとに別のトランザクションで UPDATE している（`for i in ids: with transaction(conn): ...`）。監査ログの記録もさらに別のトランザクションにある。仕様 R5 は「全部移すか、何も移さないか（途中で失敗したら元のまま）」と定めており、これを満たしていない。 / 成立条件: 移すメモが2件以上あり、2件目以降の UPDATE か監査ログの INSERT で例外が起きる場合。例は DB エラー、ロック待ちの5秒超過、プロセスの中断、`hooks.before_write(\"transfer:<id>\")` で例外を出す場合。 / 影響: 1件目以降が移管済みのまま例外が伝わり、「一部だけ移る」状態が残る。これはリスク K6 そのもの。移管済みの分は version も増えている。監査ログの INSERT だけが失敗した場合は、全件が移管済みなのに記録が残らない。 / 確認した保証: `transaction()` は呼び出しごとに BEGIN IMMEDIATE〜COMMIT で完結する。外側で全体を囲むトランザクションはない。ids の取得もトランザクションの外にあり、取得後に追加されたメモは移らない（これも漏れになりうる）。DB の制約でも防げない。`tests/test_ac5_transfer.py` にも失敗時の巻き戻しを確かめるテストはなく、これは防げていない（`hooks.before_write(\"transfer:…\")` は設計書のテスト方針が想定する差し込み口なのに使われていない）。 / 根拠: `notes/service.py` の `transfer_notes` のコード経路。`python3 -m unittest` は 62 件すべて合格だが、AC5 の「失敗時に元のまま」を確かめるテストが存在しない。 / 提案: `transfer_notes` 全体を1つの `with transaction(conn):` にまとめる。トランザクション内で ids を取得し、UPDATE と監査ログの INSERT も同じトランザクションで行う。あわせてテストを追加する。例として `service.hooks.before_write` を2件目の `transfer:<id>` で例外にし、例外が伝わること、全メモの owner_id と version が元のままであること、監査ログが増えていないことを確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証と作成を確かめるテストあり。`hooks.before_write(\"create:tags\")` でタグ挿入時の失敗を再現しており、巻き戻しの確認として妥当。\n- AC2: 非公開・他組織・存在しないメモの NotFound と閲覧数を確かめている。コードも、更新後に可視性を再確認して失敗なら巻き戻す作りで妥当。\n- AC3: LIKE の ESCAPE、プレースホルダー、ページ・並び順の範囲外、タグの OR をコードで確認した。テストも対応しており妥当。\n- AC4: 認可は `_check_modify` で、トランザクション内でも読み直している。version 条件付き UPDATE の rowcount で Conflict を判定しており、テストもあり妥当。\n- AC5: **不十分**。正常系・管理者以外・組織またぎのテストはあるが、途中失敗で元のままという主要な規則のテストがない。実装もこれを満たしていない（重大1）。\n- AC6: 8文字未満の鍵をすべて伏せる、末尾4文字だけ残す、の実装を確認した。テストあり。\n- AC7: ロック内で判定する実装。`RateLimiter.hook` による決定論的な並行テストと、枠の境界のテストがあり妥当。\n- AC8: fullmatch の正規表現、`>=` による期限判定、`compare_digest` を確認した。テストあり。\n- AC9: ログと例外に本文・署名・api_key が出ていないことをコードで確認した（ログには ID だけ）。テストあり。\n- AC10: `transaction()` の ROLLBACK 後に接続を再利用できることを確認した。テストあり。\n- エンジンが検出したテストの兆候はなし（skip・`.only`・アサーションなしのファイルは見つからなかった）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest が DB と並行実行を直接確かめられるため。\n### 不足しているリスク\n- K4/K6（R5）: 移管の途中失敗で一部だけ移る状態を確かめる検証が未実施（重大1）。\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py` を全文読んだ。\n- `python3 -m unittest discover -s . -t .`: 62 件すべて合格。\n- `tests/test_ac5_transfer.py` に失敗時の巻き戻しのテストがないことを確認した。\n- `git status` で、`notes/`、`tests/` などが未追跡であることを確認した（比較できる以前のコミットはなく、テストの弱体化の差分はない）。\n- `history` と `trace` は実行していない。\n- 実装は変更していない。",
+ "files_changed": [],
+ "valid": true
+}

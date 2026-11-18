@@ -1,0 +1,23 @@
+{
+ "case": "TD-11",
+ "rep": 2,
+ "judge_cost_usd": 0.1110082,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: export_audit が `\"actor_key\": r[\"api_key\"]` で api_key を伏せずに返している点を指摘しています。埋め込んだ欠陥と同じ箇所で、原因（生の鍵をそのまま返す）も影響（管理者の出力に全利用者の鍵が出る）も一致します。\n- **重大2**: 欠陥のあるコードそのものではなく、test_ac6_audit.py が鍵のマスクを検証していない点を指摘しています。実際にそのテストには api_key のアサートがなく、指摘は正しいため test_gap です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"export_audit が api_key を伏せずそのまま返す点を、同じ箇所で原因・影響とも正しく指摘している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"AC6 のテストが api_key のマスクを検証していないというテスト不足の指摘で、実際にそのとおりである。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥（監査ログで api_key を伏せない）を正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "export_audit が api_key を伏せずそのまま返す点を、同じ箇所で原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "AC6 のテストが api_key のマスクを検証していないというテスト不足の指摘で、実際にそのとおりである。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥（監査ログで api_key を伏せない）を正確に捉えている。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-05",
+ "rep": 2,
+ "sec": 27.0,
+ "exit": 0,
+ "cost_usd": 0.0975725,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12824,
+  "cache_read_input_tokens": 126505,
+  "output_tokens": 3361,
+  "output_tokens_details": {
+   "thinking_tokens": 605
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12824,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1997,
+    "cache_read_input_tokens": 39177,
+    "cache_creation_input_tokens": 1105,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1105
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 78281336\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 / 対応区分: 修正必須 / 内容: `search_notes`（notes/service.py:151-167）が、同じ組織の他人の非公開メモを検索結果に含める。 / 成立条件: 同じ組織の利用者 A が非公開メモを作り、同じ組織の別の利用者 B が、その題名か本文に含まれる語で検索する。 / 影響: 他人の非公開メモの id と題名が漏れる。仕様 R3「他人の非公開メモは含めない」と R2 に反し、リスク K1 が実現する。 / 根拠: WHERE 句が `org_id = ?` と LIKE だけで、`list_notes` にある `(private = 0 OR owner_id = ?)` がない。再現した。メモ作成者 A（id=1）が題名 \"secret\"・非公開のメモを作り、B（id=2、同組織）が `search_notes(c, b, 'secret')` を呼ぶと `[{'id': 1, 'title': 'secret'}]` が返った。上流の認可や DB の制約は、この漏えいを防いでいない。 / 提案: 検索の SQL に `AND (private = 0 OR owner_id = ?)` を足し、引数に `user[\"id\"]` を渡す。\n- [重大2] 区分: テスト / 対象: AC3, K1 / 対応区分: 証拠不足 / 内容: 検索で他人の非公開メモが除外されることを確かめるテストがない。tests/test_ac3_list_search.py の `test_scope_excludes_other_org_and_others_private`（18-23行）は一覧だけを見ている。56行の \"secret 100%\" は非公開メモだが、別の利用者で検索して除外を確かめていない。そのため、全 61 件が合格しても [重大1] の漏えいを検出できなかった。 / 根拠: AC3 は検索結果の範囲も対象にしており、K1 は他人の非公開メモの漏えいを重要なリスクとしている。 / 提案: 同じ組織の別の利用者が検索した場合に、他人の非公開メモが含まれず、本人の検索では含まれるテストを足す。題名と本文の両方の一致、タグ絞り込みとの併用も確かめる。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `verify_link` は \"007.期限.署名\" のように先頭が 0 の note_id も受け付ける。`int()` で正規化した値で署名を検証するため、同じメモに対して複数の文字列表現が有効になる。仕様の形式（10進の数字だけ）には反しない。 / 提案: 必要なら、正規表現の `[0-9]{1,18}` を `0|[1-9][0-9]{0,17}` に絞る。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証の長さ・型・タグの規則と、`hooks.before_write(\"create:tags\")` による途中失敗のロールバックが確かめられており、妥当。\n- AC2: NotFound の統一と、並行で閲覧数を数え漏れしないことは、コードの経路（`BEGIN IMMEDIATE`、トランザクション内で `views + 1` を実行し、可視性を再確認）で妥当と読めた。\n- AC3: 一覧の範囲外の入力と LIKE のエスケープは妥当。検索の非公開除外は実装が誤っており、テストも欠けているため不十分（[重大1]・[重大2]）。\n- AC4: トランザクション内で行を読み直して認可と version を確かめる設計で、競合と途中失敗の経路は妥当。\n- AC5: 組織と管理者の検査と、一括のトランザクションが妥当。\n- AC6: 8文字未満は全部伏せ、それ以上は末尾4文字だけを残しており、妥当。\n- AC7: ロックの中で判定しており妥当。枠の境界は `>=` で、ちょうど window 秒たつと新しい枠になる。\n- AC8: 期限は `>=` で無効にする。正規表現は fullmatch で、署名の比較は `compare_digest`。妥当。\n- AC9: ログと例外に ID だけを出す実装で、妥当。\n- AC10: ROLLBACK を安全に行う実装（`_rollback`）で、妥当。\n- エンジンが検出したテストの兆候はなかった（skip・`.only`・アサーションなし）。テストの弱体化は確認していない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest の結合テストが SQLite を実際に使っている。\n\n### 不足しているリスク\n- K1（検索）: 実装の漏れとテストの不足が [重大1]・[重大2] にある。\n- 他のリスクは、読んだコードの範囲では未対策の穴を見つけていない。\n\n### 確認したこと\n- spec.md・design.md と notes/*.py の全ファイルを読み、仕様と突き合わせた。\n- `python3 -m unittest discover` を実行した。61 件すべて合格（OK）。\n- 非公開メモを検索で漏らす再現スクリプトをインメモリ DB で実行し、他人の非公開メモが返ることを確認した。\n- `git status` を確認した。コードはすべて未追跡で、変更の履歴は見ていない（`history` コマンドは実行していない）。",
+ "files_changed": [],
+ "valid": true
+}

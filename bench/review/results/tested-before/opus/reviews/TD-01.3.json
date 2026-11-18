@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 3,
+ "sec": 95.0,
+ "exit": 0,
+ "cost_usd": 0.5113326,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 37282,
+  "cache_read_input_tokens": 287403,
+  "output_tokens": 7777,
+  "output_tokens_details": {
+   "thinking_tokens": 3098
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 37282,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2964,
+    "cache_read_input_tokens": 61810,
+    "cache_creation_input_tokens": 2334,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2334
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K1, K3 / 対応区分: 修正必須 / 内容: `update_note` は、権限の確認（`_check_modify`）をトランザクションの前に1回だけ行います。トランザクションの中では行を読み直しますが、`_visible`・`_can_modify` を再び確かめず、行が消えている（None）場合も扱っていません。`notes/service.py:182` のコメントには「同じトランザクションの中で読み直した行で認可を行う」とありますが、実際のコードはそうなっていません。 / 成立条件: (a) 作成者 A が `update_note` を呼び、権限の確認が通った後、`BEGIN IMMEDIATE` の前に、管理者が A のメモを B に移管する（`transfer_notes` は version を +1 する）。このとき A が移管後の version（予測できる連番）を渡すと、UPDATE の条件 `version = ?` が一致して、A が他人（B）のメモを書き換えられる。(b) 権限の確認の後に、別の接続でメモが削除されると、`row[\"title\"]` で `TypeError` になる（NotFound にも Conflict にもならない）。 / 影響: (a) 権限のない利用者が更新できてしまう。移管の後に A が直接更新すると Forbidden になるので、競合のときだけ認可を抜けられる。(b) 呼び出し側が想定していない例外型が伝わり、R2・R4 の「存在しないメモは NotFound」に反する。 / 確認した保証: 移管による version の +1 で、古い version を渡した場合は Conflict になります。しかし version は呼び出し側の入力で、先回りした値を渡す使い方はテスト `test_unchanged_fields_come_from_the_latest_row` でも正当とされているため、防げません。`delete_note` はトランザクションの中で確認しているので正しい（`test_permission_is_checked_inside_the_delete`）。更新には同じ種類のテストがありません。 / 根拠: `notes/service.py:177-196`。scratchpad の再現スクリプトで、`hooks.before_write(\"update\")` のときに移管すると `update_note(alice, nid, 2)` が成功し、`(owner_id=2, body='alice-wrote-after-transfer', version=3)` になることを確かめました。同じ時点で削除すると `TypeError: 'NoneType' object is not subscriptable` になります（ロールバックはされ、`in_transaction=False`）。 / 提案: トランザクションの中で `row = _row(conn, note_id)` の直後に `_check_modify(user, row, note_id, \"更新\")` を呼ぶ。これで None は NotFound に、所有者の変更は Forbidden になる。あわせて、hook で移管・削除を差し込み、それぞれ Forbidden・NotFound になって本文が変わらないことを確かめるテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `verify_link` は note_id・期限を `int()` で変換してから署名を確かめます。このため、先頭に 0 を付けた `07.1060.<署名>` も `7.1060.<署名>` と同じ署名で通ります。同じメモ・同じ期限なので、権限を超えることはありませんが、リンクの表記が1つに決まりません。 / 提案: 署名の対象を受け取った文字列そのものにする。または、先頭の 0 を拒否する（`0|[1-9][0-9]{0,17}`）。\n- [軽微2] 区分: 設計 / 対象: R1〜R10 / 対応区分: 改善提案 / 内容: impl-map で、すべての要求が空の `notes/__init__.py` に対応付けられています。設計の対応は service.py・ratelimit.py・share.py で、追跡表が実装を正しく指していません。 / 提案: 設計の「要求との対応」どおりのファイルで impl-map を登録し直す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 境界値（題名 0・100・101 文字と空白だけ、本文 10000・10001 文字、タグ数の重複の数え方、タグの形式・改行、文字列で渡したタグ）と、途中の失敗で何も残らないこと（hook）を確かめています。妥当です。\n- AC2: 他の組織・他人の非公開・存在しないメモがどれも NotFound になること、確認の後に非公開になる競合、ファイル DB で4スレッドが同時に閲覧して views=40 になることを確かめています。妥当です。\n- AC3: 範囲・並び順・ページ送り・範囲外の拒否・% と _ と \\ の扱い・タグの OR・SQL の文字列を確かめています。妥当です。LIKE は `ESCAPE '\\'` と `_like_escape`（\\ を先にエスケープ）が、題名・本文の両方の条件に同じ値で適用されていることをコードで確かめました。\n- AC4: 権限・非公開・古い version・読み出しと書き込みの間の更新・入力の検証・削除の巻き戻しは確かめています。ただし、更新の判定の後に起きる移管・削除の競合のテストがなく、[重大1] の欠陥を見逃しています。この点で不十分です。\n- AC5: 管理者だけ・組織の組み合わせ4通り・途中の失敗で元のまま・version の +1 を確かめています。妥当です。\n- AC6: 末尾4文字・7文字・8文字・空の鍵を確かめています。妥当です。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドの Barrier、hook による決定論的なインターリーブを確かめています。妥当です。\n- AC8: 期限ちょうど、改ざん3種、鍵の違い、形の崩れた入力（大文字・改行・アラビア数字・型）を確かめています。妥当です（[軽微1] を除く）。\n- AC9: ログ・例外のメッセージ・監査の出力に、本文・署名・鍵・秘密の値が出ないことを確かめています。妥当です。\n- AC10: Conflict・ValidationError・注入した失敗・IntegrityError・ROLLBACK 済みの状態の後も、接続を使い続けられることを確かめています。妥当です。\n- エンジンが検出したテストの兆候: なし。私が読んだ範囲でも、skip・弱いアサーションは見つかりませんでした。\n\n### E2E の要否\n- 不要です。HTTP やブラウザのないライブラリで、unittest で実際の SQLite（メモリ上とファイル）を操作しており、リスクに見合っています。\n\n### 不足しているリスク\n- K1・K3: 更新の認可の判定と書き込みの間の競合（移管・削除）。検証がなく、実装にも欠陥があります（[重大1]）。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`（PYTHONDONTWRITEBYTECODE=1）: 62 件すべて OK。\n- 再現スクリプト `/tmp/claude-0/-tmp-claude-0-td-before-work-aqdlc-test-co1dziyr-app/8043bbb0-8674-4206-926a-e04212b5ae71/scratchpad/repro.py`: 判定の後に移管すると更新が成功し、判定の後に削除すると TypeError になることを確かめました。\n- `$AQ trace`: すべての要求・リスクが check の unit に対応付けられ、合格（反証テストは無効）。\n- `$AQ history --since 0`: 検証条件の削除・弱体化はなし（check.add と bind の追加だけ）。\n- gate ログ `20261111-091446-check-unit.log`: 62 件 OK。\n- `git status`: 実装・テストは未追跡のファイルで、比べられる差分はありません。レビュー中にファイルは変更していません。",
+ "files_changed": [],
+ "valid": true
+}

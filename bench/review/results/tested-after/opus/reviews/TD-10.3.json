@@ -1,0 +1,49 @@
+{
+ "case": "TD-10",
+ "rep": 3,
+ "sec": 99.0,
+ "exit": 0,
+ "cost_usd": 0.5085071999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 38184,
+  "cache_read_input_tokens": 270796,
+  "output_tokens": 7441,
+  "output_tokens_details": {
+   "thinking_tokens": 3097
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 38184,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3259,
+    "cache_read_input_tokens": 52415,
+    "cache_creation_input_tokens": 6349,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6349
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 68583c30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2（notes/service.py `search_notes`） / 対応区分: 修正必須 / 内容: 検索語の `%` と `_` がワイルドカードとして働いており、仕様の「% と _ も普通の文字として部分一致で探す」に反している。`_like_escape`（service.py:251-252）は定義されているが、どこからも呼ばれていない。`pattern = f\"%{q}%\"`（service.py:260）には、検索語がエスケープされずに入っている。SQL には `ESCAPE '\\'` があるが、値の方がエスケープされていないので効いていない。同じ原因で、検索語に入った `\\` もエスケープ文字として解釈される / 成立条件: 利用者が `%`・`_`・`\\` を含む検索語を渡したとき（例: q=\"%\"、q=\"0%\"、q=\"e_n\"） / 影響: q=\"%\" で組織内の公開メモと自分のメモがすべて一致する。q=\"0%\" では \"%\" を含まない \"1000 done\" も一致し、q=\"e_n\" では \"filexname\" も一致する。検索結果が仕様と違う。組織や非公開の絞り込みは別の条件で効いているので、組織の外への漏えいはない / 確認した保証: 上流でエスケープしている箇所はない（`search_notes` が入口）。既存のテスト（tests/test_ac3_list_search.py:50-88）は、SetUp で \"100% done\" や \"file_name\" を作っているのに、`%` や `_` を検索語にして確かめていないので、この欠陥を見逃している / 根拠: `PYTHONDONTWRITEBYTECODE=1 python3 -c ...` で再現した。題名 \"100% done\"・\"1000 done\"・\"plain\"（本文 \"x\"・\"file_name\"・\"filexname\"）の3件に対して、search_notes(q=\"%\") は3件すべて、q=\"0%\" は [1, 2]、q=\"e_n\" は [2, 3] を返した。期待はそれぞれ [1]、[1]、[] / 提案: service.py:260 を `pattern = f\"%{_like_escape(q)}%\"` にする（題名と本文の両方の条件に同じ値が渡るので、1か所の修正で足りる）。あわせて、q=\"%\"・\"0%\"・\"_\"・\"e_n\"・\"\\\\\" で、文字どおりの部分一致だけが返ることを確かめるテストを AC3 に加える\n- [軽微1] 区分: 実装 / 対象: R8, K8（notes/share.py `verify_link`） / 対応区分: 改善提案 / 内容: `int()` で解析してから署名し直しているため、先頭に 0 を付けた表記（例: \"07.<期限>.<署名>\"）でも元のリンクの署名で有効になる。同じ note_id と期限なので権限が広がるわけではない。仕様は「10進の数字だけ」としか決めていないので、仕様違反ではない / 提案: 正規形（先頭の 0 を禁止する、または解析した値を文字列に戻して一致を確かめる）だけを受け付け、それを確かめるテストを加える\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 題名・本文・タグの境界値（100/101、10000/10001、5/6個、改行付きのタグ、文字列の tags）と、途中で失敗したときに何も残らないこと（hooks.before_write）を確かめており妥当\n- AC2: 他の組織、他の組織の管理者、他人の非公開、管理者から見た非公開、存在しないメモがすべて NotFound になることを確かめている。確認の後に非公開にされた場合の NotFound と、閲覧数が戻ること、4スレッド×10回で別々の接続から閲覧して数が 40 になることも確かめている。妥当\n- AC3: 一覧の範囲、並び順、ページ、不正な page・per_page・sort（bool・float・文字列）、検索の範囲・OR での絞り込み・不正な検索語とタグを確かめている。ただし、`%` と `_` を普通の文字として扱う規則を確かめるテストがないので不十分（[重大1]）\n- AC4: 作成者と管理者の更新、Forbidden と NotFound、非公開は作成者だけ、古い version で Conflict、読み出しから書き込みの間の更新で Conflict、判定の後の移管で Forbidden、更新でも入力を検証すること、削除の途中で失敗したときの巻き戻しと例外が伝わることを確かめている。妥当\n- AC5: test_ac5_transfer.py が 62件のテストに含まれて合格していることを確認した。実装では、管理者であることと3者の組織が同じことを確かめた後、1つのトランザクションで移している。途中の失敗の再現には hooks の transfer:id を使っている。コードの読み取りでは妥当（テストの中身は詳しく読んでいない）\n- AC6: 伏せる処理（8文字以上は末尾4文字だけ残し、8文字未満はすべて伏せる）は、コードで仕様どおりだと確かめた。テストは test_ac6_audit.py で合格している\n- AC7: 固定した時計で、枠の境界（159.999 / 160.0）、拒否された呼び出しが枠を延ばさないこと、Barrier で 20 スレッドが同時に呼んでも 5 回だけ通ることを確かめている。hook を使った割り込みも決定論的な順序で確かめている。妥当\n- AC8: 期限の境界は、コードで `now >= expires` が Forbidden になることと、fullmatch・compare_digest を使っていることを確かめた。テストは test_ac8_share.py で合格している。先頭 0 の表記は [軽微1]\n- AC9: ログに出すのは ID と期限だけで、例外のメッセージにも本文・署名・api_key は入らない（ValueError(link) は `from None` で外に出ない）ことをコードで確かめた\n- AC10: transaction() は例外のときとコミットの失敗のときに ROLLBACK する。in_transaction を見るので、二重に ROLLBACK しても元の例外を隠さない。コードで確かめ、test_ac10 も合格している\n- K1: 一覧と検索の WHERE と、_visible・_check_modify で、組織と非公開を絞っていることを確かめた。妥当\n- K2: 値はすべてプレースホルダーで渡している。ORDER BY は許可した列名の対応表から選んでいる。インジェクションの検証は妥当だが、LIKE のエスケープは [重大1]\n- K3: 閲覧数・更新・回数の制限の競合は、上のとおり検証されている\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、仕様でも対象外。単体テストで実際の SQLite と別々のスレッドの接続を使って確かめている）\n### 不足しているリスク\n- K2: LIKE の特殊文字（%・_・\\）を検索語に入れたときの検証がない（[重大1] で指摘）\n### 確認したこと\n- spec.md・design.md・notes/*.py をすべて読み、tests の base、ac2、ac3、ac4、ac7 を読んだ\n- `$AQ trace`: 18行すべてが合格で、反証テストは未実施\n- `$AQ history --since 0`: 検証条件の追加と紐づけだけで、弱めたり消したりした記録はない\n- gate のログ（20261111-085847-check-unit.log）: 62件のテストが OK\n- `python3 -m unittest discover -s tests -t . -q` を実行: 62件が OK\n- LIKE の欠陥を再現するスクリプトを実行した（結果は [重大1] の根拠のとおり）\n- コードの経路で確かめた入力・状態・順序: 判定の後に移管・削除・非公開化が入る場合（update と get_note はトランザクションの中で読み直している）、version を使った更新条件と rowcount、BEGIN IMMEDIATE による閲覧数と移管の直列化、回数の制限の枠の境界と lock の範囲、共有リンクの形（全角数字・改行は fullmatch と [0-9] で拒否）と期限ちょうどの時刻、監査ログを伏せる処理の 8文字の境界\n- `git status` で、リポジトリを変更していないことを確かめた（実行は PYTHONDONTWRITEBYTECODE=1 で行った）",
+ "files_changed": [],
+ "valid": true
+}

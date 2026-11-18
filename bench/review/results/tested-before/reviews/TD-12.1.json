@@ -1,0 +1,49 @@
+{
+ "case": "TD-12",
+ "rep": 1,
+ "sec": 23.2,
+ "exit": 0,
+ "cost_usd": 0.11136889999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18470,
+  "cache_read_input_tokens": 116029,
+  "output_tokens": 2587,
+  "output_tokens_details": {
+   "thinking_tokens": 372
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18470,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1684,
+    "cache_read_input_tokens": 37292,
+    "cache_creation_input_tokens": 1529,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1529
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d21222bf\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: タグの個数の上限（5個まで、重複も数える）を、作成と更新のどちらでも検査していない。検索（search_notes）だけが検査している。 / 成立条件: create_note または update_note に、規則に合う6個以上のタグを渡す。例: `['a']*6`、`t0`〜`t8` の9個。 / 影響: 仕様は ValidationError を求めるが、作成が成功して保存される。実行で確認した結果、`['a']*6` で note_id=1、9個のタグで note_id=2 が返った。受け入れ条件 AC1 と AC4 に未達。 / 根拠: notes/service.py:67-73 の `_validate` は各タグの形式しか見ておらず、`len(tags) > TAGS_MAX` がない。TAGS_MAX が使われているのは search_notes の1か所だけ（約125行目）。create_note は 約82行目、update_note は 約160行目で `_validate` だけを呼ぶ。tests/test_ac1_create.py と tests/test_ac4_update_delete.py に個数超過のテストはない（grep で確認）。 / 提案: `_validate`（または `_tag_list`）で `len(tags) > TAGS_MAX` のとき ValidationError にする（重複も数える。set にする前の個数）。作成・更新（重複込みで6個、重複を除くと5個以下のものも含む）の拒否と、5個ちょうどの成功を確かめるテストを追加する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。タグの個数上限（5個、重複を数える）を拒否するテストがなく、実装も欠けている。題名・本文・タグ形式の拒否と途中失敗時のロールバックのテストは妥当（hook で create:tags の失敗を再現し、3つのテーブルが空であることを確認している）。\n- AC2: 妥当。見え方の判定と閲覧数のテストがある。get_note は transaction 内で UPDATE と再検査をしており、同時の数え漏れを避ける設計。並行性の厳密な再現は未精査で、コードの読解のみ。\n- AC3: 妥当。LIKE は ESCAPE 付きで、`%` と `_` と `\\` をエスケープしている。SQL はプレースホルダーで、sort は許可リストの辞書から取る。検索のタグ検査（個数・形式）と、他の組織・非公開メモの除外もコードで確認した。\n- AC4: 不十分。更新時のタグの個数上限が未検査（重大1）。楽観的ロックは UPDATE の `WHERE version` と rowcount で判定しており、認可・Conflict・ロールバックのテストもある。\n- AC5: 妥当。管理者と組織を検査し、移管は1つのトランザクションで行う。失敗時に元のまま残ることを hook で確認するテストがある。\n- AC6: 妥当。8文字未満は全部伏せ、8文字以上は末尾4文字を残す。境界値の確認はコード上で行った。\n- AC7: 妥当。lock 内で判定し、境界は `>=`。hook によるテストがあり、sleep に頼っていない。\n- AC8: 妥当。fullmatch の正規表現、`>=` による期限の境界、`compare_digest` を使っている。\n- AC9: 妥当。ログは ID だけを出す。例外のメッセージに本文・署名・鍵は入らない。テストもある。\n- AC10: 妥当。`transaction` が ROLLBACK を行い、失敗した ROLLBACK で元の例外を隠さない。復旧のテストもある。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしのファイルはなかった）。テストの改ざんや弱体化の兆候は、`history` と `git diff` では未確認。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使った単体・結合テストがリスクに見合っている。\n### 不足しているリスク\n- R1 のタグ個数の上限が未実装・未検証（重大1）。\n### 確認したこと\n- `notes/*.py` を通読し、仕様・設計と突き合わせた。\n- `python3 -m unittest discover -s tests -t .` を実行した（61件 OK）。\n- 再現を実行した。`create_note(['a']*6)` と 9個のタグの `create_note` が、どちらも ValidationError にならず成功した。\n- `$AQ trace` と `$AQ history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

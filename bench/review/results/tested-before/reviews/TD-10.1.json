@@ -1,0 +1,49 @@
+{
+ "case": "TD-10",
+ "rep": 1,
+ "sec": 40.5,
+ "exit": 0,
+ "cost_usd": 0.2006984,
+ "num_turns": 9,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 16,
+  "cache_creation_input_tokens": 30448,
+  "cache_read_input_tokens": 313044,
+  "output_tokens": 4757,
+  "output_tokens_details": {
+   "thinking_tokens": 1241
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 30448,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2487,
+    "cache_read_input_tokens": 50331,
+    "cache_creation_input_tokens": 468,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 468
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 68583c30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2 / 対応区分: 修正必須 / 内容: `notes/service.py` の `search_notes` が、定義済みの `_like_escape` を検索語に適用していない。`pattern = f\"%{q}%\"` に生の `q` をそのまま入れている。`ESCAPE '\\'` 句は付いているが、検索語側が未エスケープなので意味がない。 / 成立条件: 検索語に `%`・`_`・`\\` を含める。例は `q=\"%\"`、`q=\"_\"`、`q=\"100%\"`。 / 影響: 仕様は「% と _ も普通の文字として部分一致」と定めているが守られていない。`%` や `_` は任意文字にマッチする。`100%` が「1000 done」にもマッチし、`file_name` が `filexname` にもマッチする。`\\` を含む検索語は、題名・本文に `\\` があっても何にもマッチしない。検索対象は自組織・公開または自分の非公開メモに限られるので、他組織への漏えいではない。ただし R3 の結果が仕様と違う。 / 確認した保証: `_like_escape` の呼び出し箇所はコード全体で 0 件。上流の検証は文字種を制限していない。既存のテストはどれもこの経路を通していない。 / 根拠: `notes/service.py` の `search_notes`（`pattern = f\"%{q}%\"`、`args = [..., pattern, pattern]`）。メモリ上の DB で再現した。`search_notes(q='%')` は全5件を返した。`q='100%'` は「100% done」と「1000 done」を返した。`q='file_name'` は `file_name` と `filexname` を返した。`q='a\\\\b'`（題名 `a\\b` が存在する）は 0 件だった。 / 提案: `pattern = f\"%{_like_escape(q)}%\"` に直す。あわせて重大2のテストを追加する。\n- [重大2] 区分: テスト / 対象: AC3, R3, K2 / 対応区分: 証拠不足 / 内容: `% / _ / \\` を検索語にしたときに、ワイルドカードにならず文字そのものとして探すことを確かめるテストがない。`tests/test_ac3_list_search.py` の `SearchTest.setUp` には `\"100% done\"`・`\"1000 done\"`・`\"file_name\"`・`\"filexname\"` というこの検証向けのデータがある。しかし、それを使うクエリ（`\"%\"`・`\"_\"`・`\"100%\"`・`\"file_name\"`）が1つもない。実装の欠陥（重大1）があっても 62 件すべて通っている。 / 根拠: 仕様 R3 と K2 は LIKE ワイルドカードの扱いを明示している。必須の受け入れ条件の検証が空洞化している。 / 提案: 次の検証を追加する。①`\"100%\"` が `\"100% done\"` だけにマッチする（`\"1000 done\"` にはマッチしない）。②`\"file_name\"` が `filexname` にマッチしない。③`\"%\"` と `\"_\"` だけの検索語は、その文字を含むメモだけを返す。④`\\` を含む題名・本文が見つかる。⑤本文側のワイルドカードも確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。入力境界、タグ、`create:tags` 失敗時のロールバック、監査ログを確認している。\n- AC2: 妥当。NotFound の統一、確認後の非公開化、`view` hook での割り込み、別接続・複数スレッドの閲覧数 40 を確認している。\n- AC3: 不十分。一覧の範囲、ソート、ページング、範囲外の拒否、タグ OR、SQL インジェクション文字列は妥当。ただし LIKE ワイルドカードの検証がなく、実装も誤っている（重大1・重大2）。\n- AC4: 妥当。権限、非公開、楽観的ロック、読み出しと書き込みの間の割り込み、トランザクション内の再判定、削除の巻き戻しを確認している。\n- AC5: 件数が少ないが、`transfer:` hook による巻き戻しと組織境界を確認している。コードの経路でも整合している。\n- AC6: 妥当。伏せ字のコードは仕様どおり（8 文字未満は全伏せ、それ以外は末尾 4 文字を残す）。\n- AC7: 妥当。枠の境界、拒否が枠を延ばさないこと、20 スレッドの同時呼び出し、`hook` による割り込みを確認している。sleep には頼っていない。\n- AC8: 妥当。期限ちょうどの境界、改ざん、不正な形式（改行・全角数字・大文字・型違い）を確認している。\n- AC9・AC10: ログ・例外に本文・署名・api_key が出ない。ROLLBACK 後も接続を再利用できる。コードの経路で確認し、テストもある。\n- エンジン検出の兆候: なし。`history` に検証条件の弱体化は見当たらない。テストの skip もない。\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、単体テストと実 SQLite（ファイル DB・複数スレッド）で足りる。\n### 不足しているリスク\n- K2: LIKE ワイルドカードの扱い（重大1・重大2）。\n- 軽微な未確認事項: `list_notes` の COUNT と SELECT が同一トランザクションではない。仕様に要求はないので指摘にはしない。\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 62 件すべて成功。ただしこの成功は LIKE の欠陥を検出できていない。\n- `service.py`・`share.py`・`ratelimit.py`・`db.py` を通読した。`_like_escape` の呼び出しが 0 件であることを確認した。\n- メモリ上の DB で `search_notes` を実行し、重大1の症状を再現した。\n- `aqdlc history --since 0`: 要求・受け入れ条件・検証の追加のみで、弱体化は見当たらない。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

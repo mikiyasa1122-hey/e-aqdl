@@ -1,0 +1,49 @@
+{
+ "case": "CLN-03",
+ "rep": 2,
+ "sec": 98.6,
+ "exit": 0,
+ "cost_usd": 0.5864891999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 42320,
+  "cache_read_input_tokens": 297566,
+  "output_tokens": 9418,
+  "output_tokens_details": {
+   "thinking_tokens": 4682
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 42320,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3358,
+    "cache_read_input_tokens": 67415,
+    "cache_creation_input_tokens": 2349,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2349
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e7dd616c\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, AC4, R10 / 対応区分: 改善提案 / 内容: `update_note` が `version` の型を検査しない。`version=\"1\"` を渡すと、SQLite の型変換で `WHERE version = '1'` が一致して COMMIT されます。その後 `return version + 1`（notes/service.py:301 付近、`update_note` の末尾）で TypeError になります。呼び出し側は失敗したと受け取りますが、更新は確定しています（プローブで version が 2 になったのを確認済み）。仕様は version の型を定めていないので、仕様違反ではありません / 提案: トランザクションの前に `isinstance(version, int) and not isinstance(version, bool)` を確かめて ValidationError にする。または戻り値を DB から読み直した version にする\n- [軽微2] 区分: 実装 / 対象: R8, K8 / 対応区分: 改善提案 / 内容: `LINK_RE`（notes/share.py:11）は先頭の 0 を許しています。`int()` で正規化してから署名を確かめるため、`07.1060.<sig>` のように 0 を足したリンクも note_id=7 として通ります（プローブで確認済み）。note_id・期限・署名の意味は変わらないので、権限は広がりません。ただし、文字列としては元と違うリンクが受け入れられます / 提案: `0|[1-9][0-9]*` のように正規形だけを許すか、`make_link` が作る文字列と完全に一致することを確かめる\n- [軽微3] 区分: 実装 / 対象: R9, AC9 / 対応区分: 改善提案 / 内容: `verify_link`（notes/share.py:32-35）は `raise ValueError(link)` を `from None` で置き換えています。そのため、Forbidden の `__context__` に署名を含むリンク全体の ValueError が残ります（プローブで確認済み。`__suppress_context__=True` なので、標準の traceback には出ません）。独自の例外の直列化や Sentry などが `__context__` をたどると、署名が出る可能性があります / 提案: `ValueError(link)` ではなく、引数のない例外を使うか、例外を経由せずに直接 Forbidden を送出する\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 次を確かめており妥当です: title・body・tags の境界（100/101、10000/10001、空白だけ、型の違う値、`abc\\n`、21文字、大文字・`_`・日本語）、重複の数え方と重複を除いた保存、文字列の tags の拒否、途中の失敗（create:tags）で notes・note_tags・audit が0件になること、監査ログが記録されること。\n- AC2: 次を確かめており妥当です: 他の組織（一般の利用者・管理者）、他人の非公開（同じ組織の管理者を含む）、存在しない ID がすべて NotFound になること。確認の後に非公開にされた場合も NotFound で、閲覧数が増えないこと。割り込んだ閲覧で数え漏れがないこと。4スレッド・別々の接続・ファイルの DB で 40 回が正確に数えられること。\n- AC3: 次を確かめており妥当です: 範囲（他の組織・他人の非公開の除外、管理者にも他人の非公開が見えないこと）、並び順、ページ送り、巨大な page、不正な page・per_page・sort（bool・float・文字列を含む）、`%`・`_`・`\\` をそのままの文字として扱うこと（題名・本文の両方）、タグの OR、不正な検索語・タグ。\n- AC4: 次を確かめており妥当です: 作成者と同じ組織の管理者は更新できること、他の人は Forbidden または NotFound になること、非公開のメモは作成者だけが扱えること、古い version の Conflict。さらに、読み出しと書き込みの間に他の更新が入った場合の Conflict（hook で決定論的に再現）、変えない項目に最新の行を使うこと、判定の後に移管されたら Forbidden になること、R1 と同じ入力検証、削除の途中の失敗でロールバックされ例外が伝わること。\n- AC5: 次を確かめており妥当です: 非公開のメモを含めて全部移ること、管理者だけが移せること、組織の組み合わせ4パターンの拒否、途中（2件目）の失敗で元のままになること。\n- AC6: 次を確かめており妥当です: 末尾4文字だけを残すこと、7文字・8文字・0文字の境界、管理者だけ・自分の組織だけが対象になること。\n- AC7: 次を確かめており妥当です: 枠の中での上限、利用者ごとに数えること、ちょうど window 秒での新しい枠（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、20スレッドを Barrier で同時に呼んだときの上限、hook で判定の途中に割り込んでも直列になること。\n- AC8: 次を確かめており妥当です: 形式、期限の時刻ちょうど・その1秒前、note_id・期限・署名の改ざん、別の鍵、形の崩れ（大文字の16進、改行、空白、負の数、長さの過不足、全角数字、型の違う値）。先頭の 0 は軽微2 にまとめました。\n- AC9: 次を確かめており妥当です: ログ、例外のメッセージ（5種類）、監査ログの detail に本文・署名・api_key・鍵が出ないこと。`__context__` は軽微3 にまとめました。\n- AC10: 次を確かめており妥当です: Conflict・ValidationError・RuntimeError・IntegrityError の後に `in_transaction` が False で、次の操作ができること。ROLLBACK ができない状態でも元の例外がそのまま伝わること。\n- K1〜K8: それぞれ上の AC2/3/4/5（K1・K6）、AC3（K2）、AC2/4/7（K3）、AC1/4/5/10（K4）、AC6/9（K5・K7）、AC8（K8）のテストで確かめられています。エンジンが検出したテストの兆候はありません（skip・.only・アサーションなしは見つかっていません）。\n### E2E の要否\n- 不要です。HTTP・UI のないライブラリで、仕様では API・認証は対象外です。ファイルの DB と別々の接続を使ったスレッドのテストで、同時実行の結合部分も確かめています。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py をすべて読み、仕様と突き合わせました。認可（`_visible`・`_can_modify` が get・update・delete のトランザクションの中で読み直した行に適用されていること）、すべての SQL がプレースホルダーを使っていること（sort は許可リストの辞書から引き、IN 句は `?` だけで組み立てていること）、LIKE の `ESCAPE '\\'` と `_like_escape` が題名・本文の両方の pattern に適用されていること、BEGIN IMMEDIATE による直列化と、`WHERE version = ?` + rowcount による楽観的ロックを確かめました。\n- `$AQ trace`: R1〜R10・K1〜K8 がすべて unit で合格しています（反証テストは無効）。`$AQ history --since 0`: 検証条件を弱めたり外したりした変更はありません（check.add と bind だけ）。実装はまだコミットされていないため、git diff で比べられる以前の版はありません。\n- `python3 -B -m unittest discover -s tests -t .` → 63件すべて合格しました（gate のログ 20261111-085223-check-unit.log と同じ結果）。\n- scratchpad のプローブ（/tmp/claude-0/-tmp-claude-0-td-clean-after-work-aqdlc-test-xr50r2m0-app/1a509074-1183-4101-962b-f26fa65f9a30/scratchpad/probe.py、メモリ上の DB）で次を確かめました: 文字列の version で、更新が確定した後に TypeError になること（軽微1）。先頭に 0 を足したリンクが通ること（軽微2）。Forbidden の `__context__` にリンクが残ること（軽微3）。search の LIKE は ASCII の大文字・小文字を区別しないこと（仕様に規定がないので指摘にしていません）。\n- テストが確かめていない並び順も確かめました: 削除と更新、移管と作成が同時に起きる場合です。どちらも BEGIN IMMEDIATE で直列になり、中で読み直して判定するので、整合性は保たれるとコードの経路から判断しました。",
+ "files_changed": [],
+ "valid": true
+}

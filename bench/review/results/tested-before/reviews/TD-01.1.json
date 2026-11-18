@@ -1,0 +1,49 @@
+{
+ "case": "TD-01",
+ "rep": 1,
+ "sec": 34.8,
+ "exit": 0,
+ "cost_usd": 0.2186537,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 41694,
+  "cache_read_input_tokens": 97417,
+  "output_tokens": 4212,
+  "output_tokens_details": {
+   "thinking_tokens": 1405
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 41694,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1823,
+    "cache_read_input_tokens": 38636,
+    "cache_creation_input_tokens": 3058,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3058
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4ba31e7b\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3, notes/service.py:177-196（update_note） / 対応区分: 修正必須 / 内容: update_note は、トランザクションの中で読み直した行（183行）が None かどうかを確かめていない。また、182行のコメントは「認可を読み直した行で行う」と述べているが、実際には認可（_check_modify）をやり直していない。 / 成立条件: 179行の事前チェックを通った後、184行より前に、別の接続がそのメモを削除した場合。 / 影響: R4 は「読み出しから書き込みの間に他の更新が入った場合は Conflict」と定めているが、実際は内部の TypeError（'NoneType' object is not subscriptable）が呼び出し側に漏れる。業務エラー（NotFound か Conflict）にならないため、呼び出し側は競合を判別できない。認可の読み直しがないことは、設計書の「認可は _visible と _can_modify にまとめる」にも合わない。ただし、移管された場合は version が +1 されるため、古い version を持つ呼び出しは Conflict になる。 / 根拠: 一時スクリプトで before_write(\"update\") フックの中にそのメモの DELETE を入れ、update_note(version=1) を呼ぶと TypeError になった。再現手順: スクラッチの r.py を実行する。tests/test_ac4_update_delete.py の競合テスト（56〜83行）は、別の更新を差し込むケースだけで、削除を差し込むケースはない。 / 提案: 183行の直後に `if row is None: raise NotFound(...)` を入れ、続けて `_check_modify(user, row, note_id, \"更新\")` をトランザクション内でやり直す（事前チェックは残してよい）。削除を差し込んで NotFound になるテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:11,30 / 対応区分: 改善提案 / 内容: リンクの note_id と期限は int に変換してから署名を計算するため、「007.…」のような先頭ゼロ付きの別表記でも、同じ署名で検証が通る。仕様の「10進の数字だけ」は満たしており、実害は小さい。 / 提案: 正規形（`str(int(x)) == x`）だけを通すか、署名を元の文字列で計算する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 検証規則と、タグ挿入の途中で失敗させて何も残らないことを確かめており妥当。\n- AC2: 可視性の規則と閲覧数の同時加算を確かめており妥当。他の組織・他人の非公開・存在しないメモが、どれも NotFound になることをコードで確認した。\n- AC3: ページング・並べ替え・範囲外・LIKE の % と _ のエスケープ・タグの OR を確かめており妥当。SQL はプレースホルダーで、ORDER BY は固定の辞書から取っている。\n- AC4: 競合（別の更新の差し込み）・削除の失敗・認可は確かめている。ただし、事前チェックの後でメモが削除される競合は未検証で、実装に欠陥がある（[重大1]）。したがって不十分。\n- AC5: 管理者・組織の検査と、途中で失敗したときの元の状態を確かめており妥当。\n- AC6: 8文字未満はすべて伏せ、それ以上は末尾4文字だけを出すことをコードで確認した。\n- AC7: 枠の境界（>= window）とロック内の判定をコードで確認した。テストはフックによる決定論的な再現。\n- AC8: 期限の境界・改ざん・形の崩れを確かめており妥当（軽微1の件は除く）。\n- AC9: ログ・例外にメモの本文・署名・api_key が出ないことをコードで確認した。\n- AC10: ROLLBACK 後も接続を使い続けられることを確かめており妥当。\n- エンジンが検出したテストの兆候: なし。`history` に弱体化の記録はなく、bind だけだった。\n\n### E2E の要否\n- 不要（HTTP や UI のない、SQLite のライブラリ。単体テストと並行実行のテストで足りる）。\n\n### 不足しているリスク\n- K3: 更新の事前チェック後の削除・移管の競合を確かめる検証がない（[重大1]）。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .`: 62件がすべて成功。\n- 一時スクリプトで更新と削除の競合を再現し、TypeError を確認した。\n- `aqdlc.py history --since 0` を確認した。\n- service.py・db.py・ratelimit.py・share.py の全文を読んだ。",
+ "files_changed": [],
+ "valid": true
+}

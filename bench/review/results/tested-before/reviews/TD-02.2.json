@@ -1,0 +1,49 @@
+{
+ "case": "TD-02",
+ "rep": 2,
+ "sec": 28.3,
+ "exit": 0,
+ "cost_usd": 0.1060307,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 14220,
+  "cache_read_input_tokens": 162207,
+  "output_tokens": 3291,
+  "output_tokens_details": {
+   "thinking_tokens": 1001
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14220,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1596,
+    "cache_read_input_tokens": 39624,
+    "cache_creation_input_tokens": 1506,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1506
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fda594\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py の list_notes（約98〜101行） / 対応区分: 修正必須 / 内容: page が非常に大きい整数のとき、`list_notes` が ValidationError でも空の結果でもなく、素の `OverflowError`（Python int too large to convert to SQLite INTEGER）を投げる。`MAX_OFFSET` の定義（17行目）に「これを超える page は結果なしにする」とコメントがあるが、どこでも使っていない（grep で確認）。/ 成立条件: page が `int` で 1 以上、かつ `(page-1)*per_page` が 2^63-1 を超えるとき。例は `page=10**30`。/ 影響: 仕様上 page は「1以上」なら有効で、範囲外は ValidationError と決まっている。業務エラー（NotesError）以外の例外が、利用者の入力だけで出る。呼び出し側がこのライブラリの例外だけを捕まえていると、未処理の 500 相当の障害になる。/ 確認した保証: page が整数で 1 以上かどうかの検査だけで、上限の検査はない。テストに巨大な page を扱うものはない。実際に `list_notes(c, u, page=10**30)` を実行し、OverflowError を確認した。/ 根拠: notes/service.py:98-101、MAX_OFFSET が未使用であること、上の再現手順 / 提案: `offset > MAX_OFFSET` のときは SQL を実行せず `items=[]`・`total` を実際の件数にして返す（または ValidationError にする）。あわせて巨大な page のテストを tests/test_ac3_list_search.py に追加する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 規則の境界と、途中失敗時に何も残らないことを、`before_write` の差し込み口で確かめており妥当。\n- AC2: 見え方、NotFound、確認後の削除、スレッドによる並行閲覧の数え漏れを確かめており妥当。\n- AC3: 一覧・検索・タグ OR・LIKE のエスケープの実装は適切。ただし巨大な page の境界を確かめるテストがなく、重大1の欠陥を見逃している。そのため不十分。\n- AC4: 権限、楽観的ロック、読み出しと書き込みの間の競合、トランザクション内での再認可、削除失敗時のロールバックを確かめており妥当。\n- AC5: 管理者・組織・全部か何もしないかを確かめるテストがある。実装も整合している。\n- AC6: 伏せ字の規則（8文字未満はすべて伏せる）を確かめており妥当。\n- AC7: 枠の境界、スレッドによる同時呼び出し、判定途中の割り込みを確かめており妥当。sleep には頼っていない。\n- AC8: 期限の境界・改ざん・形の崩れを確かめており妥当。\n- AC9: ログ・例外に機密が出ないことを確かめるテストがある。実装も ID だけをログに出している。\n- AC10: 例外の後に接続を使い続けられることを確かめるテストがある。実装の `_rollback` も整合している。\n- 検証条件の履歴（history）には bind だけで、検証の弱体化は見られなかった。エンジンが検出したテストの兆候はなし。\n- K1〜K8: 認可は `_visible` / `_can_modify` に集約され、SQL はプレースホルダーと ESCAPE で組み立てられている（K2）。LIKE の `%`・`_`・`\\` のエスケープは検索語に適用されており、題名と本文の両方に同じ pattern が渡っている。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、単体テストで受け入れ条件を確かめられる）。\n\n### 不足しているリスク\n- R3: 巨大な page のオフセットのオーバーフロー（重大1）。それ以外はなし。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .`: 62 件すべて成功。\n- `list_notes(c, u, page=10**30)` を実行し、OverflowError が出ることを確認した。\n- notes/*.py をすべて読み、認可・SQL・トランザクション・競合・共有リンクの検証を追った。\n- `aqdlc.py history --since 0` を確認した。",
+ "files_changed": [],
+ "valid": true
+}

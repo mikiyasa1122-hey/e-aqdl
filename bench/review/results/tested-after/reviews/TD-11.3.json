@@ -1,0 +1,49 @@
+{
+ "case": "TD-11",
+ "rep": 3,
+ "sec": 21.3,
+ "exit": 0,
+ "cost_usd": 0.0883461,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12654,
+  "cache_read_input_tokens": 124841,
+  "output_tokens": 2523,
+  "output_tokens_details": {
+   "thinking_tokens": 381
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12654,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1692,
+    "cache_read_input_tokens": 37868,
+    "cache_creation_input_tokens": 2266,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2266
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0af59235\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5 / 対応区分: 修正必須 / 内容: `export_audit` が利用者の api_key を伏せずに、そのまま `actor_key` として出力している。 / 成立条件: 管理者が `export_audit` を呼ぶと必ず起きる。監査ログが1件でもあれば再現する。 / 影響: R6「末尾4文字以外を * で伏せる。8文字未満はすべて伏せる」に反する。組織内の全利用者の api_key が丸見えになる。R9 の「出力に api_key を出さない」にも反する。 / 根拠: `notes/service.py` の `export_audit` 末尾で `\"actor_key\": r[\"api_key\"]` を返している。マスク処理は `notes/` 全体のどこにもない。上流にも DB の制約にも、これを防ぐものはない。 / 提案: マスク関数を追加し、`actor_key` にだけ適用する。8文字未満は全文を `*` にする。8文字以上は先頭を `*` にして末尾4文字だけ残す。あるいは `actor_key` の出力をやめる。\n- [重大2] 区分: テスト / 対象: AC6, K7, K5 / 対応区分: 証拠不足 / 内容: `tests/test_ac6_audit.py` は管理者以外の拒否と組織の絞り込みしか確かめていない。api_key の伏せ字は一切アサートしていない。 / 根拠: AC6 と K7 は伏せ字の確認そのものが条件であり、そのテストがないため重大1の欠陥を検出できなかった。61件のテストはすべて通っている。 / 提案: 次の3ケースをテストに追加する。(a) 8文字以上の鍵は末尾4文字以外が `*`。(b) 7文字以下の鍵は全文が `*`。(c) 出力全体に元の鍵の平文が含まれない。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 作成の検証と、途中失敗の巻き戻し（`hooks.before_write`）を確かめており妥当。コードでも、トランザクション、重複タグの除去、タグ列の型検査を確認した。\n- AC2: 可視性、NotFound への統一、閲覧数の加算を確認した。`get_note` は UPDATE の後に可視性を読み直しており、同時の閲覧でも数え漏れがない。妥当。\n- AC3: ページとソートの範囲外の拒否、LIKE の ESCAPE とワイルドカードのエスケープ、プレースホルダー、タグの OR を確認した。妥当。\n- AC4: 認可、楽観的ロック（UPDATE の WHERE に version を入れて rowcount で判定）、トランザクション内での再検証を確認した。妥当。\n- AC5: 管理者だけ、同じ組織だけ、全部か何もしないか、という規則をコードで確認した。妥当。\n- AC6: 不十分（重大1・重大2）。伏せ字の実装がなく、テストもない。\n- AC7: ロックで保護されており、枠の境界は `>= window` で仕様どおり。フック経由の同時呼び出しのテストもある。妥当。\n- AC8: 形式の検査（fullmatch）、`compare_digest`、期限ちょうど以降の無効を確認した。妥当。\n- AC9: テストは別途ある。ただし `export_audit` が api_key を出力するため、R9 は実装側で満たされていない（重大1に含めた）。\n- AC10: `_rollback` と `transaction` が例外後も接続を使える状態に戻すことを確認した。妥当。\n- エンジンが検出したテストの兆候はなし。`history` に検証の弱体化は見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI はなく、ライブラリの単体テストでリスクを確かめられる。\n\n### 不足しているリスク\n- K7 / K5: api_key の伏せ字を確かめる検証がない（重大2）。\n\n### 確認したこと\n- `python3 -m unittest discover` を実行し、61件がすべて合格。\n- `notes/*.py` を全て読み、spec.md と design.md と突き合わせた。\n- `tests/test_ac6_audit.py` と `tests/test_ac9_secrets.py` を確認した。\n- `history --since 0` を確認し、検証条件の弱体化がないことを見た。\n- `gate` は実行していない。コードは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,28 @@
+{
+ "case": "TD-07",
+ "rep": 3,
+ "judge_cost_usd": 0.2489396,
+ "judge_raw": "## 判定結果: TD-07\n\nレビュー担当は埋め込んだ欠陥を見つけています（重大1）。ほかの2件のうち、重大2は実際にあるテストの不足です。軽微1は、テストがあるのに「ない」と言っているので誤検出です。\n\n### 各指摘の分類\n\n- **重大1 → matches_defect（欠陥そのもの）**\n  - 箇所・原因・影響が欠陥と一致しています。\n    - 箇所: `notes/share.py` の `verify_link`\n    - 原因: 期限の比較が `now > expires` になっている\n    - 影響: 期限の時刻ちょうどでもリンクが使える\n  - 再現手順（now=1060 で 7 が返る）も添えてあります。\n  - `int()` の切り捨てで expires+1 未満まで通ってしまう、という補足も正しいです。仕様は「期限の時刻ちょうど以降は無効」なので、1060.5 も無効にすべきです。\n\n- **重大2 → test_gap（テストの不足）**\n  - `tests/test_ac8_share.py` で期限を試しているのは now=1059（期限の前で有効）だけです。now=1001 は改ざんと形崩れのケースで使っているだけです。\n  - そのため、期限切れや期限ちょうどを確かめるケースは実際に1件もありません。\n  - この指摘はテストの不足だけを述べているので、test_gap にしました。\n\n- **軽微1 → false_positive（誤検出）**\n  - 「検索語にバックスラッシュが入るケースのテストが見当たらない」と書いていますが、テストはあります。\n  - `test_percent_and_underscore_are_literal` に `self.ids(\"\\\\\")` → `[]` があります。\n  - テストがあるのに「ない」と言っているので、規則どおり false_positive にしました。\n  - 一致するケース（`\\` を含む題名を `\\` で検索する）がない、という点だけなら弱さとは言えます。それでも、主張の前提が事実と違います。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"notes/share.py の verify_link で期限の比較が `>` のため期限ちょうど（now == expires）が有効になる、という原因と影響を再現付きで正しく指摘している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"test_ac8_share.py には期限切れ・期限ちょうどのケースが実際になく、テストの不足だけを指摘している。\"}, {\"label\": \"軽微1\", \"class\": \"false_positive\", \"reason\": \"test_percent_and_underscore_are_literal に self.ids(\\\"\\\\\\\\\\\") のバックスラッシュ検索のケースが既にあるのに「見当たらない」としている。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"埋め込んだ欠陥は重大1が正確に捉えており、重大2は対応するテストの不足、軽微1は既存のテストを見落とした誤検出。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "notes/share.py の verify_link で期限の比較が `>` のため期限ちょうど（now == expires）が有効になる、という原因と影響を再現付きで正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "test_ac8_share.py には期限切れ・期限ちょうどのケースが実際になく、テストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "false_positive",
+    "reason": "test_percent_and_underscore_are_literal に self.ids(\"\\\\\") のバックスラッシュ検索のケースが既にあるのに「見当たらない」としている。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "埋め込んだ欠陥は重大1が正確に捉えており、重大2は対応するテストの不足、軽微1は既存のテストを見落とした誤検出。"
+ }
+}

@@ -1,0 +1,49 @@
+{
+ "case": "TD-08",
+ "rep": 1,
+ "sec": 67.0,
+ "exit": 0,
+ "cost_usd": 0.5355175999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 44414,
+  "cache_read_input_tokens": 238688,
+  "output_tokens": 6621,
+  "output_tokens_details": {
+   "thinking_tokens": 1831
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 44414,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3176,
+    "cache_read_input_tokens": 55888,
+    "cache_creation_input_tokens": 9106,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 9106
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c3a94d21\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, AC2, K3（notes/service.py `get_note` 220〜223行） / 対応区分: 修正必須 / 内容: 閲覧数を、トランザクションの外で読んだ値から計算した絶対値で書き戻している（`views = row[\"views\"]` を読み、後で `UPDATE notes SET views = ?` に `views + 1` を入れる）。読み出しと書き込みの間に他の閲覧が入ると、その閲覧の加算が上書きされて消える / 成立条件: 同じメモを、別々の接続・別々のスレッドから同時に閲覧したとき。仕様の「対象外」に書かれた前提（接続はスレッドごとに1つ）の範囲内で起きる / 影響: 仕様 R2 の「同時に閲覧されても数え漏れがないこと」に反し、閲覧数が実際より少なくなる（データの正確さの欠陥）。再現では、2回閲覧した後の views が 1 になり、8スレッド×50回（期待 400）の閲覧後は 50 だった / 確認した保証: `transaction()` の BEGIN IMMEDIATE は、トランザクションの中で読んだ値だけを守る。今回の値はトランザクションの前に読んでいるので守られない。DB の制約にも、これを防ぐものはない。既存のテスト `test_each_view_counts_once` は1つの接続から順に呼ぶだけなので、この経路を通らない / 根拠: service.py:220 で読み、221 で hook、222〜223 で古い値を書く。再現スクリプトは scratchpad の repro.py（hooks.before_write(\"view\") の中で別の接続から get_note を実行する、決定論的な再現。スレッドでの再現も含む） / 提案: トランザクションの中で `UPDATE notes SET views = views + 1 WHERE id = ?` のように DB 側で加算し、加算の後に行を読み直す。あわせて、hooks.before_write(\"view\") に別の接続からの閲覧を差し込み、閲覧数が 2 になることを確かめるテストをファイル DB で追加する。テストの修正は、実装を元に戻すと失敗するものにする（`tests/test_ac2_view.py` は threading・tempfile を import しているのに、並行のテストがない）\n- [軽微1] 区分: 実装 / 対象: R9, AC9（notes/share.py:370, 373） / 対応区分: 改善提案 / 内容: `raise ValueError(link)` の後に `from None` で送出しているため、表示上は隠れる。ただし `Forbidden.__context__` には、署名を含むリンクの全文を持つ ValueError が残る。例外オブジェクトをそのままシリアライズする利用者がいると、署名が漏れる可能性がある / 提案: `raise ValueError(link)` をやめて、`if not m: raise Forbidden(...)` で直接送出する\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create で、題名・本文・タグの境界値と型違い、`abc\\n`、重複タグを数えること、文字列の tags を拒否すること、途中の失敗（create:tags）で3つの表に何も残らないことを確かめており、妥当\n- AC2: 見え方（他の組織・他の組織の管理者・他人の非公開・存在しない ID がすべて NotFound になること。確かめた後に非公開化された場合を含む）は妥当。閲覧数は、1つの接続から順に閲覧する場合しか確かめておらず、仕様の「同時に閲覧されても数え漏れがない」を検証していない。そのため不十分（[重大1]。実装の欠陥も実在する）\n- AC3: 一覧の範囲、並び順、ページング、巨大な page、bool・float・文字列の不正値、sort の許可リスト。検索の % と _ と \\ をそのままの文字として扱うこと、OR でのタグ絞り込み、範囲、入力の拒否。いずれも確かめており、妥当\n- AC4: 作成者と管理者の更新、Forbidden と NotFound の区別、非公開のメモ、古い version の Conflict、読み出しから書き込みの間の更新による Conflict、判定の後の移管によって再び判定されること、更新時の入力検証、削除の途中の失敗でロールバックし例外を伝えること。いずれも確かめており、妥当\n- AC5: 管理者だけが移せること、組織をまたぐ4通りの組み合わせが Forbidden になること、途中の失敗ですべて元のままになること、非公開のメモも移ることを確かめており、妥当\n- AC6 / K7: 末尾4文字を残すこと、7文字・8文字・空の鍵の境界、管理者だけであること、組織で絞り込むことを確かめており、妥当\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、20スレッドを Barrier で揃えた同時の呼び出し、hook による判定の途中への割り込みが直列化されることを確かめており、妥当\n- AC8 / K8: 期限ちょうどが無効になること、改ざん（ID・期限・署名・鍵）、形の崩れ（大文字、改行、符号、全角数字、型の違い）を確かめており、妥当\n- AC9 / K5: ログ・例外のメッセージ・監査の detail に、本文・署名・鍵・secret が含まれないことを確かめており、妥当\n- AC10 / K4: Conflict・ValidationError・注入した例外・IntegrityError・自動でロールバックされた後のそれぞれで、接続を引き続き使えることと、元の例外が伝わることを確かめており、妥当\n- K1: 閲覧・一覧・検索・更新・削除で、他の組織と他人の非公開メモが見えないことを確かめており、妥当\n- K2: SQL の文字列を値として扱うこと、sort の注入を拒否すること、LIKE の ESCAPE を確かめており、妥当。コード上もすべてプレースホルダーで、f-string に埋め込んでいるのは許可リストの値と `?` の個数だけ\n- K3: 更新の競合と回数の制限は妥当。閲覧の同時実行は検証がなく、実装も欠陥がある（[重大1]）\n- K6: 組織の外への移管の拒否と、全部か何もしないかを確かめており、妥当\n- エンジンが検出したテストの兆候: なし（skip・.only は見つからず、アサーションのないテストもないことを目視でも確かめた）\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、仕様も HTTP を対象外にしている。単体テストで実際の SQLite を使って検証しているので、リスクに見合っている）\n\n### 不足しているリスク\n- K3: 別々の接続から同時に閲覧したときの閲覧数の検証がない（[重大1] で対応）\n\n### 確認したこと\n- spec.md・design.md・notes/*.py・tests/*.py を全部読み、仕様の規則と1つずつ突き合わせた。調べたのは、認可（_visible・_can_modify と、トランザクションの中での判定のやり直し）、SQL の組み立て（プレースホルダー、ESCAPE '\\'、sort の許可リスト）、トランザクションの境界、RateLimiter のロックの範囲、share の正規表現と compare_digest\n- `$AQ trace` と `$AQ history --since 0` を確認した。検証条件・チェックの弱体化や変更はない（check の unit は1回登録されただけ）\n- gate のログ 20261111-085755-check-unit.log: 61件のテストがすべて OK\n- `python3 -B -m unittest discover -s tests -t . -q` を実行し、61件が OK だった\n- 再現スクリプト（/tmp/claude-0/-tmp-claude-0-td-after-work-aqdlc-test-tsfawy35-app/91783e12-e236-477b-b9d1-95780c930843/scratchpad/repro.py。一時フォルダのファイル DB を使い、プロジェクトは変更していない）: 決定論的な割り込みで2回閲覧すると views=1、8スレッド×50回だと views=50（期待 400）。[重大1] を確認した\n- git は全ファイルが未追跡で、差分の履歴はない。そのためテストの改ざんは、git diff ではなく history とテストの内容から判断した",
+ "files_changed": [],
+ "valid": true
+}

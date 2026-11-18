@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 2,
+ "sec": 39.8,
+ "exit": 0,
+ "cost_usd": 0.1251031,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15636,
+  "cache_read_input_tokens": 126831,
+  "output_tokens": 4986,
+  "output_tokens_details": {
+   "thinking_tokens": 2200
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15636,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2034,
+    "cache_read_input_tokens": 39344,
+    "cache_creation_input_tokens": 3787,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3787
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 1\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, notes/service.py:140 `list_notes` / 対応区分: 修正必須 / 内容: `sort` に list・dict など hashable でない値を渡すと、`sort not in SORT_COLUMNS`（dict への所属判定）が TypeError を出す。仕様は「sort は updated か title だけ。範囲外は ValidationError」で、例外が ValidationError ではない。 / 成立条件: `list_notes(conn, user, sort=[\"title\"])` のように、型の違う値（list・dict・set）を渡したとき。 / 影響: 呼び出し側が ValidationError だけを捕まえていると未処理の TypeError になる。page・per_page は `_int_in` で型を確かめて ValidationError にしているのに、sort だけ例外の種類が揃わない。データの漏えいはない。 / 確認した保証: 上流に型検査はない。既存テスト（tests/test_ac3_list_search.py:44）が試す不正な sort は `\"id\"` と `\"title; DROP\"` の2つで、どちらも文字列。 / 根拠: `python3 -B` で `list_notes(c,u,sort=[\"title\"])` を実行し、`TypeError unhashable type: 'list'` を確認した。 / 提案: `if not isinstance(sort, str) or sort not in SORT_COLUMNS: raise ValidationError(...)` にする。非文字列の sort を ValidationError と期待するテストも1件足す。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:11・27 / 対応区分: 改善提案 / 内容: note_id を `int()` に変換してから署名するため、「007.期限.署名」のようなゼロ埋めの note_id も、「7.期限.署名」と同じ署名で有効になる。仕様は数字だけの形のみを求めていて、ゼロ埋めの禁止は規定していないので、欠陥とは扱わない。 / 提案: 同じリンクを一意に扱いたいなら、`str(note_id) == m.group(1)` を確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 規則どおりの作成・拒否と、タグの途中で失敗したときの巻き戻し（`before_write(\"create:tags\")` の差し込み口）まで、コード上で確かめた。コードの経路は妥当。\n- AC2: 閲覧の可否はすべて NotFound に揃っている。閲覧数の加算は `BEGIN IMMEDIATE` の中の `views = views + 1` で、数え漏れしない。トランザクション内で可視性を読み直しており、判定の後に削除・変更が入っても NotFound になる。妥当。\n- AC3: 不十分。範囲外の整数・文字列の検証はあるが、sort の型違い（hashable でない値）が通り抜ける（重大1）。LIKE は `%` `_` `\\` をエスケープし、`ESCAPE '\\'` を付け、値はすべてプレースホルダーで渡している。題名と本文の両方に同じパターンを使っている。タグ絞り込みは OR で、R1 の規則で検査している。\n- AC4: 認可・version 条件つき UPDATE の rowcount 判定を、トランザクション内で読み直した行で行っている。タグを含む検証、削除の失敗の伝播もある。妥当。\n- AC5: 管理者・同じ組織（3者）の検査、全部か何もしないかの1トランザクション、途中失敗の差し込み口がある。妥当。\n- AC6: 8文字未満はすべて伏せ、8文字以上は末尾4文字だけ見せている。妥当。\n- AC7: ロック内で枠の判定を行い、境界は `>= window` で新しい枠になる。上限を超えて許さない。妥当。\n- AC8: fullmatch・`compare_digest`・期限の `>=` で検証している。非文字列と形の崩れたリンクは Forbidden になる。妥当。\n- AC9: ログ・例外のメッセージに本文・署名・api_key は出ていない。妥当。\n- AC10: ROLLBACK 自体が失敗しても元の例外を隠さず、COMMIT の失敗でも巻き戻す。妥当。\n- エンジンが検出したテストの兆候: なし。`history` に検証条件を弱める変更はなく、bind の追加だけだった。\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、SQLite を使った単体テストでリスクを確かめられる。\n### 不足しているリスク\n- R3: sort の型違いの検証（重大1）\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .` → 63件すべて OK。\n- `list_notes(..., sort=[\"title\"])` → TypeError を再現（重大1の根拠）。\n- spec.md・design.md・notes/*.py をすべて読み、R1〜R10 とリスク K1〜K8 の経路をたどった。\n- `aqdlc.py history --since 0` で検証条件の弱体化がないことを確認した。\n- `trace` は実行していない。\n- 並行処理（閲覧数・RateLimiter・楽観的ロック）は、コードの経路で確かめた。テストの実行結果は、全体の OK 以外を個別には見ていない。",
+ "files_changed": [],
+ "valid": true
+}

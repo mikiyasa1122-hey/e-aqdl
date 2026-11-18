@@ -1,0 +1,49 @@
+{
+ "case": "TD-10",
+ "rep": 3,
+ "sec": 38.7,
+ "exit": 0,
+ "cost_usd": 0.1332448,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18429,
+  "cache_read_input_tokens": 128128,
+  "output_tokens": 4670,
+  "output_tokens_details": {
+   "thinking_tokens": 2307
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18429,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1799,
+    "cache_read_input_tokens": 40012,
+    "cache_creation_input_tokens": 5883,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 5883
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 68583c30\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `LINK_RE` は先頭ゼロ付きの数字を許す。このため `0007.<期限>.<署名>` のように note_id の表記を変えたリンクは、元のリンクと同じ署名で検証を通り、note_id 7 を返す。署名の対象は整数に直した値で、文字列そのものではない。 / 提案: 先頭ゼロを拒否する（`0|[1-9][0-9]*` にする）か、検証後に `f\"{note_id}.{expires}.{token}\" == link` を確かめる。署名は有効なままで、他のメモにも権限が及ばないため、仕様違反とは断定せず改善提案にとどめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。`create_note` は題名・本文・タグを検証してから 1 つのトランザクションで記録する。タグ登録の途中で `hooks.before_write` から失敗させるテストがあり、何も残らないことを確かめている。\n- AC2: 妥当。見えないメモ（他の組織・他人の非公開・存在しない）はすべて NotFound になり、閲覧数も増えない。確認後に非公開へ変えられた場合と、割り込み閲覧の数え漏れを決定論的に確かめている。スレッドによる同時閲覧も、一時ファイルの DB で行っている。\n- AC3: 妥当。LIKE は `ESCAPE '\\'` で、`\\` と `%` と `_` をエスケープしている。値はすべてプレースホルダーで渡している。page・per_page・sort の範囲外と bool、タグの OR と検査もコード上で確認した。テストファイルは存在する。個々の入力はテストの中身までは追っていない。\n- AC4: 妥当。認可は書き込みと同じトランザクションの中で読み直して判定している。楽観的ロックは `UPDATE ... WHERE version` の rowcount で判定する。削除は途中で失敗すると例外が伝わりロールバックされる。\n- AC5: 妥当。管理者であること、3者が同じ組織であること、全件を 1 つのトランザクションで移すことを確認した。途中失敗のフック用の差し込み口もある。\n- AC6: 妥当。8文字未満は全部伏せ、8文字以上は末尾4文字以外を伏せる。監査ログの detail には ID しか入らない。\n- AC7: 妥当。`now - start >= window` で枠が切り替わる。ロックで保護され、`threading.Barrier` を使った同時呼び出しと、ロック内での割り込みのテストがある。時計は注入した値を使い、sleep には頼っていない。\n- AC8: 概ね妥当。期限は「ちょうど以降は無効」、署名の比較は `hmac.compare_digest` で、形の崩れたものは Forbidden になる。軽微1の先頭ゼロの扱いはテストされていない。\n- AC9: 妥当。ログと例外メッセージに本文・署名・api_key は出ていない。`verify_link` の ValueError は `from None` で隠している。\n- AC10: 妥当。`transaction` は BaseException でも ROLLBACK し、ROLLBACK の失敗で元の例外を隠さない。\n- エンジンが検出したテストの兆候はなかった。履歴は bind だけで、検証の弱体化は見つからなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実 DB を使う単体テストが並行処理・ロールバック・認可の経路を直接確かめている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様書・設計書と、`notes/` の全 5 ファイルを通読した。\n- `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests -t .` を実行し、62 件が OK だった。\n- `aqdlc.py history --since 0` で履歴を確認した。\n- 次の観点をコードの経路で確かめた。\n  - 認可（他の組織・非公開・管理者）。\n  - 判定の後に他の操作が入る場合（view と update）。\n  - 途中失敗のロールバック。\n  - SQL のプレースホルダーと LIKE のエスケープ。\n  - 型の違う入力（bool の page、文字列の tags）。\n  - api_key の長さの境界（8文字未満と8文字）。",
+ "files_changed": [],
+ "valid": true
+}

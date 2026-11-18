@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 2,
+ "sec": 90.5,
+ "exit": 0,
+ "cost_usd": 0.5377494,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 37766,
+  "cache_read_input_tokens": 293227,
+  "output_tokens": 8846,
+  "output_tokens_details": {
+   "thinking_tokens": 3569
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 37766,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3562,
+    "cache_read_input_tokens": 63944,
+    "cache_creation_input_tokens": 1252,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1252
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: 共有リンクの数字部分に先頭のゼロを付けても通る。`notes/share.py:348` の `LINK_RE` が `[0-9]{1,18}` で、そのあと `int()` に変換してから署名を確かめるため、`007.<期限>.<署名>` が note_id 7 として有効になる（プローブで確認済み）。署名が守る note_id と期限の値は変わらないので、別のメモや期限の延長には使えない。仕様の「10進の数字だけ」にも反しない。ただし、1つのリンクを別の文字列で表せてしまう。また上限が18桁なので、`make_link` が19桁の note_id（SQLite の整数の上限まで取りうる）で作ったリンクを、`verify_link` 自身が Forbidden にする（プローブで確認済み）。/ 提案: 検証は受け取った文字列そのものに対して署名を計算する（`f\"{m.group(1)}:{m.group(2)}\"`）か、先頭のゼロを拒否する。桁の上限は `make_link` と揃える。\n- [軽微2] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note`（`notes/service.py:281-301`）は `version` の型を確かめていない。`\"1\"` を渡すと、SQLite の型の変換で `WHERE version = ?` に一致して更新がコミットされ、そのあと `return version + 1` で TypeError になる。つまり、更新は成功したのに呼び出し側には失敗に見える（プローブでは TypeError が出た）。version の型は仕様に書かれていない。/ 提案: 入口で `isinstance(version, int) and not isinstance(version, bool)` を確かめ、違えば ValidationError にする。\n- [軽微3] 区分: テスト / 対象: AC4, K3 / 対応区分: 改善提案 / 内容: 楽観的ロックの競合を確かめるテストは、hook を使って同じ接続の中で順番を入れ替える形だけで、別々のスレッド・別々の接続からの同時更新は試していない。設計どおり BEGIN IMMEDIATE と `version` の条件があり、読み出しから書き込みの間の割り込みは hook のテストで決まった順番で確かめられているので、必須の証拠は足りている。/ 提案: 閲覧数のテスト（`test_concurrent_views_from_threads`）と同じ形で、複数のスレッドが同じ version を渡して更新し、成功が1件・残りが Conflict・version が2になることを確かめるテストを足す（今回のプローブではこのとおりの結果だった）。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1（`test_ac1_create.py`）は妥当。題名の境界（0・空白だけ・100・101文字、型の違い）、本文（10000・10001文字）、タグ（大文字・末尾の改行・全角・`_`・21文字・数字の型）、重複を数えたうえで5個まで、文字列そのものを拒否することを確かめている。hook で途中に失敗させ、notes・note_tags・audit が 0/0/0 になることも確かめている。\n- AC2: V2 は妥当。他の組織（管理者を含む）・他人の非公開・存在しないメモが、どれも NotFound になることを確かめている。確かめた後に非公開になった場合も NotFound で、閲覧数が増えないことも見ている。閲覧数は、割り込みのテストに加えて、4つのスレッドが別々の接続で10回ずつ閲覧して合計40になることを、ファイルの DB で確かめている。\n- AC3: V3 は妥当。一覧の範囲（他の組織・他人の非公開を含まない。管理者も同じ）、並び順、ページ、巨大な page、不正な page・per_page・sort（bool・float・文字列）を確かめている。検索は、`%`・`_`・`\\` をそのままの文字として扱うこと、タグの OR、範囲、検索語とタグの拒否を確かめている。\n- AC4: V4 は妥当。作成者と同じ組織の管理者だけが変更でき、他の利用者は Forbidden、他の組織は NotFound、非公開は管理者にも NotFound になることを確かめている。古い version と、読み出しから書き込みの間に他の更新が入った場合の Conflict、判定の後に移管された場合の再判定、更新での入力検証、削除の途中の失敗でタグとメモが残ることと、例外が呼び出し側に伝わることも確かめている。\n- AC5: V5 は妥当。全件（非公開を含む）が移ること、管理者だけが移せること、4通りの組織の組み合わせで拒否されること、途中で失敗したら全件が元のままになることを確かめている。\n- AC6: V6 は妥当。末尾4文字だけが見えること、7文字・8文字・空の鍵の境界、管理者だけが出力でき、自分の組織だけが含まれることを確かめている。\n- AC7: V7 は妥当。枠の境界（59.999秒は制限、60秒ちょうどで新しい枠）、拒否された呼び出しで枠が延びないこと、20スレッドを同時に呼んで成功が5件ちょうどになることを確かめている。hook の中に割り込む形で、判定が直列になることも見ている。待ちの時間の上限に頼る箇所はあるが、ロックを外せば失敗する形になっている。\n- AC8: V8 は妥当。期限の時刻ちょうどと、その後は無効になることを確かめている。note_id・期限・署名の改ざん、別の秘密鍵、形の崩れたリンク（大文字の16進、改行、前後の空白、符号、全角やアラビアの数字、None・int・bytes）も確かめている。先頭のゼロは[軽微1]のとおり。\n- AC9: V9 は妥当。ログ・例外のメッセージ・監査ログの出力に、本文・署名・api_key・秘密鍵が出ないことを、実際のハンドラーで記録を取り出して確かめている。\n- AC10: V10 は妥当。Conflict・ValidationError・RuntimeError・IntegrityError のあとに `in_transaction` が False になり、次の操作が成功すること、SQLite がすでにロールバックした後でも元の例外が伝わることを確かめている。\n- K1〜K8: それぞれ上の AC と同じテストで確かめられている（K2 は SQL の文字列とタグに注入を試すテストがあり、コードもすべての値をプレースホルダーで渡している）。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションのないテストは見つからなかった）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで（HTTP の API は仕様の対象外）、受け入れ条件はすべて公開関数の単体テストで、本物の SQLite を使って確かめている。モックは使っていない。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/*.py` をすべて読み、仕様の R1〜R10 とコードの経路を突き合わせた。\n  - 認可: `_visible` と `_can_modify` が、取得・更新・削除・一覧・検索のすべての経路で適用されている。\n  - 更新・削除: 認可をトランザクションの中で読み直した行で再判定している。\n  - SQL: すべての値がプレースホルダーで渡されている。f-string で SQL に入るのは、固定の `SORT_COLUMNS` と `?` の列だけ。\n  - LIKE: `\\` → `%` → `_` の順にエスケープし、題名と本文の両方に `ESCAPE '\\'` を付けている。\n- `$AQ trace`: R1〜R10・AC1〜AC10・K1〜K8 すべてに V が対応し、gate 20261111-085408 で合格（反証テストは無効）。\n- `$AQ history --since 0`: 検証の追加と対応づけだけで、検証の削除や弱体化はなかった。\n- gate のログ `gate/20261111-085408-check-unit.log`: 63件 OK。\n- `python3 -B -m unittest discover -s tests -t . -q`（バイトコードを書き出さずに実行）: 63件 OK。\n- 境界のケースを確かめるスクリプトを scratchpad（`/tmp/claude-0/-tmp-claude-0-td-clean-after-work-aqdlc-test-giguvan5-app/ffd9eb6a-ab65-4dd4-af19-560b42a84748/scratchpad/probe.py`、DB はメモリ上と一時フォルダ）で実行した結果:\n  - 先頭のゼロのリンクが通る → [軽微1]\n  - 19桁の note_id のリンクが Forbidden になる → [軽微1]\n  - `version=\"1\"` で TypeError が出る → [軽微2]\n  - 8スレッドが別々の接続で同時に更新 → 成功1件・Conflict 7件・version 2（更新は失われない）\n  - 検索は ASCII の大小文字を区別しない（仕様に規定はない）\n- `git status` でリポジトリに変更がないことを確かめた（追跡されていないファイルが元のままあるだけ）。",
+ "files_changed": [],
+ "valid": true
+}

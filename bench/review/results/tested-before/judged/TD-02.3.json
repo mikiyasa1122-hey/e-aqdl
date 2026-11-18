@@ -1,0 +1,23 @@
+{
+ "case": "TD-02",
+ "rep": 3,
+ "judge_cost_usd": 0.1142302,
+ "judge_raw": "## 判定\n\n- **重大1**: 巨大な page（例: page=2**62, per_page=50）で OFFSET が SQLite の整数範囲を超え、`OverflowError` になる点を指摘しています。箇所は `notes/service.py` の `list_notes`、原因は `MAX_OFFSET` が定義されているだけで OFFSET の範囲を確かめていないこと、影響は ValidationError でも空の結果でもなく OverflowError になること。埋め込んだ欠陥と箇所・原因・影響がすべて一致します。再現結果も示されています。\n- **軽微1**: 共有リンクの数字部分が先頭ゼロを受け入れる点を指摘しています。レビュー担当自身が「セキュリティ上の欠陥ではない」と述べています。仕様の R8 は「10進の数字だけ」としており、先頭ゼロを禁じていないので、仕様違反ではありません。正規形にするかどうかの提案にとどまるため、style と判断しました。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes で巨大な page により OFFSET が SQLite の整数範囲を超え OverflowError になる、という埋め込み欠陥の箇所・原因（MAX_OFFSET 未使用）・影響が一致し、再現も示している。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの数字を受け入れる点は仕様（10進の数字だけ）に反せず、署名も偽造できないと自認した正規形の改善提案にすぎない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（巨大 page による OverflowError）を原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes で巨大な page により OFFSET が SQLite の整数範囲を超え OverflowError になる、という埋め込み欠陥の箇所・原因（MAX_OFFSET 未使用）・影響が一致し、再現も示している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの数字を受け入れる点は仕様（10進の数字だけ）に反せず、署名も偽造できないと自認した正規形の改善提案にすぎない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（巨大 page による OverflowError）を原因・影響とも正確に捉えている。"
+ }
+}

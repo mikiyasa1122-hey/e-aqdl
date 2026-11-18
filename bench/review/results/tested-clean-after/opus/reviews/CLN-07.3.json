@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 3,
+ "sec": 113.8,
+ "exit": 0,
+ "cost_usd": 0.6216526,
+ "num_turns": 7,
+ "models": [
+  "claude-opus-5-5"
+ ],
+ "usage": {
+  "input_tokens": 14,
+  "cache_creation_input_tokens": 43042,
+  "cache_read_input_tokens": 291803,
+  "output_tokens": 10945,
+  "output_tokens_details": {
+   "thinking_tokens": 6850
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 43042,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3133,
+    "cache_read_input_tokens": 66960,
+    "cache_creation_input_tokens": 3512,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3512
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R4, R10, AC4 / 対応区分: 改善提案 / 内容: `update_note` は `version` の型を検査していない。文字列の `\"1\"` を渡すと、SQLite の型変換で `WHERE version = '1'` が一致して更新がコミットされる。その後、戻り値を作る `version + 1`（notes/service.py:301）で TypeError が出る。呼び出し側には失敗に見えるが、データは変わっている（再試行すると Conflict になる）。仕様は version の型を決めていないため、改善提案にとどめる / 提案: 関数の最初で `version` が int であること（bool は除く）を確かめ、違えば ValidationError にする。または戻り値を DB から読み直した version にする\n- [軽微2] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `LINK_RE`（notes/share.py:348）は先頭が 0 の数字を通す。`int()` で正規化してから署名を確かめるため、`07.1060.<署名>` のような別の書き方のリンクも有効になる。指しているメモと期限は元のリンクと同じなので、権限が広がることはない。ただし、リンクの表記が一意に決まらない / 提案: 先頭の 0 を許さない（`(0|[1-9][0-9]{0,17})`）。または `str(int(x)) == x` を確かめる\n- [軽微3] 区分: テスト / 対象: R3, AC3, K2 / 対応区分: 改善提案 / 内容: `test_percent_and_underscore_are_literal` の `ids(\"\\\\\")`（tests/test_ac3_list_search.py:299 付近）の対象データには `\\` を含むメモがない。そのため、エスケープ文字そのもののエスケープを外しても、このテストは結果 `[]` のまま通る。手元で確かめたところ、実装は `\\` を正しく文字として探せている / 提案: 本文に `\\` を含むメモを用意し、`\\` で検索すると見つかることを確かめる\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当。題名・本文・タグの境界値（100/101、10000/10001、20/21 文字、空白だけ、改行付きのタグ、型の違う値、文字列そのもの）を確かめている。重複を含めた個数と、重複を除いた保存も確かめている。`create:tags` で失敗させたとき notes・note_tags・audit の3表がすべて 0 件になることも確かめている\n- AC2: V2 は妥当。他の組織・他の組織の管理者・他人の非公開・存在しないメモが、すべて NotFound になることを確かめている。判定の後に非公開になった場合の NotFound と閲覧数の巻き戻し、hook で割り込ませた閲覧、別々の接続の4スレッドから計40回の閲覧も確かめている\n- AC3: V3 は妥当。範囲（他の組織・他人の非公開）、並び順、ページ送り、巨大な page、bool・浮動小数・文字列の page と per_page、sort のホワイトリスト、% と _ を普通の文字として扱うこと、タグの OR、検索語とタグの拒否を確かめている（`\\` の検証が弱い点は軽微3）\n- AC4: V4 は妥当。作成者と同じ組織の管理者が更新できること、Forbidden と NotFound の区別、非公開メモは作成者だけが扱えること、古い version の Conflict を確かめている。読み出しと書き込みの間の更新による Conflict、トランザクションの中での認可の再確認（移管の後）、更新時の入力検証、削除の途中での失敗の巻き戻しと例外の伝わり方も確かめている\n- AC5: V5 は妥当。管理者だけができること、組織の組み合わせ4通りの拒否、非公開のメモも含めて移ること、途中で失敗したときに何も移らないことを確かめている\n- AC6: V6 は妥当。7・8・0 文字の鍵の境界、末尾4文字だけが見えること、管理者だけが出力でき、自分の組織の分だけになることを確かめている\n- AC7: V7 は妥当。時計を注入して 159.999 秒と 160.0 秒の境界を確かめている。Barrier で20スレッドを同時に呼んで上限5回を確かめている。hook での割り込みは、ロックを外すと [\"ok\",\"ok\"] になって失敗する形になっている\n- AC8: V8 は妥当。期限ちょうど（1060）が無効になること、note_id・期限・署名・秘密鍵の改ざん、16種類の形の崩れたリンク（大文字・改行・アラビア数字・None・bytes など）を確かめている\n- AC9: V9 は妥当。ログ・例外のメッセージ・監査ログの出力に、本文・署名・秘密鍵・api_key が出ないことを確かめている\n- AC10: V10 は妥当。Conflict・ValidationError・途中の失敗・外部キー違反・ROLLBACK ができない状態のあとに、`in_transaction` が False に戻ることと、次の操作が成功することを確かめている\n- K1〜K8: 上記のテストで扱われている。K2 はプレースホルダー・sort のホワイトリスト・LIKE の ESCAPE をコードでも確かめた\n- エンジンが検出したテストの兆候: なし\n### E2E の要否\n- 不要（HTTP・UI のないライブラリで、仕様も HTTP を対象外にしている。実際の SQLite と、スレッドごとの別々の接続で単体テストをしており、リスクに見合っている）\n### 不足しているリスク\n- なし\n### 確認したこと\n- 仕様・設計・notes/*.py・tests/*.py をすべて読んだ。`$AQ trace` で R1〜R10 がすべて対応していることを、`$AQ history --since 0` で検証条件の削除・弱体化がないことを確かめた（check の unit は1回登録されただけで、変更はない）\n- gate のログ 20261111-085408-check-unit.log では 63 件が合格（exit=0）だった。自分でも `python3 -m unittest discover -s tests -t . -q` を実行し、63 件が合格した\n- 一時スクリプトで次を確かめた（メモリ上の DB を使い、バイトコードを書き出さない設定で実行）\n  - 文字列の version を渡すと、コミットの後に TypeError になる（軽微1）\n  - `\\` と `K\\S` の検索が正しく一致する\n  - 先頭に 0 を付けたリンクが通る（軽微2）\n- コードの経路で確かめたこと\n  - SQL の値は、すべてプレースホルダーで渡している（sort は辞書で、IN 句は `?` の数だけを組み立てている）\n  - LIKE は `\\` を最初にエスケープし、題名・本文の両方に `ESCAPE '\\'` を付けている\n  - 認可は `_visible` と `_can_modify` でサーバー側の行を使い、更新・削除ではトランザクションの中で読み直した行で判定し直している\n  - 楽観的ロックは `WHERE version = ?` と rowcount で判定している\n  - 閲覧数は `views = views + 1` を BEGIN IMMEDIATE の中で増やしている\n  - RateLimiter は、時計の読み取りからカウントの更新までを1つのロックで囲んでいる\n  - HMAC は `compare_digest` で比べている\n  - transaction() は例外のときと COMMIT に失敗したときに ROLLBACK し、元の例外を隠さない\n- `git status` で、作業ツリーを変更していないことを確かめた",
+ "files_changed": [],
+ "valid": true
+}

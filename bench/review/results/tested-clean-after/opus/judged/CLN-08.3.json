@@ -1,0 +1,28 @@
+{
+ "case": "CLN-08",
+ "rep": 3,
+ "judge_cost_usd": 0.2760076,
+ "judge_raw": "## 判定\n\nこのケースは「欠陥なし」です。埋め込んだ変更は、`transfer_notes` で移管の対象を `rows` と `ids` の2つの変数に分けて読み出すだけです。振る舞いは変わらないので、どの指摘も matches_defect にはなりません。レビュー担当の指摘は、どれもこの移管の箇所には触れていません。\n\n### 重大1（sort にリスト・dict を渡すと TypeError）→ real_other\n- **成立する入力:** `list_notes(conn, user, sort=[\"updated\"])` または `sort={}` を渡したとき。\n- **原因:** `service.py:135` の `sort not in SORT_COLUMNS` は dict のメンバー判定です。このとき `hash()` が呼ばれるので、ハッシュ化できない値では ValidationError にならず、TypeError が出ます。\n- **仕様との関係:** R3 は「sort は updated か title だけ。範囲外は ValidationError」と定めています。同じ関数の page・per_page は型を検査しており、そろっていません。\n- **重大度:** 実在する仕様違反です。ただし、データの破損や漏えいはなく、入力の拒否が想定と違う例外になるだけなので、「重大」は言い過ぎで、実際は軽い不具合です。\n\n### 軽微1（version=\"1\" でコミットの後に TypeError）→ real_other\n- **成立する入力:** `update_note(..., version=\"1\", body=\"z\")` を渡したとき。\n- **原因:** version 列は INTEGER の型親和性を持つので、`version = '1'` の比較では文字列が整数に変換されて一致します。そのため UPDATE が成功して COMMIT されます。その後、`service.py:197` の `return version + 1` で TypeError が出ます。\n- **影響:** 呼び出し側には失敗と伝わるのに、書き込みは反映されています。\n- **仕様との関係:** version の型は仕様に書かれていません。しかし、「失敗と伝えたのに状態が変わっている」ことは、K4 の不整合の観点から実在する欠陥と判断しました。レビュー担当は改善提案としていますが、主張の中身は欠陥の指摘です。\n\n### 軽微2（共有リンクの数字の先頭0を受け入れる）→ style\n- R8 は「10進の数字だけ」としか定めておらず、`07` も10進の数字の並びなので、仕様違反ではありません。\n- 署名は整数値にかかっているので、偽造・期限の延長・別のメモへの流用はできません。レビュー担当自身もそう認めています。\n- 内容は「表し方を1つにそろえる」という正規化の提案で、欠陥の主張ではありません。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"sort=[\\\"updated\\\"] や sort={} を渡すと、service.py:135 の dict のメンバー判定で hash() が呼ばれて TypeError になり、R3 の『範囲外は ValidationError』に反する（ただし影響は小さく、重大度は過大）\"}, {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"version=\\\"1\\\" を渡すと、SQLite の型親和性で UPDATE が一致してコミットされた後に、service.py:197 の version + 1 で TypeError になり、失敗と伝わるのに書き込みが残る\"}, {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"R8 は『10進の数字だけ』としか定めておらず、署名は整数値にかかっているので偽造もできず、先頭0の受け入れは正規化の好みにとどまる\"}], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"埋め込んだ変更は移管の対象の読み出しを変数に分けただけで振る舞いは変わらず、レビュー担当はこの箇所に触れていない。一方で、sort の型の検査漏れと、コミットの後の TypeError という、題材の作り手が見落とした実在の欠陥を2件見つけている\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "sort=[\"updated\"] や sort={} を渡すと、service.py:135 の dict のメンバー判定で hash() が呼ばれて TypeError になり、R3 の『範囲外は ValidationError』に反する（ただし影響は小さく、重大度は過大）"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "version=\"1\" を渡すと、SQLite の型親和性で UPDATE が一致してコミットされた後に、service.py:197 の version + 1 で TypeError になり、失敗と伝わるのに書き込みが残る"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "R8 は『10進の数字だけ』としか定めておらず、署名は整数値にかかっているので偽造もできず、先頭0の受け入れは正規化の好みにとどまる"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "埋め込んだ変更は移管の対象の読み出しを変数に分けただけで振る舞いは変わらず、レビュー担当はこの箇所に触れていない。一方で、sort の型の検査漏れと、コミットの後の TypeError という、題材の作り手が見落とした実在の欠陥を2件見つけている"
+ }
+}
