@@ -1,0 +1,49 @@
+{
+ "case": "CLN-03",
+ "rep": 1,
+ "sec": 29.5,
+ "exit": 0,
+ "cost_usd": 0.22380260000000002,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 43897,
+  "cache_read_input_tokens": 138246,
+  "output_tokens": 3437,
+  "output_tokens_details": {
+   "thinking_tokens": 1260
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 43897,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1522,
+    "cache_read_input_tokens": 42399,
+    "cache_creation_input_tokens": 1498,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1498
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード e7dd616c\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `verify_link` は note_id を整数に変換してから署名を検証する。そのため、先頭にゼロを付けた「007.期限.署名」も note_id=7 の有効なリンクとして通る。署名の偽造にはならないが、同じ内容のリンクが複数の文字列で通る。 / 提案: `make_link` が出す正規の形（先頭ゼロなし）以外は Forbidden にするか、署名を元の文字列で検証する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_ac1_create.py` の検証規則と、`hooks.before_write(\"create:tags\")` による途中失敗の再現で、失敗時に何も残らないことを確認できる。妥当。\n- AC2: 見えないメモの NotFound を、他の組織・他の組織の管理者・他人の非公開・管理者・存在しないメモの5パターンで確認している。確認後に非公開へ変わる場合もある。閲覧数は、割り込みの閲覧と別接続4スレッドから各10回の閲覧で確認している。`BEGIN IMMEDIATE` と `views = views + 1` の組み合わせで数え漏れは起きないため、妥当。\n- AC3: スコープ、sort、page、範囲外の入力、`%` と `_` をそのまま文字として探すこと、タグの OR、SQL 文字列を値として渡す場合を確認している。実装は `ESCAPE '\\'` とプレースホルダーを題名・本文の両方に使っており、タグ側もプレースホルダーである。妥当。\n- AC4: 認可、非公開は NotFound、古い version の Conflict、読み出しと書き込みの間の割り込み、トランザクション内での再認可、タグを含む検証、途中失敗時の巻き戻しと例外の伝播を確認している。妥当。\n- AC5: 管理者以外・組織外の拒否、途中失敗で何も移らないこと、version の更新を確認している。妥当。\n- AC6: マスクの規則と8文字未満の鍵を確認している。妥当。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しが枠を延ばさないこと、20スレッドの同時呼び出しで成功が5回に収まること、`hook` による割り込みの直列化を確認している。sleep に頼らず Barrier と Event で順序を固定している。妥当。\n- AC8: 往復、期限の境界、改ざん、形の崩れを確認している。軽微1の先頭ゼロは未検証だが、仕様違反ではない。\n- AC9: ログと例外メッセージに本文・署名・鍵が出ないことを確認している。実装でも出力は ID と tag の値だけである。妥当。\n- AC10: 例外の後で接続を使い続けられることを確認している。`transaction` は例外のたびに ROLLBACK する。元の例外は隠さない。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのテストは見つからなかった。`history` はすべて実装担当の `bind` で、検証条件の弱体化は見当たらない。\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、SQLite の実接続（ファイルDBでの複数スレッドを含む）を使った単体・結合テストがリスクを確かめている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、63件すべて成功した。\n- `notes/*.py` の全ファイルと、AC2・AC7 のテスト、AC3〜AC9 のテスト名一覧を読んだ。\n- `aqdlc.py history --since 0` を確認した。\n- 他の組織・非公開メモの経路（`_visible`、`list_notes`・`search_notes` の WHERE、`transfer_notes` の組織条件）が、利用者の入力から SQL までたどって適用されていることを確認した。\n- `aqdlc.py trace` と `gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

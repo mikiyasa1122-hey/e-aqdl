@@ -1,0 +1,23 @@
+{
+ "case": "BND-01",
+ "rep": 2,
+ "judge_cost_usd": 0.058990299999999996,
+ "judge_raw": "**判定**\n\n- **重大1**: 埋め込み欠陥そのものです。`list_notes` の per_page の検査が `<= PER_PAGE_MAX + 1` で、上限が1つずれています。報告は箇所（notes/service.py の list_notes）、原因（`+ 1`）、影響（51 が通る）のすべてで正解データと一致します。実行で確認した根拠もあります。\n- **重大2**: コードの欠陥の指摘ではなく、テストが薄いという指摘だけです。そのため test_gap と判断します。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の per_page 上限の検査が `PER_PAGE_MAX + 1` で1つずれ、51 が通ることを、箇所・原因・影響とも正しく指摘している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（per_page 上限の境界のずれ）を正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の per_page 上限の検査が `PER_PAGE_MAX + 1` で1つずれ、51 が通ることを、箇所・原因・影響とも正しく指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘しており、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（per_page 上限の境界のずれ）を正確に捉えている。"
+ }
+}

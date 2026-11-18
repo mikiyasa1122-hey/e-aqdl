@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-09",
+ "rep": 3,
+ "sec": 36.7,
+ "exit": 0,
+ "cost_usd": 0.1089029,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13091,
+  "cache_read_input_tokens": 120129,
+  "output_tokens": 4451,
+  "output_tokens_details": {
+   "thinking_tokens": 1343
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13091,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2608,
+    "cache_read_input_tokens": 36398,
+    "cache_creation_input_tokens": 3092,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3092
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 095b6340\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検査用の正規表現 TAG_RE が `^[a-z0-9-]{1,20}$` で、`re.match` で使われている。`$` は末尾の改行の直前にも一致するため、\"abc\\n\" のような改行つきのタグを通してしまう / 成立条件: create_note・update_note・search_notes に、末尾が \"\\n\" のタグ（例 [\"abc\\n\"]）を渡す / 影響: 「英小文字・数字・ハイフンの1〜20文字」の規則に違反するタグが保存される。21文字（20文字＋改行）も通る。入力検証の穴 / 根拠: notes/service.py の TAG_RE と、_validate・search_notes の `TAG_RE.match(t)`。実行して確認した。`create_note(c,u,'t','b',['abc\\n'])` が成功し、`get_note` の tags は `['abc\\n']` だった。share.py は fullmatch を使っており、同じ落とし穴を避けている。上流の検証や DB の制約（CHECK）はなく、既存のテストも防いでいない / 提案: `TAG_RE.fullmatch(t)` に変える（または `\\Z` を使う）。あわせて下記の重大2のテストを足す\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7, AC8, AC9, AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は正常系が中心の12件で、仕様が求める異常系・境界値・並行・途中の失敗を確かめるテストがほぼない。足りないものは次のとおり。(a) 作成の境界（題名100/101文字、空白だけの題名、本文10000/10001文字、タグ5/6個、不正なタグ、tags に文字列を渡す）。(b) 見え方の制限（他の組織・他人の非公開・存在しないメモがどれも NotFound になること。閲覧数の増加と同時の閲覧）。(c) 一覧・検索（page・per_page・sort の範囲外、% と _ のリテラル検索、タグの OR、他人の非公開メモが含まれないこと、SQL インジェクションの入力）。(d) 更新・削除（Forbidden、古い version での Conflict、before_write で割り込む競合、更新時のタグ検査、削除の途中失敗）。(e) 移管（他の組織の拒否、途中失敗で元のままになること）。(f) 監査ログの api_key の伏せ字（現在のテストは action と actor しか見ておらず、AC6 を確かめていない）。(g) RateLimiter の「ちょうど window 秒」の境界と、複数スレッドからの同時呼び出し（RateLimiter.hook で決定論的に再現できる）。(h) 共有リンクの期限の境界・形の崩れ・期限切れ。(i) 例外の後に接続を使い続けられること（ロールバックの確認）、ログに機密情報が出ないこと。設計が用意した hooks.before_write と RateLimiter.hook は、テストで一度も使われていない / 根拠: 仕様の受け入れ条件は境界・拒否・競合・失敗時の巻き戻しを明示的に求めている。認可（K1）、SQL インジェクション（K2）、同時実行（K3）、不整合（K4）、機密情報の露出（K5・K7）、共有リンク（K8）は、検証がないと条件を外しても失敗しない。重大1のバグ（タグの改行）が12件のテストを通過したことが、検証の空洞化を示している / 提案: 上の (a)〜(i) を unittest で追加する。並行・途中の失敗は hooks を使い、sleep に頼らず決定論的に再現する。認可・version・ESCAPE・伏せ字・期限の条件を外すと失敗する形にする\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系と空の題名の拒否だけで不十分。境界値・タグ規則・トランザクションの巻き戻しがなく、実際にタグの改行のバグを見逃した\n- AC2: 作成者本人の閲覧しかなく不十分。組織外・非公開の NotFound、閲覧数の増加、同時の閲覧が未検証。実装は _visible と BEGIN IMMEDIATE で正しそうだが、確かめられていない\n- AC3: 一覧は1ページ目、検索は1件の正常系だけで不十分。範囲外の拒否、% と _、OR のタグ、非公開の除外、SQL インジェクションが未検証。実装はプレースホルダーと ESCAPE を使っており、コード上は妥当\n- AC4: 作成者による更新・削除の正常系だけで不十分。Forbidden、Conflict、競合、削除の失敗が未検証\n- AC5: 管理者による移管の正常系と非管理者の拒否だけで不十分。他の組織・途中失敗が未検証\n- AC6: 伏せ字を確認しておらず、検証がない\n- AC7: 単純な超過と枠の更新だけで不十分。ちょうど window 秒の境界と並行呼び出しが未検証。実装はロック内で判定しており、コード上は妥当\n- AC8: 往復と改ざん（note_id の書き換え）だけで不十分。期限ちょうど・期限切れ・形の崩れが未検証。実装は fullmatch で、コード上は妥当\n- AC9: 検証なし。コード上、ログには ID だけを出している\n- AC10: 検証なし。transaction() は ROLLBACK して再送出しており、コード上は妥当\n- エンジンが検出したテストの兆候: なし。ただし検証が薄い（重大2のとおり）\n### E2E の要否\n- 不要（HTTP・UI のないライブラリ。単体・結合テストで十分。ただし並行は別々の接続・スレッドを使った結合テストが必要）\n### 不足しているリスク\n- K1〜K8 のほぼすべて: 失敗するテストで確かめられていない（重大2）\n- 未確認の軽微な点（指摘にはしない）: update_note と delete_note の権限判定は、トランザクションの外で読んだ行に基づく。移管と競合すると古い所有者で判定される可能性がある（version の条件で多くは Conflict になる）\n- 未確認の軽微な点: 削除が競合して行が既に消えていても、audit に記録される\n### 確認したこと\n- spec.md・design.md を読み、notes/*.py と tests/test_notes.py を全文読んだ\n- `python3 -m unittest discover -s tests -t .`: 12件 OK。ただし重大2のとおり検証が薄い\n- 実行して再現した: `create_note(..., ['abc\\n'])` が成功し、改行つきのタグが保存された（重大1）\n- コードの確認: SQL は値をプレースホルダーで渡している（ORDER BY は固定のホワイトリスト）。LIKE は ESCAPE。transaction() は ROLLBACK して再送出する。RateLimiter はロック内で判定する。share は fullmatch と compare_digest を使う\n- gate は実行していない。ファイルは変更していない\n```",
+ "files_changed": [],
+ "valid": true
+}

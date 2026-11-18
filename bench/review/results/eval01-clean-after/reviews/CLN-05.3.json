@@ -1,0 +1,49 @@
+{
+ "case": "CLN-05",
+ "rep": 3,
+ "sec": 32.5,
+ "exit": 0,
+ "cost_usd": 0.12655080000000002,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18431,
+  "cache_read_input_tokens": 123808,
+  "output_tokens": 4043,
+  "output_tokens_details": {
+   "thinking_tokens": 1131
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18431,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2392,
+    "cache_read_input_tokens": 38001,
+    "cache_creation_input_tokens": 7369,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 7369
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 43fba595\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `notes/share.py` の `verify_link` は note_id を `int()` にしてから署名を検証する。そのため `7.<期限>.<署名>` と、先頭に0を付けた `007.<期限>.<署名>` が、どちらも有効と判定される。仕様の「10進の数字だけ」は満たしており、署名の偽造にもならない。ただし同じメモに対する文字列が複数できる。 / 提案: 厳密にしたい場合は、先頭0を拒否するか、`m.group(1)` の文字列そのままを署名に使う。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当と判断した。`tests/test_ac1_create.py` を読んだ。`hooks.before_write(\"create:tags\")` でタグの書き込み前に失敗させ、メモ・タグ・監査ログが残らないことを見ている。\n  - コード側で、題名・本文・タグ個数・タグ形式・文字列の tags 拒否を確認した。個数は重複を含めて数え、保存は `set` で重複を除いている。\n  - 検証の詳細な中身は読み切っていない（未確認）。\n- AC2: 妥当と判断した。\n  - 他組織・他人の非公開・存在しないメモが、すべて NotFound になる（subTest）。\n  - NotFound のときは閲覧数が増えない。\n  - 確認後に非公開へ変えられた場合の再確認がある。\n  - 差し込み口による割り込み閲覧、別接続・別スレッドでの同時閲覧（40回）がある。`BEGIN IMMEDIATE` と `views = views + 1` で数え漏れは防げている。\n- AC3: コードで確認した。\n  - 一覧は組織と非公開の条件、page / per_page / sort の範囲検査、bool の拒否がある。\n  - 検索は `%` `_` `\\` をエスケープし、`ESCAPE` 句とプレースホルダーを使い、題名と本文の両方に同じパターンを渡している。タグは OR で、R1 の規則で検査している。IN の `?` は個数だけを動的に組み立てており、インジェクションの余地はない。\n  - テストの中身（`tests/test_ac3_list_search.py`）の妥当性は個別に確認していない。\n- AC4: コードで確認した。\n  - `_check_modify` で NotFound と Forbidden を出し分けている。\n  - 更新は、トランザクション内で行を読み直して認可と検証をやり直し、`WHERE version = ?` と rowcount で Conflict を判定している。\n  - 削除は、タグとメモを1つのトランザクションで消し、例外はそのまま伝える。\n  - `tests/test_ac4_update_delete.py` は通っている。\n- AC5: コードで確認した。管理者の role と3者の org 一致を検査し、1つのトランザクションで全件を移す。途中失敗は ROLLBACK される。\n- AC6: マスクは、8文字未満なら全て伏せ、8文字以上なら末尾4文字以外を伏せる。\n- AC7: 妥当と判断した。\n  - 枠の境界は 159.999 と 160.0 で見ている。\n  - 拒否された呼び出しが枠を延ばさないことを見ている。\n  - 20スレッドが Barrier で同時に呼び、許可がちょうど5件になる。\n  - 判定の途中に割り込む差し込み口で、直列化を確認している。sleep に頼らず Event を使っている。\n- AC8: コードで確認した。正規表現は `fullmatch` で ASCII の数字と16進小文字を使い、期限は `>=` で判定し、署名は `compare_digest` で比較する。形の崩れた入力と非文字列は Forbidden になる。\n- AC9: `tests/test_ac9_secrets.py` が通っている。メッセージとログにはコードを読む限り ID しか出ていない。例外メッセージに本文・署名・api_key は含まれない。\n- AC10: `transaction()` は、例外のときだけでなく COMMIT の失敗でも ROLLBACK する。ROLLBACK 自体の失敗で元の例外を隠さない。\n- K2: SQL は常にプレースホルダーを使っている。LIKE のエスケープも適用されている。\n- K3: 更新は楽観的ロックと `BEGIN IMMEDIATE`、閲覧は SQL 上の加算で守られている。\n- K1 / K6: 認可は `_visible` と `_can_modify` にまとめられ、一覧・検索・移管の SQL でも org_id で絞っている。\n- テストの兆候: エンジンが検出したものはなし。`history` に、検証条件が弱められた記録は見当たらなかった。gate の結果はどれも「合格」だが、反証テストが無効なので `passed_but_unchallenged`（合格だが反証未実施）の状態である。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使った単体テストが、別接続・別スレッドの並行実行まで確かめている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/*.py` の全ソースを読んだ。\n- `tests/test_ac2_view.py` と `tests/test_ac7_ratelimit.py` は全文を読んだ。それ以外のテストは、中身を精査せず実行結果だけを見た。\n- `aqdlc.py history --since 0` と `trace` を実行した。要求・受け入れ条件・検証の対応に欠落はなく、検証条件の弱体化も見当たらなかった。\n- `python3 -B -m unittest discover -s tests -t .` を実行した。63件すべて OK だった。\n- 実装報告（impl.md）は読んでいない。",
+ "files_changed": [],
+ "valid": true
+}

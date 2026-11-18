@@ -1,0 +1,49 @@
+{
+ "case": "EXC-03",
+ "rep": 1,
+ "sec": 32.6,
+ "exit": 0,
+ "cost_usd": 0.1328944,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20214,
+  "cache_read_input_tokens": 113824,
+  "output_tokens": 4064,
+  "output_tokens_details": {
+   "thinking_tokens": 895
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20214,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2917,
+    "cache_read_input_tokens": 36420,
+    "cache_creation_input_tokens": 3795,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3795
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 774f3810\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R8, AC8, K8（notes/share.py の verify_link） / 対応区分: 修正必須 / 内容: 形の崩れたリンクで Forbidden を送出せず `None` を返す。仕様 R8 は「期限切れ・改ざん・形の崩れたリンクは、どれも Forbidden」と定めている。 / 成立条件: `LINK_RE.fullmatch` に合わない文字列。例: `\"abc\"`、署名が64文字でない、数字以外を含む、改行付き、20桁以上の数字。`verify_link` はこれらを受けると `raise ValueError` を自分で捕まえて `return None` する。 / 影響: 呼び出し側が例外だけで拒否を判定していると、`None` を「検証済み」として扱うおそれがある。これは K8（形の崩れたリンクを通す）そのものである。仕様と挙動が食い違う。 / 根拠: notes/share.py の verify_link の try/except。`except ValueError: return None`。コードを読んで確認した（実行はしていない）。上流に同じ検証はない。 / 提案: `if not m: raise Forbidden(\"不正なリンク\")` に直し、`except ValueError: return None` は削除する。int 変換の失敗も Forbidden にする。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち特に AC2, AC3, AC4, AC5, AC7, AC8, AC9, AC10 とリスク K1, K2, K3, K4, K6, K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件・リスクを確かめるテストが空洞化している。tests/test_notes.py は12件の正常系中心で、次の検証がない。(1) 他組織・他人の非公開メモの NotFound、管理者が非公開メモを扱えないこと、更新・削除の Forbidden。(2) version の Conflict、および hooks.before_write を使った「読み出しから書き込みの間の割り込み」による Conflict。(3) 閲覧数の同時加算。(4) hooks による途中失敗でのロールバック（作成・削除・移管）と、その後も接続が使えること。(5) 移管の組織外 Forbidden と、途中失敗で元のままになること。(6) 入力検証の境界値（題名100/101文字、タグ5/6個、本文10000/10001文字、tags に文字列そのもの、page=0、per_page=51、不正な sort）。(7) `%`・`_`・SQL 文字列を含む検索語、タグの OR 絞り込み。(8) RateLimiter の枠の境界（ちょうど window 秒）とスレッド同時実行（RateLimiter.hook）。(9) 共有リンクの期限ちょうど、形の崩れたリンク、署名の改ざん。(10) api_key の伏せ方（8文字未満・8文字以上）と、ログ・例外に本文・署名・鍵が出ないこと。 / 根拠: これらは仕様で「規則どおり」とされた受け入れ条件であり、漏えい・競合・不整合のリスクの核心である。設計もこのために hooks の差し込み口を用意しているが、一度も使われていない。実際、[重大1] の欠陥は、形の崩れたリンクのテストが1件もないため gate をすり抜けた。`unittest` は12件がすべて通ったが、通ったことは受け入れ条件を確かめた証拠にならない。トレースの検証 V1〜V10 と VK1〜VK8 はすべて unit に紐付いているが、中身は上の正常系だけである。 / 提案: 上記 (1)〜(10) を、境界値・異常系を含めて決定論的に追加する。並行処理は sleep ではなく hooks と threading.Barrier で再現する。認可の条件や重複防止の条件を外すと失敗することを確認する。\n- [軽微1] 区分: 実装 / 対象: R8（share.py） / 対応区分: 改善提案 / 内容: 先頭ゼロ付きの note_id（`007.…`）が int 化されて 7 として検証される。有害ではないが、同じ署名で別の文字列表現が通る。 / 提案: 先頭ゼロを拒否するか、元の文字列で署名する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空題名の拒否と正常作成だけ。境界値（100/101文字、タグ5/6個、本文）、不正なタグ、tags が文字列の場合、途中失敗で何も残らないことの検証がなく、不十分。実装は規則どおり。\n- AC2: 作成者本人の閲覧だけ。他組織・非公開・存在しないメモの NotFound、閲覧数の同時加算の検証がなく、不十分。\n- AC3: 1ページ目の一覧と単純な検索だけ。範囲外、`%`・`_`、タグの OR、他人の非公開メモの除外、SQL インジェクションの検証がなく、不十分。実装は ESCAPE とプレースホルダーを使っている。\n- AC4: 作成者による更新・削除の正常系だけ。Conflict、Forbidden、非公開メモと管理者、割り込み更新、削除の失敗伝播の検証がなく、不十分。\n- AC5: 正常系と、非管理者の Forbidden だけ。組織をまたぐ移管の拒否、途中失敗で元のままになること、非公開メモが移ることの検証がなく、不十分。\n- AC6: アクションと actor は確認しているが、api_key の伏せ方は一度も確認していない。不十分（空洞化）。\n- AC7: 上限超過と、61秒後の再開だけ。ちょうど window 秒の境界と、複数スレッド同時の検証がなく、不十分。\n- AC8: 往復と1パターンの改ざんだけ。期限ちょうど、形の崩れたリンクの検証がなく、不十分。この検証不足のため、[重大1] の欠陥を検出できなかった。\n- AC9: 検証なし。実装を読んだ範囲では、ログには ID だけを出している。\n- AC10: 検証なし。実装では transaction() が ROLLBACK している。\n- エンジンが検出したテストの兆候: なし。skip・.only もなかった。history に検証の弱体化は見られなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の in-memory で結合した単体テストで足りる。ただし、並行処理は別接続・別スレッドと、ファイルまたは共有キャッシュの DB を使う検証が必要。\n\n### 不足しているリスク\n- K1, K2, K3, K4, K6, K8: 上記 [重大2] のとおり、検証がない。\n- K8: 実装にも欠陥がある（[重大1]）。\n- 同時閲覧の数え漏れ（R2）は、`views = views + 1` を BEGIN IMMEDIATE の中で実行しているため、実装上は防げていると読める。ただしテストで確認していない。\n\n### 確認したこと\n- spec.md、design.md、notes/*.py、tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が通った。\n- `aqdlc.py history --since 0` を確認した。bind の記録だけで、検証条件を弱めた形跡はない。\n- `git status`: notes/ と tests/ は未追跡で、差分比較はできなかった。\n- verify_link が `None` を返す点は、コードの読解だけで確認し、実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,33 @@
+{
+ "case": "CLEAN-03",
+ "rep": 2,
+ "judge_cost_usd": 0.0689463,
+ "judge_raw": "**判定**: 欠陥なしのケースなので、matches_defect はありません。\n\n- **重大1**: `$` は末尾の改行の直前にも一致するため、`match` を使う `TAG_RE` は `\"abc\\n\"` を通します。これは仕様違反として実在する欠陥です。ただし、埋め込んだ変更（OFFSET を変数に分ける）とは無関係なので、real_other とします。\n- **重大2**: テストの不足だけを指摘しており、コードの欠陥の主張ではありません。test_gap です。\n- **重大3**: これもテストの境界値と並行実行の不足だけを指摘しています。test_gap です。\n- **軽微1**: 可視性と権限の確認がトランザクションの外にあるため、`delete_note` では確認後に所有者が変わった場合に元の所有者が削除できます。この競合は実在します。`update_note` は、移管で version が上がるので Conflict になり、指摘のとおりにはなりません。それでも `delete_note` の指摘は成り立つため、real_other とします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と match により末尾が改行のタグが通るのは実在する仕様違反だが、埋め込んだ変更とは無関係。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"RateLimiter と共有リンクのテストの境界値・並行実行の不足だけを指摘している（実装は正しいと認めている）。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"権限確認がトランザクション外にあり、特に delete_note は確認後に移管されると元の所有者が削除できる競合が実在する（update は version で Conflict になるため一部は過大）。\"}\n ],\n \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、実在する別の欠陥（改行付きタグ）と軽微な競合を指摘しており、OFFSET の変更自体は誤検知されていない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と match により末尾が改行のタグが通るのは実在する仕様違反だが、埋め込んだ変更とは無関係。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "RateLimiter と共有リンクのテストの境界値・並行実行の不足だけを指摘している（実装は正しいと認めている）。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "権限確認がトランザクション外にあり、特に delete_note は確認後に移管されると元の所有者が削除できる競合が実在する（update は version で Conflict になるため一部は過大）。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、実在する別の欠陥（改行付きタグ）と軽微な競合を指摘しており、OFFSET の変更自体は誤検知されていない。"
+ }
+}

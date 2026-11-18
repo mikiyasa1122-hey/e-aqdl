@@ -1,0 +1,49 @@
+{
+ "case": "EXC-01",
+ "rep": 3,
+ "sec": 35.5,
+ "exit": 0,
+ "cost_usd": 0.1437817,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21739,
+  "cache_read_input_tokens": 117097,
+  "output_tokens": 4510,
+  "output_tokens_details": {
+   "thinking_tokens": 866
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21739,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2748,
+    "cache_read_input_tokens": 38147,
+    "cache_creation_input_tokens": 3824,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3824
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 2e25bbfa\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R3, K1, AC2, notes/service.py:105-106 (get_note) / 対応区分: 修正必須 / 内容: 見られないメモ（他の組織・他人の非公開）に対して Forbidden を投げており、存在しないメモの NotFound と区別できる。仕様は「どれも NotFound」と定めている。 / 成立条件: 他の組織の利用者、または他人の非公開メモの閲覧者が get_note を呼ぶ。 / 影響: メモの存在が漏れる（K1）。実行で確認した: 別組織の利用者が実在のメモを get_note すると Forbidden になる。 / 根拠: service.py:105-106。update_note と delete_note は同じ場面で NotFound を投げており、挙動が一貫していない。上流に防ぐ層はなく、テストも検証していない。 / 提案: 105-106行目を `raise NotFound(...)` に統一する。row が None のときと同じ処理にまとめてよい。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, notes/service.py:14 (TAG_RE) / 対応区分: 修正必須 / 内容: TAG_RE が `^...$` を `re.match` で使っているため、末尾に改行を付けたタグ（例 \"ab\\n\"）が通る。タグは英小文字・数字・ハイフンの1〜20文字に限る規則に反する。share.py は同じ問題を避けるために fullmatch を使っている。 / 成立条件: create_note・update_note・search_notes に tags=[\"ab\\n\"] を渡す。 / 影響: 規則外のタグが保存され、検索の絞り込みにも使われる。実行で確認した: create_note が成功し、note_id 1 が作られた。 / 根拠: service.py:14, 64, 152。 / 提案: `TAG_RE.fullmatch` に変えるか、パターンを `\\Z` で終える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほぼ正常系だけである。異常系・境界値・並行実行・ロールバックの検証がない。具体的には次のとおり。 / 根拠: 受け入れ条件は、拒否・境界・同時実行・失敗時に何も残らないことまで要求している。重大1・2の欠陥もこのテストでは検出できなかった。 / 提案: 次のテストを追加する。(1) 他の組織・他人の非公開メモが NotFound になる。(2) 閲覧数を並行に増やしても数え漏れがない。(3) hooks.before_write で途中失敗させ、create・delete・transfer が元の状態に戻る。(4) 古い version で Conflict になる。(5) 読み出しと書き込みの間に更新を割り込ませても Conflict になる。(6) LIKE の % と _ を普通の文字として検索する。(7) 検索語にインジェクション文字列を渡す。(8) api_key のマスクの境界（8文字未満・8文字・9文字）。(9) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドからの呼び出し。(10) 共有リンクの期限ちょうど・形の崩れ・期限切れ。(11) 例外の後も接続を使える。(12) 例外メッセージとログに本文・署名・api_key が出ない。\n- [重大4] 区分: テスト / 対象: AC4, AC5, K1, K6 / 対応区分: 証拠不足 / 内容: 認可の検証がない。更新・削除の Forbidden、管理者でも非公開は NotFound になること、移管の組織またぎが Forbidden になることを確かめるテストがない。transfer_notes のテストは件数を確かめるだけである。 / 根拠: 認可の条件を外してもテストは通る。K1・K6 は漏えいと組織またぎのリスクで、必須の検証にあたる。 / 提案: 非管理者の Forbidden、管理者による非公開メモの NotFound、移管元・移管先・管理者のどれかが別組織のときの Forbidden を確かめ、拒否のあとで状態が変わっていないことも確認する。\n- [軽微1] 区分: 実装 / 対象: R8, notes/share.py:11 / 対応区分: 改善提案 / 内容: LINK_RE は先頭ゼロ付きの note_id（例 \"007\"）を受け付ける。int に変換してから署名を検証するため、同じ署名で別の文字列のリンクが通る。仕様上は危険ではない。 / 提案: 先頭ゼロを拒否するか、元の文字列のまま署名を検証する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけで、正常系と空の題名しか確かめていない。タグ・本文の上限、ロールバックは未確認。重大2・3のため不十分。\n- AC2: 閲覧の可否も閲覧数も確かめていない。実装は Forbidden を返しており、仕様と食い違う（重大1）。不十分。\n- AC3: 一覧の1ページ目と単純な検索だけ。範囲外の入力、% と _、インジェクション、タグの OR、他人の非公開メモの除外は未確認。実装の LIKE の ESCAPE とプレースホルダーはコード上は妥当。不十分。\n- AC4: 所有者の更新と削除だけ。Conflict・Forbidden・NotFound の検証がなく、不十分。\n- AC5: 件数だけを確認している。組織またぎ、ロールバック、移管後の所有者は未確認。不十分。\n- AC6: 実装は仕様どおりに見える。ただしマスク結果を確かめるテストがなく、不十分。\n- AC7: 枠の超過と再開だけ。ちょうど window 秒の境界とスレッド並行は未確認。不十分。\n- AC8: 往復と改ざん1件だけ。期限の境界、形の崩れ、期限切れは未確認。不十分。\n- AC9: テストがない。\n- AC10: テストがない。\n- エンジンが検出したテストの兆候: なし（skip・.only・アサーションなしは見つからなかった）。テストの改ざん・弱体化は見つからなかった。history は bind の記録のみ。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、単体テストと統合テストで足りる）。並行実行は別々の接続・スレッドを使うテストで確かめる必要がある。\n\n### 不足しているリスク\n- K2: インジェクション入力のテストがない。\n- K3: 閲覧数・更新・RateLimiter の並行テストがない。\n- K4: 途中失敗のロールバックのテストがない。\n- K5, K7: マスクとログの検証がない。\n- K8: 期限と形の崩れのテストがない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests -t .`: 12件すべて通った。\n- 実行して確認: 別組織の利用者の get_note が Forbidden になる（重大1）。\n- 実行して確認: 末尾に改行を付けたタグ \"ab\\n\" で create_note が成功する（重大2）。\n- 仕様・設計と notes/ の全ソースを読み、認可・SQL・トランザクションの経路をたどった。SQL は全てプレースホルダーで、LIKE は ESCAPE を使っている。\n- `history --since 0` を確認した。検証条件の弱体化は見つからなかった。\n- gate と依存関係のインストールは実行していない。",
+ "files_changed": [],
+ "valid": true
+}

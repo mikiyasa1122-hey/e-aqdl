@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-07",
+ "rep": 2,
+ "judge_cost_usd": 0.0687243,
+ "judge_raw": "各指摘の判定です。欠陥なしのケースなので、matches_defect は使いません。\n\n- **重大1**: `TAG_RE` を `re.match` で使うと `$` が末尾の改行を通す、という指摘は実在します。service.py:14 の正規表現は `^...$` で、`re.match` では `\"abc\\n\"` が通ります。share.py が `fullmatch` を使っているのと対照的です。仕様の「英小文字・数字・ハイフンの1〜20文字」に反するため、real_other です。\n- **重大2**: テストの不足だけを述べているので、test_gap です。\n- **重大3**: update と delete の権限判定がトランザクションの外にあり、delete は version も org も条件に付けていません。コードに根拠はありますが、レビュー担当自身が、非公開化の API がなく実害は直接 SQL で変えた場合に限られ、経路は未確認だと述べています。移管後の delete が古い判定で通る可能性は実在する競合なので、real_other とします。ただし仕様の R4 は「作成者と同じ組織の管理者」に限っており、実害は限定的です。\n- **軽微1**: `page` が 10**30 のとき OFFSET の計算で OverflowError になり、ValidationError にならない、という指摘です。sqlite3 は Python の int が 64bit を超えると OverflowError を出すので、実在します。仕様の「範囲外は ValidationError」にも反します。real_other です。\n- **軽微2**: 検査が2か所に分かれていることへの保守性の提案で、欠陥の主張ではないため style です。前半の「tags が None のとき…」は意味が不明瞭ですが、主旨は重複の整理です。\n\n欠陥なしのケースで、振る舞いを変えない変更は回数の制限の内部の名前の変更だけです。この変更に触れた指摘はありません。ただし real_other が3件あり、どれも元のコードにある別の問題です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE を re.match で使うと末尾の改行を通すため、仕様のタグの規則に反する実在のバグ。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘していて、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update・delete の権限判定がトランザクションの外にあり、delete は version も org も条件にないため、競合の余地が実在する。ただし実害の経路は限定的で未確認。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"巨大な page で OverflowError になり、範囲外は ValidationError という仕様に反するのは実在する。\"},\n  {\"label\": \"軽微2\", \"class\": \"style\", \"reason\": \"タグ検査の重複を1つの関数にまとめる保守性の提案。\"}\n], \"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、回数の制限の内部の名前の変更には触れておらず、元のコードにある別の問題を3件挙げた。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE を re.match で使うと末尾の改行を通すため、仕様のタグの規則に反する実在のバグ。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘していて、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update・delete の権限判定がトランザクションの外にあり、delete は version も org も条件にないため、競合の余地が実在する。ただし実害の経路は限定的で未確認。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "巨大な page で OverflowError になり、範囲外は ValidationError という仕様に反するのは実在する。"
+   },
+   {
+    "label": "軽微2",
+    "class": "style",
+    "reason": "タグ検査の重複を1つの関数にまとめる保守性の提案。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、回数の制限の内部の名前の変更には触れておらず、元のコードにある別の問題を3件挙げた。"
+ }
+}

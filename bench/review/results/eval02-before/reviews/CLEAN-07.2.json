@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-07",
+ "rep": 2,
+ "sec": 35.9,
+ "exit": 0,
+ "cost_usd": 0.13174639999999999,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18937,
+  "cache_read_input_tokens": 113724,
+  "output_tokens": 4461,
+  "output_tokens_details": {
+   "thinking_tokens": 917
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18937,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3155,
+    "cache_read_input_tokens": 36384,
+    "cache_creation_input_tokens": 2554,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2554
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d524f16c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, R3, AC3, R4 / 対応区分: 修正必須 / 内容: タグの検査が `TAG_RE = ^[a-z0-9-]{1,20}$` を `re.match` で使っているため、末尾の改行を通す。`\"abc\\n\"` は不正なタグなのに有効と判定される。share.py は同じ問題を避けて `fullmatch` を使っており、service.py だけ漏れている。 / 成立条件: タグに末尾が `\\n` の文字列を渡す（create_note・update_note・search_notes のどれでも）。 / 影響: 仕様「英小文字・数字・ハイフンの1〜20文字」に反する値が note_tags に保存される。入力検証をすり抜ける。 / 確認した保証: DB に CHECK 制約はなく、上流の検証もない。実行して `TAG_RE.match('abc\\n')` が True になることを確認した。 / 根拠: notes/service.py:14（TAG_RE）、:62-64（`_validate`）、:140-142（`search_notes`）。 / 提案: `TAG_RE.fullmatch(t)` に変える。または `\\Z` を使う。3か所すべてを共通の関数にまとめる。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件の正常系・簡易な異常系だけで、受け入れ条件の中心を確かめていない。足りない証拠は次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること（get・list・search・update・delete）。(b) 管理者が他人の非公開メモを扱えないこと。(c) 同時閲覧で閲覧数が正確に増えること。(d) version 不一致の Conflict と、読み出しから書き込みの間に他の更新が入った場合の Conflict。(e) `hooks.before_write` を使った途中失敗でのロールバック（create・delete・transfer）。(f) 移管での組織またぎの Forbidden。(g) `%` `_` `'` を含む検索語。(h) page・per_page・sort・tags の境界と範囲外。(i) api_key の伏せ字（8文字未満・ちょうど8文字）。(j) RateLimiter の枠の境界（ちょうど window 秒）と、複数スレッドからの同時呼び出し。(k) 共有リンクの期限ちょうど・形の崩れ・改行付き。(l) ログ・例外・出力に本文・署名・api_key が出ないこと。(m) 例外の後も接続を使えること。 / 根拠: 設計書のテスト方針は `hooks.before_write` と `RateLimiter.hook` で並行実行と途中失敗を再現するとしているが、テストはどちらも使っていない。認可の条件を外してもテストは落ちない。K1〜K8 は検証が空洞になっている。重大1のバグもテストで検出できていない。 / 提案: 上記 (a)〜(m) を unittest で追加する。並行実行は `hooks`・`hook` と別接続・別スレッドで、sleep に頼らず再現する。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: update_note と delete_note は、メモの読み出し・`_visible`・`_can_modify` の判定をトランザクションの外で行っている。get_note は閲覧数の更新後に再確認しているが、この2つにはない。さらに delete は WHERE に version も org も付けない。 / 成立条件: 判定の後、書き込みの前に、別の接続がそのメモを非公開にする、または移管で owner を変える。 / 影響: 権限を失った作成者の更新・削除が通る可能性がある。update は version 条件で一部は Conflict になる。非公開化は version を上げないので通る。delete は version を見ないので、移管後でも古い判定のまま削除される。 / 確認した保証: 本ライブラリにはメモの非公開化（`private` の更新）APIがない。移管は version を上げるので update は Conflict になる。したがって実害が出るのは delete が主で、直接 SQL などで private を変えた場合に限られる。この経路が実際に起きるかは未確認。 / 根拠: notes/service.py:160-170（update）、:182-191（delete）。 / 提案: 権限判定をトランザクション（BEGIN IMMEDIATE）の内側に移して再読込する。または delete に権限・version 条件を付けて rowcount を確認する。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `page` に非常に大きな整数（例: 10**30）を渡すと、OFFSET の計算で sqlite3 の OverflowError になり、ValidationError にならない。 / 提案: page に上限を設けるか、OverflowError を ValidationError に変換する。\n- [軽微2] 区分: 実装 / 対象: R4, R1 / 対応区分: 改善提案 / 内容: update_note の `_validate` は、tags が None（更新しない）のとき重複を除く前のタグ数を見ない。一方 create・search には tags 検査が重複している。検査が `_validate` と search_notes の2か所に分かれており、重大1のような修正漏れの原因になる。 / 提案: タグ検査を1つの関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。文字数の境界、タグの規則（改行・重複・5個）、本文の上限、失敗時に何も残らないこと、のどれも確かめておらず不十分。実装にも重大1の欠陥がある。\n- AC2: 同じ組織の閲覧しか確認していない。他の組織・非公開・存在しないメモの NotFound と、同時閲覧での閲覧数は未検証で不十分。\n- AC3: 一覧の1ページ目と単純な検索だけ。非公開メモの除外、範囲外の拒否、`%` `_`、タグの OR は未検証で不十分。\n- AC4: 作成者の更新・削除の正常系だけ。Conflict、Forbidden、管理者、非公開の NotFound、更新時のタグ検査は未検証で不十分。\n- AC5: 件数が正しいことと、管理者でない場合の Forbidden だけ。組織またぎ、全部か何もしないか（失敗時の巻き戻し）は未検証で不十分。\n- AC6: 伏せ字そのものを確かめていない（action と actor だけ）。不十分。\n- AC7: 上限超過と枠の再開だけ。ちょうど window 秒の境界と、複数スレッドからの同時呼び出しは未検証で不十分。\n- AC8: 正常系と1種類の改ざんだけ。期限ちょうど・期限切れ・形の崩れ・改行付きは未検証で不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip・弱体化は見つからなかった。ただしテストが少なすぎて空洞化している（重大2）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite の実接続を使った unittest で十分。ただし重大2の統合テストは必要。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 を確かめるテストがない（重大2）。\n- K2 のコードは、SQL のプレースホルダー・LIKE ESCAPE・並び順の許可リストを使っており、読んだ範囲では問題を見つけていない。ただし検証はない。\n- K3 の並行実行は、コードを読んだ範囲では BEGIN IMMEDIATE と `UPDATE views = views + 1` で保たれているように見える。検証はなく、実行していないため未確認。\n- 並行実行・競合は決定論的に再現できていない。未検証として扱う。\n\n### 確認したこと\n- 仕様・設計・全ソース（notes/*.py）・tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .`: 12件すべて成功。\n- `TAG_RE.match('abc\\n')` が True になることを実行して確認した。\n- `git status` では全ファイルが未追跡で、変更前の履歴がないため、テストの弱体化は比較できなかった。gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

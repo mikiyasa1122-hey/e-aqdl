@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-05",
+ "rep": 2,
+ "sec": 32.5,
+ "exit": 0,
+ "cost_usd": 0.11122109999999999,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14052,
+  "cache_read_input_tokens": 121171,
+  "output_tokens": 4288,
+  "output_tokens_details": {
+   "thinking_tokens": 558
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14052,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2854,
+    "cache_read_input_tokens": 36959,
+    "cache_creation_input_tokens": 3500,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3500
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード bd3d930e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1, notes/service.py:search_notes（約118〜132行） / 対応区分: 修正必須 / 内容: 検索の SQL に非公開メモの絞り込み（`private = 0 OR owner_id = ?`）がない。同じ組織の他人の非公開メモが検索結果に出る。 / 成立条件: 同じ組織の利用者 A が private=True でメモを作り、同じ組織の B が題名または本文に含まれる語で検索する。 / 影響: R3「他人の非公開メモは含めない」に違反し、非公開メモの存在と題名が漏れる（K1）。 / 根拠: 実行して確認した。A が題名 'secret' の非公開メモを作り、B が `search_notes(c, b, 'secret')` を呼ぶと `[{'id': 1, 'title': 'secret'}]` が返った。`list_notes` には絞り込みがあるが、`search_notes` にはない。上流・DB 側にこれを防ぐ仕組みはない。 / 提案: WHERE に `AND (private = 0 OR owner_id = ?)` を追加し、引数に `user[\"id\"]` を渡す。\n- [重大2] 区分: 実装 / 対象: R1, R4, R3, AC1, AC3, AC4, notes/service.py:TAG_RE と _validate、search_notes / 対応区分: 修正必須 / 内容: `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っている。Python の `$` は末尾の改行の手前にも一致するため、`\"ab\\n\"` のようなタグが検証を通る。 / 成立条件: 作成・更新・検索のタグに末尾が改行の文字列を渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」に違反したタグが保存される。20文字＋改行も通る。share.py は同じ問題を意識して fullmatch にしているのに、ここだけ漏れている。 / 根拠: 実行して確認した。`create_note(..., tags=['ab\\n'])` が拒否されず note_id 2 を返した。 / 提案: `TAG_RE.fullmatch(t)` に変える（3箇所）。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8, R2, R4, R5, R7 / 対応区分: 証拠不足 / 内容: テストは 12 件で、正常系中心。受け入れ条件・リスクの境界と異常系を確かめていない。足りないのは次の検証。(a) 非公開・他組織メモの NotFound と、検索・一覧からの除外（これがないため重大1を見逃した）。(b) 入力の境界値（題名100/101文字、タグ5/6個、不正なタグ文字、本文10000文字、page・per_page・sort の範囲外）。(c) 検索の % と _ と SQL インジェクション文字列。(d) Conflict（古い version、`hooks.before_write(\"update\")` による競合の再現）。(e) 途中失敗のロールバック（create:tags、delete:note、transfer:i のフック）と、その後も接続が使えること（AC10）。(f) 他組織・非管理者への移管の拒否。(g) api_key の伏せ字（8文字未満・ちょうど8文字）。(h) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。(i) 共有リンクの期限の境界（期限ちょうど）、形の崩れ、期限切れ。(j) 閲覧数の同時加算。(k) 例外やログに本文・署名・api_key が出ないこと（AC9）。 / 根拠: 仕様の AC は境界・同時・拒否を明示的に求めている。設計の差し込み口（hooks、RateLimiter.hook）は用意されているのに、テストが一度も使っていない。`test_tampered` が確かめているのは note_id を変える改ざんだけ。 / 提案: 上の (a)〜(k) を決定論的に確かめるテストを追加する。sleep には頼らず、フックとスレッドの Barrier を使う。\n- [重大4] 区分: テスト / 対象: AC9, R9, K5, notes/service.py と share.py のログ・例外メッセージ / 対応区分: 証拠不足 / 内容: 機密情報（本文・署名・api_key）がログ・例外・監査出力に出ないことを確かめる検証が一つもない。実装（log.info は ID だけ）は目視では問題なさそうだが、検証がない。 / 根拠: AC9 と K5 は必須。assertLogs と例外メッセージを検査するテストが必要。 / 提案: assertLogs で作成・閲覧・共有リンク生成のログに本文・署名・鍵が含まれないことを検査し、拒否時の例外メッセージにも含まれないことを検査する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と空題名の1件だけで、境界・タグ規則・失敗時の何も残らないことを確かめていないため不十分。実装にタグの改行の欠陥あり（重大2）。\n- AC2: test_delete_by_owner の NotFound は削除後のものだけで、閲覧数の加算と非公開・他組織の隠蔽、同時加算は未検証のため不十分。\n- AC3: 検索で他人の非公開メモを除外することを確かめておらず、実装に欠陥がある（重大1）。per_page 等の範囲外、% と _、タグ OR も未検証のため不十分。\n- AC4: 作成者による正常な更新と削除だけ。Conflict、管理者・他人の Forbidden、ロールバックが未検証のため不十分。\n- AC5: 正常系と非管理者の拒否だけ。他組織・全部か何もしないかが未検証のため不十分。\n- AC6: 伏せ字の値を一切検証していない（rows[0][\"actor\"] を見るだけ）ため不十分。\n- AC7: 上限超過と枠の再開だけ。ちょうど window 秒の境界と同時呼び出しが未検証のため不十分。\n- AC8: 正常系と note_id の改ざん1件だけ。期限の境界、形の崩れ、署名の改ざんが未検証のため不十分。\n- AC9: 検証なし（重大4）。\n- AC10: 検証なし（例外後の接続の再利用）。\n- 機械検出のテストの兆候（skip・.only など）: なし。\n\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、単体・結合テストで足りる。必要なのは上のユニットテストの拡充）。\n\n### 不足しているリスク\n- K1: 検索経由の非公開メモの漏えいが実装にもテストにもある（重大1）。\n- K2: SQL は ? で値を渡しており、LIKE は ESCAPE も付いている。ただしインジェクション文字列や % と _ を使った検証がない。\n- K3・K4・K6・K7・K8: 実装の仕組みは設計どおり。ただし同時実行・ロールバック・移管の境界・api_key の伏せ字・リンクの期限の検証がない（重大3）。\n- K5: 検証がない（重大4）。\n\n### 確認したこと\n- spec.md・design.md と notes/*.py 全部、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が成功。\n- 検索の漏えいとタグの改行は、python3 -c の再現スクリプトで確認した（メモリ上の DB のみ使用）。\n- `aqdlc.py history --since 0` は末尾だけ確認した。検証条件の bind が並んでおり、弱体化の兆候は見つからなかった。ただし全履歴は読んでいない。\n- `git diff` は未確認。リポジトリは全ファイル未追跡で、比較対象がない。\n- gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

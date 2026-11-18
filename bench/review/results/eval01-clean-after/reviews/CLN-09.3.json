@@ -1,0 +1,49 @@
+{
+ "case": "CLN-09",
+ "rep": 3,
+ "sec": 23.5,
+ "exit": 0,
+ "cost_usd": 0.1003692,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 15194,
+  "cache_read_input_tokens": 122772,
+  "output_tokens": 2730,
+  "output_tokens_details": {
+   "thinking_tokens": 694
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 15194,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1541,
+    "cache_read_input_tokens": 37389,
+    "cache_creation_input_tokens": 4750,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4750
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 542df200\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R6, AC6 / 対応区分: 改善提案 / 内容: `export_audit` は監査ログと users を JOIN している（notes/service.py の export_audit）。actor_id に対応する users 行がなければ、その監査行は出力から黙って落ちる。現状は FK がないため理論上は起きうるが、仕様のどの経路でも利用者は削除されない。 / 提案: 将来 users の削除を導入するなら LEFT JOIN にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。入力検証（題名・本文・タグの境界、tags が文字列のときの拒否）と、`create:tags` に例外を差し込んだときのロールバックを確かめている。実装も `transaction()` の中で、メモ・タグ・監査をまとめて書いている。\n- AC2: 妥当。他組織・他人の非公開・存在しないメモがすべて NotFound になる。確認後に見えなくなった場合の再検査、閲覧数の数え漏れ（差し込み口によるインターリーブと複数スレッド）も確かめている。閲覧数の更新は BEGIN IMMEDIATE の中の `views = views + 1` で、設計どおり。\n- AC3: 妥当。範囲と他人の非公開メモの除外、並び順、ページ境界、巨大な page を確かめている。`%` と `_` はリテラル扱いで、`ESCAPE '\\'` が題名・本文の両方に適用されている（バックスラッシュ自体もエスケープされる）。タグは OR で、R1 の規則で検査している。SQL インジェクションは値として渡すテストがあり、実装も全てプレースホルダーを使っている。\n- AC4: 妥当。作成者・管理者・その他の権限、非公開、古い version の Conflict、読み出しから書き込みの間の割り込み、トランザクション内での権限の再検査、更新時の検証、失敗時の巻き戻しを確かめている。実装では UPDATE に `WHERE version=?` を付け、rowcount で判定している。\n- AC5: 妥当。管理者以外・組織をまたぐ移管の拒否と、途中失敗の全戻しを確かめている。\n- AC6: 妥当。末尾4文字以外を伏せる処理と、8文字未満をすべて伏せる処理を確かめている。実装も仕様どおり。\n- AC7: 妥当。枠の境界（159.999 で拒否、160.0 で新しい枠）、拒否が枠を延ばさないこと、20スレッドの同時呼び出しで許可が5件だけになることを確かめている。`hook` による決定論的な割り込みもあり、sleep には頼っていない。\n- AC8: 妥当。期限ちょうど以降の無効、改ざん、形の崩れを確かめている。実装は `fullmatch` と ASCII 数字だけの正規表現で、`hmac.compare_digest` で署名を比較している。\n- AC9 / AC10: テストがあり、実装もログに ID だけを出し、例外後に ROLLBACK している。\n- 重要なリスク K1〜K8 は、それぞれ対応する VK の検証が束縛されている。\n- エンジンが検出したテストの兆候はなし。`git diff` と `history` で、検証条件の弱体化は見当たらない。\n\n### E2E の要否\n- 不要。HTTP や UI を持たない Python ライブラリで、SQLite（メモリ上）に対する単体・結合テストがリスクに見合っている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- spec.md と design.md、notes/*.py の全ソースを読み、認可（`_visible` と `_can_modify`）、SQL の組み立て、トランザクション、並行処理をたどった。\n- `python3 -B -m unittest discover -s tests -t .` を実行し、63 件がすべて成功した。\n- `$AQ history --since 0` で、検証の束縛が追加されただけで、弱める変更はないことを確認した。\n- `$AQ gate` は実行していない。ファイルは変更していない。",
+ "files_changed": [],
+ "valid": true
+}

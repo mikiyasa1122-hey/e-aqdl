@@ -1,0 +1,49 @@
+{
+ "case": "SEC-03",
+ "rep": 1,
+ "sec": 28.7,
+ "exit": 0,
+ "cost_usd": 0.1372143,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 21500,
+  "cache_read_input_tokens": 155043,
+  "output_tokens": 3569,
+  "output_tokens_details": {
+   "thinking_tokens": 765
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21500,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2227,
+    "cache_read_input_tokens": 39862,
+    "cache_creation_input_tokens": 1639,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1639
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 4f555e9c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5, notes/share.py:321 / 対応区分: 修正必須 / 内容: `make_link` が共有リンクの署名（token）をそのままログに出している（`log.info(\"share link created ... token=%s\", ..., token)`）。 / 成立条件: `make_link` を呼ぶだけで起きる。INFO 以上のログが有効なら必ず出る。 / 影響: 署名はリンクを使うための資格情報そのもので、ログを読めた人が共有リンクを再構成できる。R9「共有リンクの署名をログに出さない」に違反する。 / 根拠: notes/share.py:321。上流でのマスクや、ログを抑止する仕組みは見つからなかった。 / 提案: ログから token を外し、note_id と expires だけを出す。\n- [重大2] 区分: テスト / 対象: AC9, R9, K5 / 対応区分: 証拠不足 / 内容: ログ・例外メッセージ・出力に本文・署名・api_key が出ないことを確かめるテストがない。`assertLogs` の使用がなく、上記の署名漏えいも検出されていない。 / 根拠: AC9 は必須の受け入れ条件で、現に漏えいがある。 / 提案: ログを捕捉して署名・本文・api_key が含まれないことを検証するテストを追加する。例外メッセージについても同様に検証する。\n- [重大3] 区分: テスト / 対象: AC1〜AC8, AC10, K1〜K4, K6〜K8 / 対応区分: 証拠不足 / 内容: テストは12件で、正常系が中心になっている。次の検証が欠けている。\n  - AC1: 境界値（題名100/101文字、空白だけの題名、本文10000文字、タグ6個、不正なタグ、tags に文字列を渡す）と、途中で失敗したときに何も残らないこと（`before_write` の hook を使う）。\n  - AC2: 他の組織・他人の非公開メモが NotFound になること、閲覧数の同時加算。\n  - AC3: `%`・`_` を普通の文字として検索すること、per_page・page・sort の範囲外、タグの OR 絞り込み、SQL インジェクション文字列。\n  - AC4: Forbidden、Conflict（古い version、読み出しと書き込みの間の競合）、管理者の扱い、削除の途中失敗。\n  - AC5: 他の組織への移管と、途中で失敗したときに元のままであること。\n  - AC6: 伏せ字の検証（api_key の値と一致する assert がない。8文字未満・ちょうど8文字の境界もない）。\n  - AC7: 枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。\n  - AC8: 期限ちょうど、期限切れ、形の崩れたリンク。\n  - AC10: 例外の後に接続を使い続けられること。\n / 根拠: これらは仕様が明示するリスク（K1〜K8）と受け入れ条件の中心で、検証がなければ認可・競合・SQL・リンク検証の欠陥を検出できない。設計書も、`hooks.before_write` と `RateLimiter.hook` を並行・障害の再現のために用意している。それを使うテストが一つもない。 / 提案: 上記の境界・異常系・並行・途中失敗のテストを追加する。並行の検証は sleep ではなく hook などで決定論的に再現する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と空の題名の拒否だけ。境界値・タグ・ロールバックの検証がなく不十分。\n- AC2: 正常な閲覧だけ。見え方の制限、NotFound、閲覧数の同時加算の検証がなく不十分。\n- AC3: 最初のページと単純な検索だけ。範囲外、LIKE のエスケープ、タグ絞り込み、インジェクションの検証がなく不十分。\n- AC4: 作成者による更新・削除の正常系だけ。Forbidden・Conflict・NotFound の検証がなく不十分。\n- AC5: 管理者による移管の件数と、管理者以外の拒否だけ。組織またぎと、失敗時にロールバックされることの検証がなく不十分。\n- AC6: アクション名と利用者名しか見ておらず、伏せ字そのものを検証していない。空洞で不十分。\n- AC7: 逐次の枠の検証だけ。ちょうど境界と複数スレッドの検証がなく不十分。\n- AC8: 往復の確認と、改ざん1種だけ。期限の境界と形の崩れたリンクの検証がなく不十分。\n- AC9: 検証なし。実装に欠陥もある。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。`unittest` の12件は `python3 -B -m unittest discover -s tests -t .` で全件成功した。`history` は bind が追加されただけで、検証が弱められた形跡はなかった。\n### E2E の要否\n- 不要（HTTP を持たない標準ライブラリのライブラリで、単体・結合テストで足りる）。ただし並行・途中失敗の決定論的なテストは必須。\n### 不足しているリスク\n- K1、K2、K3、K4、K6、K7、K8 を確かめる実質的な検証がない。VK1〜VK8 は \"unit\" に紐付いているだけで、中身がない。\n- 実装コードの確認で見つけた欠陥は [重大1] の1件だけ。認可・SQL のプレースホルダー・トランザクション・楽観的ロック・レートリミッターの実装は設計どおりに読めた。ただし、これらは未検証のため確定とは言えない。\n### 確認したこと\n- spec.md と design.md、notes/*.py の全ソース、tests/test_notes.py の全文を読んだ。\n- `python3 -B -m unittest discover -s tests -t .` → 12件成功。\n- `aqdlc.py history --since 0` で検証条件の変更履歴を確認した。弱体化はなかった。\n- ファイルの変更と gate の実行はしていない。",
+ "files_changed": [],
+ "valid": true
+}

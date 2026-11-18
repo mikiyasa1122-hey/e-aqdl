@@ -1,0 +1,38 @@
+{
+ "case": "EXC-03",
+ "rep": 3,
+ "judge_cost_usd": 0.0657283,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`verify_link` が形の崩れたリンクで `None` を返しており、Forbidden にしていません。箇所・原因・影響が正解データと一致します。\n- **重大2**: 実在する欠陥です。ただし、コードはこの指摘と食い違っています。`TAG_RE` は `^[a-z0-9-]{1,20}$` で、`$` は末尾の改行の直前にも一致します。このため `\"ab\\n\"` は `.match` を通ります。R1 に反しているので real_other です。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: 実在する欠陥です。`delete_note` は、認可の確認をトランザクションの外で行っています。DELETE には `WHERE id = ?` しかなく、権限の再確認もありません。そのため、移管の競合が起きると、権限のない元の所有者でも削除できてしまいます。\n- **軽微1**: 実在する欠陥です。`page` が極端に大きいと OFFSET が整数範囲を超え、OverflowError になります。この場合、仕様が定める ValidationError にはなりません。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link が形の崩れたリンクで None を返しており、埋め込んだ欠陥（分解の失敗を None で返す）と箇所・原因・影響が一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と `.match` により末尾改行付きのタグが通り、R1 に反する実在の欠陥である。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n{\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"delete_note は認可確認がトランザクションの外にあり、DELETE にも権限の再確認がないため、移管の競合時に権限のない削除が通る実在の欠陥である。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"page が極端に大きいと OFFSET が整数範囲を超えて OverflowError になり、仕様の ValidationError にならない実在の欠陥である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込んだ欠陥（verify_link が None を返す）を、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link が形の崩れたリンクで None を返しており、埋め込んだ欠陥（分解の失敗を None で返す）と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と `.match` により末尾改行付きのタグが通り、R1 に反する実在の欠陥である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "delete_note は認可確認がトランザクションの外にあり、DELETE にも権限の再確認がないため、移管の競合時に権限のない削除が通る実在の欠陥である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "page が極端に大きいと OFFSET が整数範囲を超えて OverflowError になり、仕様の ValidationError にならない実在の欠陥である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込んだ欠陥（verify_link が None を返す）を、箇所・原因・影響とも正しく指摘している。"
+ }
+}

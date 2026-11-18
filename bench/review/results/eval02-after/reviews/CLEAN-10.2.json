@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-10",
+ "rep": 2,
+ "sec": 42.0,
+ "exit": 0,
+ "cost_usd": 0.1509151,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 21755,
+  "cache_read_input_tokens": 116391,
+  "output_tokens": 5224,
+  "output_tokens_details": {
+   "thinking_tokens": 1654
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21755,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3055,
+    "cache_read_input_tokens": 37448,
+    "cache_creation_input_tokens": 4539,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 4539
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 0d59cab3\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC1, AC4, AC5, AC10, K4, R1, R4, R5, R10 / 対応区分: 証拠不足 / 内容: 途中で失敗したときのロールバックと、楽観的ロックの Conflict を確かめる検証がない。設計は `hooks.before_write` を差し込み口として用意している。しかし `tests/test_notes.py` はこれを一度も使っていない。作成・削除・移管の途中失敗で何も残らないこと、古い version や読み書きの間に更新が入ったときの Conflict、失敗後に接続を続けて使えることが未検証。 / 根拠: 受け入れ条件 AC1・AC4・AC5・AC10 とリスク K4 は、失敗時に何も残らないことそのものが要求。`transaction()` を `BEGIN` だけにしても、`UPDATE` の `version` 条件を外しても、現在のテストは全部通る。 / 提案: `before_write` で例外を起こし、メモ・タグ・監査ログ・所有者・version が元のままであることを確認する。続けて同じ接続で書き込みができることも確認する。古い version と、読み出し後に別接続が更新した場合に Conflict になり、先の更新が残ることも確認する。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC6, K1, K2, K6, K7, R2, R3, R4, R5, R6 / 対応区分: 証拠不足 / 内容: 認可・漏えい防止と入力検証・SQL の検証が、正常系の一部しかない。次の項目に検証がない。\n  - 他の組織・他人の非公開・存在しないメモが NotFound になること\n  - 管理者が非公開メモを扱えないこと\n  - 他人による更新・削除が Forbidden になること\n  - 一覧・検索から他の組織と他人の非公開メモが除外されること\n  - page / per_page / sort の範囲外\n  - 検索語の `%` `_` `\\` の扱い\n  - タグの OR 絞り込み\n  - 移管の組織またぎ\n  - api_key の伏せ字（8文字未満・8文字ちょうどの境界）\n  / 根拠: これらは仕様が明示している規則で、リスク K1・K2・K6・K7 の主な防御にあたる。`_visible` の組織条件や ESCAPE を外しても現在のテストは通る。なお、コードは読んで確認した限り規則どおりで、LIKE のエスケープ・プレースホルダー・`SORT_COLUMNS` の許可リストは適用されていた。欠陥ではなく証拠がない、という指摘。 / 提案: 上記の拒否・境界ケースを unittest に追加する。たとえば 2 組織・非公開・管理者で組み合わせる。検索は `50%` `a_b` `\\` を含むデータで確認する。`api_key` は 7 文字・8 文字で確認する。\n- [重大3] 区分: テスト / 対象: AC7, AC8, AC9, K3, K8, R2, R7, R8, R9 / 対応区分: 証拠不足 / 内容: 次の検証がない。\n  - 閲覧数の同時加算（別スレッド・別接続）\n  - RateLimiter の枠の境界（ちょうど window 秒で新しい枠）と複数スレッド\n  - 共有リンクの期限ちょうど・期限切れ・形の崩れ・署名の改ざん\n  - ログ・例外メッセージに本文・署名・api_key が出ないこと\n  / 根拠: AC7 は枠の境界と同時呼び出しを含めると明記している。AC8 は期限の境界を含めると明記している。K3 は数え漏れを防ぐ要求。現在のテストは、リンクの 7→8 の改ざん 1 件と、枠を過ぎた後の 1 回だけ。 / 提案: 次の検証を追加する。\n  - 決定的な並行テスト（`RateLimiter.hook` と `before_write(\"view\")` を使う）\n  - 複数スレッドと別接続（ファイル DB）での閲覧数と上限\n  - `now == expires` と `expires - 1`\n  - `.` が足りないリンク、署名が 63 文字のリンク、大文字・改行入りのリンク\n  - `assertLogs` でログに本文・署名・api_key が含まれないこと\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `verify_link` が先頭ゼロ付きの note_id・期限（例: `007.…`）を同じ署名で受け付ける。`int` に変換してから署名を検証しているため、同じメモに対して複数の文字列が有効になる。 / 提案: `str(int(x)) != x` なら Forbidden にするか、受け取った文字列のまま署名する。\n- [軽微2] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `delete_note` は、確認後に別接続がメモを先に削除すると、0 行削除のまま監査ログを書いて成功を返す。`update_note` は同じ場合に NotFound ではなく Conflict になる。害は小さい。 / 提案: トランザクション内で `DELETE` の rowcount を確認し、0 なら NotFound にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系 1 件と空題名 1 件だけ。本文・タグ・題名の境界と、失敗時に何も残らないことの検証がない。\n- AC2: 不十分。自分のメモが見えることだけで、NotFound の各ケースも閲覧数の加算・同時加算も確かめていない。\n- AC3: 不十分。一覧の件数と、検索の単純な部分一致だけ。範囲外・ワイルドカード・タグ・他人の非公開の除外が未検証。\n- AC4: 不十分。所有者による正常な更新と削除だけ。Forbidden・Conflict・検証・ロールバックが未検証。\n- AC5: 不十分。件数と非管理者の拒否だけ。組織またぎと、途中失敗で元のままになることが未検証。\n- AC6: 不十分。action と actor しか見ておらず、伏せ字そのものを確かめていない。\n- AC7: 不十分。`clock` を使った 1 件だけ。境界ちょうどと並行が未検証。\n- AC8: 不十分。往復と改ざん 1 件だけ。期限の境界・期限切れ・形の崩れが未検証。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候はなし。検証条件の弱体化は、`history` を見た限りない。ただし `unit` に紐づけたテストが薄いだけで、実質的な検証になっていない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、ファイル DB と複数スレッドを使った統合テストで足りる。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 の、拒否・境界・並行・ロールバックの各ケース（上記の重大1〜3）。\n- 実装の読み取りでは、認可・SQL（プレースホルダー、ESCAPE、許可リスト）・トランザクション・楽観的ロックの欠陥は見つからなかった。ただし実行して確かめてはいない。\n\n### 確認したこと\n- `python3 -B -m unittest discover -s tests -t .` を実行し、12 件が OK だった。\n- `$AQ history --since 0` で検証条件の変更履歴を確認した。すべて実装担当による bind で、弱体化はない。\n- `notes/*.py` の全行と `tests/test_notes.py` を読んだ。`impl.md` は読んでいない。\n- `gate` と依存関係のインストールは実行していない。",
+ "files_changed": [],
+ "valid": true
+}

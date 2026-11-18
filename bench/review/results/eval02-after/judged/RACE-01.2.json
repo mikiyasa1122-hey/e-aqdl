@@ -1,0 +1,33 @@
+{
+ "case": "RACE-01",
+ "rep": 2,
+ "judge_cost_usd": 0.0738823,
+ "judge_raw": "各指摘を欠陥データとコードに照らして分類しました。\n\n- **重大1**: 埋め込んだ欠陥そのものです。UPDATE の条件に version がなく、確認が読み出し時にだけある点を、同じ箇所（update_note）で指摘しています。原因・影響・成立条件が一致します。\n- **重大2**: 実在する別の欠陥です。認可を transaction 外の古い row で判定しており、移管や削除と競合します。ただし、これは認可の再確認の問題で、埋め込んだ欠陥（更新の喪失）とは別です。\n- **重大3**: テストの不足だけを指摘しています。\n- **軽微1**: 先頭ゼロの note_id でも署名が通る点で、実在する挙動です。ただし、仕様違反とは言えず、改善提案にとどまります。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note の UPDATE 条件に version がなく、version の確認が読み出し時だけなので、他の更新を上書きするという埋め込み欠陥と原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"update_note・delete_note が transaction 外の古い row で認可を判定しており、移管や削除と競合すると誤った許可や Conflict になる実在の欠陥だが、埋め込み欠陥そのものではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足と弱さだけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの note_id でも署名が通る点は、報告自身が仕様違反ではないと述べる改善提案である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、UPDATE 条件に version がない update_note の欠陥を原因・影響とも正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note の UPDATE 条件に version がなく、version の確認が読み出し時だけなので、他の更新を上書きするという埋め込み欠陥と原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "update_note・delete_note が transaction 外の古い row で認可を判定しており、移管や削除と競合すると誤った許可や Conflict になる実在の欠陥だが、埋め込み欠陥そのものではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足と弱さだけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの note_id でも署名が通る点は、報告自身が仕様違反ではないと述べる改善提案である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、UPDATE 条件に version がない update_note の欠陥を原因・影響とも正確に指摘している。"
+ }
+}

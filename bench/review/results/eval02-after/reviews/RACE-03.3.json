@@ -1,0 +1,49 @@
+{
+ "case": "RACE-03",
+ "rep": 3,
+ "sec": 29.8,
+ "exit": 0,
+ "cost_usd": 0.1274845,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19246,
+  "cache_read_input_tokens": 116245,
+  "output_tokens": 3886,
+  "output_tokens_details": {
+   "thinking_tokens": 523
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19246,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2776,
+    "cache_read_input_tokens": 37300,
+    "cache_creation_input_tokens": 2178,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2178
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a3ad4ed5\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R7, AC7, K3 / 対応区分: 修正必須 / 内容: `RateLimiter.hit` が呼び出しのたびに `threading.Lock()` を新しく作っており（`with threading.Lock():`）、排他が効かない。`self._lock` は使われていない。 / 成立条件: 同じ user_id に対して複数スレッドが同時に `hit` を呼ぶ。n を読んでから `_counts` に書き込むまでの間に別スレッドが入る。 / 影響: 全員が n < limit と読み、limit 回を超えて許可される。R7 の「同時でも上限を超えて許さない」に違反する。 / 根拠: notes/ratelimit.py の `hit`（`with threading.Lock():`）。n を読む処理と書く処理の間に `self.hook()` があり、ここで競合を再現できる。上流や呼び出し元に別の排他はなく、既存テストは単一スレッドのみ。 / 提案: `with self._lock:` に直す。\n- [重大2] 区分: テスト / 対象: AC7, R7, K3 / 対応区分: 証拠不足 / 内容: 枠の境界（ちょうど window 秒で新しい枠になること、window−1 では枠が続くこと）と、複数スレッドからの同時呼び出しを確かめるテストがない。`RateLimiter.hook` を使った決定的な競合テストもない。 / 根拠: AC7 は「枠の境界・同時の呼び出しを含む」と明記している。テストの `test_limit` は t=61 の1点だけを確かめる。重大1の欠陥はこの不足のため検出されていない。 / 提案: ちょうど window 秒と window−ε の境界テストを追加する。`hook` で2スレッドを同期させ、limit を超えて許可されないことを確かめる。\n- [重大3] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC8, AC9, AC10, K1, K2, K3, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: AC7 以外の受け入れ条件・リスクを確かめるテストが、正常系1本ずつ程度しかない。次の検証が欠けている。<br>- R1: 題名・本文・タグの境界値、タグの重複計数、失敗時のロールバック（`hooks.before_write(\"create:tags\")`）<br>- R2: 他の組織・他人の非公開メモが NotFound になること、閲覧数の並行加算<br>- R3: `%` と `_` の検索、他組織・他人の非公開メモが含まれないこと、page・per_page・sort の範囲外、タグ OR、タグの不正値<br>- R4: Forbidden・Conflict（古い version、読み出しと書き込みの間の競合）、更新時の検証、削除失敗の伝播<br>- R5: 他組織・非管理者の拒否、途中失敗での巻き戻し<br>- R6: api_key の伏せ字（8文字未満・8文字・長い鍵）<br>- R8: 期限の時刻ちょうど・期限切れ・形の崩れ（改行付きなど）<br>- R9: ログ・例外に本文・署名・api_key が出ないこと<br>- R10: 例外の後に接続を再利用できること / 根拠: 設計書のテスト方針が `hooks.before_write` を再現用の差し込み口と定めているのに、テストが1回も使っていない。K1・K2・K4・K6・K7・K8 は異常系・拒否系の検証が全くなく、空洞化している。 / 提案: 上記の異常系・境界値・並行・巻き戻しのテストを追加する。特に、認可条件を外したら失敗するテスト、LIKE のワイルドカードのテスト、`hooks` を使った巻き戻しのテストを入れる。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、可視性と権限の判定をトランザクションの外で行っている。判定後に transfer などで owner が変わっても再判定しない。version 条件で更新の競合は防げるので、実害は限定的。 / 提案: トランザクション内で行を読み直して判定する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、境界値・タグ・ロールバックの検証がなく不十分。実装は R1 の規則を満たしているように見える（`_validate`、`transaction`）。\n- AC2: 閲覧の正常系しかない。非公開・他組織・存在しないメモの NotFound と、並行加算の検証がなく不十分。実装は UPDATE 文で加算しており問題なさそう。\n- AC3: `test_list_first_page` と `test_search` の正常系のみ。ESCAPE 句付きの LIKE とプレースホルダーを実装で確認した。`%` と `_` のテスト、範囲外、タグ OR のテストがなく不十分。\n- AC4: 所有者による更新・削除の正常系のみ。Forbidden・Conflict・競合・削除失敗の検証がなく不十分。\n- AC5: `test_transfer` は件数を返すことしか見ておらず、移管後に所有者が変わったことを確かめていない。拒否は非管理者の1件だけで、他組織の拒否もロールバックも未検証のため不十分。\n- AC6: `test_export_audit` は action と actor しか見ておらず、`actor_key` を一切確かめていないため空洞。\n- AC7: 実装に欠陥がある（重大1）。テストは単一スレッドの1点のみで不十分（重大2）。\n- AC8: 往復と改ざん（`7.` を `8.` に変える）の2本。期限の時刻ちょうど・期限切れ・形の崩れが未検証で不十分。実装の `>=` と `fullmatch` は妥当に見える。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip や `.only` はないが、アサーションが弱くカバーが薄い。\n\n### E2E の要否\n- 不要（HTTP を持たないライブラリで、unittest の統合テストで足りる）。ただし並行・巻き戻しの決定的なテストは必須。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの拒否を確かめるテストがない。\n- K2: `%` と `_` を含む検索のテストがない。\n- K3: 閲覧数・更新・RateLimiter の並行テストがない。\n- K4: 巻き戻しのテストがない。\n- K5, K7: `api_key` の伏せ字のテストがない。\n- K6: 移管で他組織に渡さないこと、途中失敗の巻き戻しのテストがない。\n- K8: 期限切れ・形の崩れのテストがない。\n\n### 確認したこと\n- `python3 -m unittest discover -s tests`: 12件すべて成功（ただしテストが薄い）。\n- `notes/` の全ソースと `tests/test_notes.py` を読んだ。\n- LIKE は `ESCAPE '\\\\'` 付きで、`\\`・`%`・`_` を全てエスケープしている。値はすべてプレースホルダーで渡されている。ORDER BY は許可リストの辞書で固定している。\n- `git status` では全て未追跡で、検証条件やテストを弱めた形跡は確認できなかった。`history` コマンドと `$AQ trace` は実行していない。\n- gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

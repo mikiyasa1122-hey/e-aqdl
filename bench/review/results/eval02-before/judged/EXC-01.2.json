@@ -1,0 +1,43 @@
+{
+ "case": "EXC-01",
+ "rep": 2,
+ "judge_cost_usd": 0.06653629999999999,
+ "judge_raw": "各指摘の判定は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。get_note が見えないメモに Forbidden を返しており、存在しないメモの NotFound と区別できます。原因も影響も正解データと一致します。\n- **重大2**: 実在する欠陥です。`re.match` と `$` の組み合わせは末尾の改行を通すので、タグの検査仕様に反します。\n- **重大3**: 実在する欠陥です。delete_note は認可の判定がトランザクションの外にあり、DELETE の rowcount も見ていません。そのため、消えたメモに対して成功し、監査ログが残ります。\n- **重大4**: テストの不足だけを指摘しているので test_gap です。\n- **重大5**: 誤検知です。LINK_RE は `[0-9]{1,18}` で先頭の 0 を許すので、`007.exp.sig` は形として正しい文字列です。仕様は「10進の数字だけ」としか定めていません。署名は int 化した値に対して検証されます。署名の鍵がなければ偽造もできません。したがって仕様違反とは言えません。\n- **軽微1**: 仕様にない要望で、欠陥の主張ではないので style です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"get_note が見えないメモに Forbidden を返し、NotFound と区別できて存在が分かるという、埋め込んだ欠陥の原因と影響に一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE.match と $ の組み合わせで末尾に改行のあるタグを通すので、R1 のタグ規則に反する実在のバグである。\"},\n{\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note の認可判定がトランザクションの外にあり、DELETE の rowcount も確認していないので、消えたメモへの削除が成功して監査ログが残る実在の競合がある。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘している。\"},\n{\"label\": \"重大5\", \"class\": \"false_positive\", \"reason\": \"先頭に 0 のある数字列も仕様の「10進の数字だけ」の形に合い、署名は正規化した値に対して検証されるので、仕様違反ではない。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"Conflict を監査に残すかどうかは仕様にない改善提案で、欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1 が get_note の Forbidden による存在の漏えいを正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "get_note が見えないメモに Forbidden を返し、NotFound と区別できて存在が分かるという、埋め込んだ欠陥の原因と影響に一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE.match と $ の組み合わせで末尾に改行のあるタグを通すので、R1 のタグ規則に反する実在のバグである。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note の認可判定がトランザクションの外にあり、DELETE の rowcount も確認していないので、消えたメモへの削除が成功して監査ログが残る実在の競合がある。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大5",
+    "class": "false_positive",
+    "reason": "先頭に 0 のある数字列も仕様の「10進の数字だけ」の形に合い、署名は正規化した値に対して検証されるので、仕様違反ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "Conflict を監査に残すかどうかは仕様にない改善提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1 が get_note の Forbidden による存在の漏えいを正しく指摘している。"
+ }
+}

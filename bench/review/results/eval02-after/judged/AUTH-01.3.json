@@ -1,0 +1,33 @@
+{
+ "case": "AUTH-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0648619,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `_visible` が組織の一致を確かめていない点を、同じ箇所・同じ原因で指摘しています。他組織の公開メモを読める影響も一致します（行番号は多少ずれています）。matches_defect です。\n- **重大2**: テストの不足だけを指摘しています。test_gap です。\n- **重大3**: `update_note` と `delete_note` が、トランザクション外で読んだ古い行で認可を判定する点を指摘しています。実在するかは次のとおりです。\n  - `delete_note` は、読み出しと削除の間に移管・非公開化が入ると、古い判定のまま削除します。仕様の R4（読み出しから書き込みの間の更新は Conflict）にも関わります。\n  - `update_note` は version 条件で保護されます。移管は version を増やすため、競合が検出されます。非公開化の手段はなく、実質的な穴は `delete_note` に限られます。\n  - 埋め込み欠陥とは別の箇所と原因です。real_other とします。\n\n埋め込み欠陥は重大1で検出できています。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_visible が org_id の一致を確かめていないことを同じ箇所・原因で指摘し、他組織の公開メモを読める影響も一致している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを挙げており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"delete_note がトランザクション外で読んだ古い行で認可を判定し、version・owner の条件なしに削除する点は実在する別の欠陥である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検証の重複という保守性の提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（_visible の組織チェック欠落）を原因・影響とも正確に特定している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_visible が org_id の一致を確かめていないことを同じ箇所・原因で指摘し、他組織の公開メモを読める影響も一致している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを挙げており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "delete_note がトランザクション外で読んだ古い行で認可を判定し、version・owner の条件なしに削除する点は実在する別の欠陥である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検証の重複という保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（_visible の組織チェック欠落）を原因・影響とも正確に特定している。"
+ }
+}

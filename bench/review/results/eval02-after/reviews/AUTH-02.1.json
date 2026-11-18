@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-02",
+ "rep": 1,
+ "sec": 32.2,
+ "exit": 0,
+ "cost_usd": 0.1428463,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23734,
+  "cache_read_input_tokens": 111443,
+  "output_tokens": 3675,
+  "output_tokens_details": {
+   "thinking_tokens": 558
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23734,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2728,
+    "cache_read_input_tokens": 36808,
+    "cache_creation_input_tokens": 3287,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3287
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7a4e3663\n\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1, notes/service.py:112-118 `list_notes` / 対応区分: 修正必須 / 内容: `list_notes` の条件が `org_id = ?` だけで、非公開メモの絞り込み（`private = 0 OR owner_id = ?`）がない。 / 成立条件: 同じ組織の利用者 A が非公開メモを作り、同じ組織の別の利用者 B が `list_notes` を呼ぶ。 / 影響: B の一覧に A の非公開メモの id・題名・更新時刻が出る。`total` にも数えられる。仕様 R3 の「他人の非公開メモは含めない」に反し、リスク K1（他人の非公開メモの漏えい）が現実になる。 / 根拠: `where = \"org_id = ?\"`、`args = (user[\"org_id\"],)` で COUNT と SELECT の両方が同じ条件を使っている。`search_notes` には同じ条件があるが、`list_notes` には呼び出し元にも上流にも補う処理がない。 / 提案: `where = \"org_id = ? AND (private = 0 OR owner_id = ?)\"`、`args = (org_id, user[\"id\"])` に直す。COUNT と SELECT の両方に効く。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件・リスクの大半を確かめるテストがなく、`tests/test_notes.py` は正常系を中心とした12件だけ。足りない検証は次のとおり。(a) 非公開メモが一覧に出ない・他の組織が見えない、NotFound になる（AC2, AC3, K1。重大1 を検出できなかった原因）。(b) 一覧の page・per_page・sort の範囲外、タグ・題名・本文の境界値（AC1, AC3）。(c) 検索で `%`・`_`・`\\` が普通の文字として扱われること、タグ OR 絞り込みと SQL インジェクション文字列（AC3, K2）。(d) 閲覧数の同時加算と、更新の version 競合・読み書きの間に入る更新（AC2, AC4, K3）。(e) 途中失敗時のロールバックと接続の再利用（AC1, AC4, AC5, AC10, K4, K6）。(f) 管理者・作成者・非公開メモに対する更新・削除の認可（AC4）。(g) api_key の伏せ字（8文字未満・8文字以上）（AC6, K7）。(h) RateLimiter の枠のちょうど window 秒の境界と、複数スレッド同時（AC7）。(i) 共有リンクの期限ちょうど・形の崩れ・改行付き（AC8, K8）。(j) ログ・例外に機密情報が出ないこと（AC9, K5）。`hooks.before_write` と `RateLimiter.hook` の差し込み口は設計に用意されているが、どのテストからも使われていない。 / 根拠: 仕様は境界・同時・失敗時の挙動を受け入れ条件にしている。テストが正常系だけだと、条件を外しても失敗しない。重大1 のバグがテストを通過した事実がその実例。 / 提案: 上の (a)〜(j) について、決定論的なテストを追加する。具体的には、差し込み口を使った失敗の再現、スレッドとバリアによる同時実行、境界値、`%`・`_` の検索、api_key の伏せ字、非公開メモの一覧。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K3, notes/service.py:151-170 `update_note` / 対応区分: 修正必須 / 内容: 更新の認可判定（`_visible`・`_can_modify`）が、トランザクションの外で読んだ行に対してのみ行われる。 / 成立条件: 読み出しの後、書き込みの前に、別の接続がそのメモの所有者を移管するか非公開にする。 / 影響: version は `transfer_notes` で増えるため、通常は Conflict になる。ただし、非公開のまま所有者が変わった場合など、`version` が一致する経路は閉じているかどうかを確認できていない。 / 根拠: UPDATE の WHERE は `id` と `version` だけで、`owner_id`・`private`・`org_id` を条件に入れていない。`transfer_notes` は version を +1 するため、移管との競合は Conflict で防がれると見ている。ただし、この指摘は未確認の部分が残る。 / 提案: 重大度の確定には、トランザクション内で行を読み直して認可を再判定するか、UPDATE の条件に `org_id` と所有者を含める。この項目は、前の確認結果次第で取り下げ可能。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。境界値（100文字・タグ6個・不正タグ・本文10000文字）がなく、失敗時に何も残らないことも未確認。\n- AC2: 閲覧の正常系のみ。他の組織・非公開・存在しないメモの NotFound と、閲覧数の同時加算が未検証で不十分。\n- AC3: `test_list_first_page` は非公開メモがない前提のため、バグを見逃した。範囲外の入力、`%`・`_` の検索、タグ OR が未検証で不十分。\n- AC4: 作成者の更新・削除の正常系のみ。Conflict、Forbidden、管理者の扱い、非公開、タグ検証が未検証で不十分。\n- AC5: `test_transfer` は件数のみで、メモの所有者を確認していない。他の組織・途中失敗が未検証で不十分。\n- AC6: 伏せ字の中身を確かめておらず、不十分。\n- AC7: 枠の再開だけ確認している。ちょうど window 秒の境界とスレッド同時が未検証で不十分。\n- AC8: 往復と改ざんは確認しているが、期限の境界と形の崩れが未検証で不十分。\n- AC9, AC10: テストなしで未検証。\n- エンジンが検出したテストの兆候: なし。skip・弱化は見つからない。`history` は bind のみで、弱体化はない。\n\n### E2E の要否\n- 不要（HTTP・UI のないライブラリで、SQLite の in-memory による結合テストで足りる）。ただし、上のスレッド・失敗再現のテストは必要。\n\n### 不足しているリスク\n- K1: 重大1 の漏えいを、現状のテストは検出しない。\n- K2: `search_notes` の LIKE は ESCAPE とプレースホルダーを使っているが、`%`・`_` の挙動は実行確認していない。\n- K3・K4・K5・K6・K7・K8: テストがなく、確認できていない。\n\n### 確認したこと\n- `spec.md`、`design.md`、`notes/*.py`、`tests/test_notes.py` を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行し、12件が通った。\n- `aqdlc.py history --since 0` を確認し、bind だけで検証の弱体化はなかった。\n- `list_notes` に非公開の絞り込みがないことを、コードの経路で確認した（実行での再現はしていない）。\n- 重大3 は、移管と version の関係から Conflict になると見ており、実害の再現はできていない。",
+ "files_changed": [],
+ "valid": true
+}

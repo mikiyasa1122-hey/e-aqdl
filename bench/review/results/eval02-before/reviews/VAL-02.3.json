@@ -1,0 +1,49 @@
+{
+ "case": "VAL-02",
+ "rep": 3,
+ "sec": 35.2,
+ "exit": 0,
+ "cost_usd": 0.1485455,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22909,
+  "cache_read_input_tokens": 122135,
+  "output_tokens": 4468,
+  "output_tokens_details": {
+   "thinking_tokens": 670
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22909,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3298,
+    "cache_read_input_tokens": 40572,
+    "cache_creation_input_tokens": 2338,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2338
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f2b7a217\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: `create_note` と `update_note` が使う `_validate`（notes/service.py:50-56）に、タグ5個までの検査がない。`TAGS_MAX` は `search_notes` でしか使われていない。 / 成立条件: タグを6個以上渡して作成または更新する。 / 影響: R1・R4 の「タグは5個まで（重複も数える）」に違反する。AC1 の「R1 の規則どおりに拒否」が満たされない。 / 根拠: 実行して確認した。`create_note(conn, u, 't', 'b', tags=['a','b','c','d','e','f','g'])` が ValidationError にならず ID 1 を返した。上流にも DB にも、個数を制限する検査や制約はない。 / 提案: `_validate` に `len(tags) > TAGS_MAX`（重複を数える）で ValidationError を出す検査を足す。`search_notes` の個数検査は `_validate` に寄せてもよい。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC4, AC5, K1, K3, K4, K6 / 対応区分: 証拠不足 / 内容: tests/test_notes.py には、R1・R2・R4・R5 の拒否・競合・巻き戻しを確かめるテストがない。次の検証が欠けている。(a) 他組織・他人の非公開メモが NotFound になること。(b) 管理者でも非公開メモは NotFound になること。(c) 古い version での Conflict と、`hooks.before_write(\"update\")` を使った読み出し〜書き込みの間の割り込みでの Conflict。(d) 閲覧数の同時加算を別スレッド・別接続で確かめること。(e) `hooks.before_write` で途中失敗させたとき、作成・削除・移管で何も残らないこと。(f) 組織をまたぐ移管と非管理者の移管が Forbidden になること。(g) タグ・題名・本文の境界値（6個、101文字、10001文字、不正タグ）。 / 根拠: これらは K1（漏えい）、K3（更新や数の消失）、K4（不整合）、K6（組織外への移管）の対策そのもので、設計も hooks をこのために用意している。いまのテストは正常系中心で、実装を壊しても通る。重大1のバグも検出できていない。 / 提案: 上記 (a)〜(g) の単体テストを追加する。並行処理は sleep ではなく hooks で順序を固定して再現する。\n- [重大3] 区分: テスト / 対象: AC3, AC6, AC9, AC10, K2, K5, K7 / 対応区分: 証拠不足 / 内容: 次の検証がない。(a) 一覧の page・per_page・sort が範囲外のときの ValidationError。(b) 検索で `%`・`_`・クォートを含む語を普通の文字として扱うこと（K2 のインジェクション）。(c) タグ OR 絞り込みと、他人の非公開メモが含まれないこと。(d) api_key の伏せ方（末尾4文字、8文字未満は全部伏せ、ちょうど8文字）。`test_export_audit` は action と actor しか見ておらず、`actor_key` を見ていない。(e) ログ・例外メッセージに本文・署名・api_key が出ないこと。(f) 例外のあとも同じ接続が使えること。 / 根拠: 検索はコード上 `ESCAPE` とプレースホルダーを使っていて実装は妥当に見える。ただし AC3・AC6・AC9・AC10 と、リスク K2・K5・K7 を確かめる証拠が存在しない。 / 提案: 上記の検証を unittest で追加する。ログの検査は `assertLogs` を使う。\n- [重大4] 区分: テスト / 対象: AC7, AC8, K3, K8 / 対応区分: 証拠不足 / 内容: RateLimiter のテストは「枠の途中で拒否され、61秒後に通る」だけである。「ちょうど window 秒で新しい枠になる」境界（t=window）と、window 秒の直前に拒否されること、複数スレッドから同時に呼んで上限を超えないこと（`RateLimiter.hook` を使った再現）を確かめていない。共有リンクでは、期限ちょうど（now==expires）、期限の1秒前、形の崩れたリンク（改行付き・非数字・署名の長さ違い・大文字16進）、署名の改ざん（note_id・期限の書き換えを含む）がない。`test_tampered` は note_id の書き換え1件だけである。 / 根拠: AC7・AC8 は境界と同時実行を明示している。コード上は `>=` と `fullmatch` で正しく見えるが、検証証拠がない。 / 提案: 境界値と形の崩れたリンクの単体テストを追加する。同時呼び出しは複数スレッドで `hit` を並行実行し、許可数が limit 以下であることを確かめる。ロックを外すと失敗する形にする。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `list_notes` で `page` が極端に大きい（2^63 超）と、OFFSET の計算で `OverflowError` が出る可能性がある。ValidationError にならない。（実行して確認はしていない。） / 提案: page の上限を設けるか、OverflowError を ValidationError に変換する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常作成と空題名の拒否だけを確かめていて不十分。タグ6個の拒否ができず、実際にバグを見逃している（重大1・2）。ロールバックの検証もない。\n- AC2: V2 は自分のメモを閲覧する正常系だけで不十分。他組織・非公開・存在しない場合の NotFound、閲覧数の同時加算を確かめていない（重大2）。\n- AC3: V3 は一覧の1ページ目と単純な検索だけで不十分。範囲外の入力、`%`・`_`、タグ OR、非公開の除外を確かめていない（重大3）。\n- AC4: V4 は作成者による正常な更新と削除だけで不十分。Forbidden、NotFound、Conflict、割り込み、削除の失敗時の挙動を確かめていない（重大2）。\n- AC5: V5 は成功と非管理者の拒否だけで不十分。組織をまたぐ移管と途中失敗時の巻き戻しを確かめていない（重大2）。\n- AC6: V6 は `actor_key` を確かめておらず、検証が空洞化している（重大3）。\n- AC7: V7 は枠の境界と同時実行を確かめておらず不十分（重大4）。\n- AC8: V8 は往復と1種類の改ざんだけで不十分。期限の境界と形の崩れたリンクがない（重大4）。\n- AC9: ログ・例外に機密が出ないことを確かめるテストがなく、未検証（重大3）。\n- AC10: 例外後の接続再利用を確かめるテストがなく、未検証（重大3）。\n- エンジンが検出したテストの兆候はなかった。skip・`.only` もなく、テストの弱体化・改ざんの形跡は確認できなかった。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、単体・結合テストで足りる。ただし、複数スレッド・複数接続を使う並行テストは必要。\n### 不足しているリスク\n- K1: 認可の拒否を確かめるテストがない（重大2）。\n- K2: インジェクションと LIKE のエスケープを確かめるテストがない（重大3）。\n- K3: 同時の更新・閲覧・呼び出しを確かめるテストがない（重大2・4）。\n- K4: 途中失敗の巻き戻しを確かめるテストがない（重大2）。\n- K5, K7: api_key の伏せ方とログの検査がない（重大3）。\n- K6: 組織をまたぐ移管と一部だけ移る失敗を確かめるテストがない（重大2）。\n- K8: 期限の境界と形の崩れたリンクを確かめるテストがない（重大4）。\n### 確認したこと\n- spec.md・design.md を読み、`aqdlc trace` で全 AC に検証が対応していることを確認した（`history` は途中で BrokenPipe になった。末尾の確認は未実施）。\n- notes/ の全ソースと tests/test_notes.py を読んだ。\n- `python3 -m unittest discover` を実行した。12 件が通った（実行時間 0.005 秒）。\n- タグ7個で `create_note` を直接実行し、拒否されず ID 1 が返ることを確認した（重大1）。\n- コードの読解では、権限判定・トランザクション・プレースホルダー・`ESCAPE`・ratelimiter のロック・HMAC の `compare_digest` は設計どおりで、重大な欠陥は見つからなかった。",
+ "files_changed": [],
+ "valid": true
+}

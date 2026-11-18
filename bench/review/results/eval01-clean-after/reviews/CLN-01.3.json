@@ -1,0 +1,49 @@
+{
+ "case": "CLN-01",
+ "rep": 3,
+ "sec": 28.0,
+ "exit": 0,
+ "cost_usd": 0.1425962,
+ "num_turns": 8,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 12,
+  "cache_creation_input_tokens": 21549,
+  "cache_read_input_tokens": 218762,
+  "output_tokens": 3450,
+  "output_tokens_details": {
+   "thinking_tokens": 804
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 21549,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1592,
+    "cache_read_input_tokens": 46871,
+    "cache_creation_input_tokens": 1624,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 1624
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6454e556\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R5, notes/service.py:342 / 対応区分: 改善提案 / 内容: transfer_notes が version は上げるが updated_at を更新しない。仕様に更新日時の規定はなく、受け入れ条件には影響しない。 / 提案: 移管を「更新」とみなすなら updated_at も更新する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_ac1_create は題名・本文・タグの境界、tags が文字列のときの拒否、タグ登録中の失敗（hooks.fail_at）で何も残らないことを確認しており妥当。R1 は notes/service.py:215-227 でトランザクション内に収まっている。\n- AC2: 他組織・他人の非公開・存在しないメモが NotFound になること、NotFound で閲覧数が増えないこと、確認後に見えなくなる場合を確認している。閲覧数は `views = views + 1` を BEGIN IMMEDIATE 内で更新する。割り込みを再現するテストとスレッドによる並行閲覧のテストがあり妥当。\n- AC3: 範囲外の入力、% と _ のリテラル検索、タグの OR 絞り込み、SQL 文字列を検索語に渡す場合を確認している。SQL はプレースホルダーで、LIKE は ESCAPE 付き。title と body の両方に同じ pattern を渡している。エスケープ文字の `\\` 自体も `_like_escape` でエスケープしている。妥当。\n- AC4: 権限、非公開メモの扱い、古い version、読み出しと書き込みの間の割り込みによる Conflict、トランザクション内での権限の再確認、更新時の入力検証、失敗時の巻き戻しを確認している。UPDATE の WHERE に version を入れ、rowcount で判定する実装も確認した。妥当。\n- AC5: 管理者のみ、同じ組織のみ、途中で失敗した場合に何も移らないことを確認しており妥当。\n- AC6: 8文字未満はすべて伏せ、8文字以上は末尾4文字だけ残す。実装を確認した。テストは9つ。妥当。\n- AC7: 枠の境界（159.999 と 160.0）、拒否された呼び出しで枠が延びないこと、Barrier を使った20スレッドの並行呼び出しを確認している。hook による割り込みの再現もあり、sleep に頼らない決定論的なテストで妥当。\n- AC8: 期限の境界、改ざん、形の崩れたリンクを確認している。fullmatch、hmac.compare_digest、期限切れ判定の `>=` は実装で確認した。妥当。\n- AC9: ログ、例外メッセージ、監査の detail に本文・署名・api_key が出ないことを確認している。実装でも ID しかログに出していない。妥当。\n- AC10: 例外の後に接続を再利用できることを確認している。transaction() の ROLLBACK は in_transaction を確認してから実行し、元の例外を隠さない。妥当。\n- リスク K1〜K8 は、上記の対応テストでカバーされている。\n- エンジンが検出したテストの兆候: なし。skip・only・アサーションなしのテストは確認されなかった。\n### E2E の要否\n- 不要。標準ライブラリだけで作った DB ライブラリで、HTTP や UI がない。実際の SQLite に対する単体テストで、並行処理・巻き戻し・SQL の挙動まで確かめられている。\n### 不足しているリスク\n- なし\n### 確認したこと\n- spec.md と design.md を読み、notes/ の全ソースを精読した。認可（_visible・_can_modify）、SQL の組み立て、楽観的ロック、トランザクション境界を、利用者の入力から使われる箇所までたどった。\n- `python3 -m unittest discover -s tests -t .` を実行し、63件がすべて合格した（出力はテスト結果のみ）。\n- `aqdlc trace` で全要求・受け入れ条件・リスクに検証が対応していること、`history` で検証条件の弱体化がないことを確認した（history は出力が途中で切れたが、先頭40行までは追加のみ）。\n- 反証テストは無効なので、「認可の条件を外したら失敗するか」は実行していない。コードとテストの突き合わせで判断した。",
+ "files_changed": [],
+ "valid": true
+}

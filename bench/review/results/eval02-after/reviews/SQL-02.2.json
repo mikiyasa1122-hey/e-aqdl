@@ -1,0 +1,49 @@
+{
+ "case": "SQL-02",
+ "rep": 2,
+ "sec": 38.0,
+ "exit": 0,
+ "cost_usd": 0.1224162,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 16013,
+  "cache_read_input_tokens": 121982,
+  "output_tokens": 4615,
+  "output_tokens_details": {
+   "thinking_tokens": 1031
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 16013,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3251,
+    "cache_read_input_tokens": 36828,
+    "cache_creation_input_tokens": 6054,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6054
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 2\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 67ae1954\n\n### 指摘\n- [重大1] 区分: テスト / 対象: AC2, AC3, AC4, AC5, K1, K6 / 対応区分: 証拠不足 / 内容: 他の組織・他人の非公開メモが見えない・触れないことを確かめるテストが1件もない。`_visible` と `_can_modify` の次の分岐が未検証。他の組織のメモの get / list / search に対する NotFound。他人の非公開メモ。管理者が非公開メモを更新・削除しようとしたときの NotFound。他の組織の管理者の拒否。member の更新・削除の Forbidden。移管で他の組織の利用者を指定したときの Forbidden。移管の途中失敗でメモが元のまま残ること。 / 根拠: これらは仕様上、最重要リスク K1・K6 の検証。実装を読む限り欠陥は見つからなかったが、条件を外してもテストは落ちない。`tests/test_notes.py` は正常系中心で、`test_transfer_requires_admin` が唯一の拒否テスト。 / 提案: 2つ目の組織の利用者を作る。それぞれの経路で NotFound / Forbidden を確かめる。`hooks.before_write(\"transfer:2\")` で例外を起こし、全メモの owner_id が元のままであることを確かめる。\n- [重大2] 区分: テスト / 対象: AC3, K2 / 対応区分: 証拠不足 / 内容: 検索の `%`・`_`・`\\` を普通の文字として扱うこと、SQL 文字列を埋め込めないこと、タグの OR 絞り込み、タグ不正の拒否、一覧の境界値と範囲外（page=0、per_page=0・51、不正な sort、bool）が未検証。 / 根拠: R3 の明示規則であり、K2（SQL インジェクション）の検証でもある。現在の検索テストは「予算」の部分一致1件だけ。 / 提案: 題名に `100%` や `a_b` を持つメモと持たないメモを作り、`%`・`_`・`\\` で検索して件数を確かめる。`q=\"' OR 1=1 --\"` が全件を返さないこと、タグ OR、q が空白だけ・101文字、per_page の境界値を確かめる。\n- [重大3] 区分: テスト / 対象: AC4, AC7, AC2, K3, K4, AC10 / 対応区分: 証拠不足 / 内容: 同時実行・競合・ロールバックを確かめるテストがない。閲覧数が同時に正確に増えること。古い version での更新が Conflict になること。`hooks.before_write(\"update\")` の間に別の接続で更新が入ったときの Conflict。`create:tags` / `delete:note` で障害を起こした後に何も残らず、接続を再利用できること。RateLimiter の同時呼び出しで上限を超えないこと。枠の境界（ちょうど window 秒で新しい枠になる）。 / 根拠: 設計書が `hooks` と `RateLimiter.hook` を再現用に用意しているのに、どのテストも使っていない。K3・K4・AC7・AC10 は証拠がゼロ。`test_limit` は t=61 しか見ておらず、境界の 60 を確かめない。 / 提案: ファイル DB と別接続で、`hooks` による決定論的なテストを書く。`RateLimiter.hook` の中から別スレッドの `hit` を試す方法もある。sleep には頼らない。clock を 59.99 / 60 に固定して境界を確かめる。\n- [重大4] 区分: テスト / 対象: AC6, AC8, AC9, K5, K7, K8 / 対応区分: 証拠不足 / 内容: 次の項目が未検証。api_key の伏せ字が実際に伏せられていること（末尾4文字以外が `*` になること、8文字未満は全部伏せること）。共有リンクの期限ちょうどでの無効化。期限切れ・形の崩れたリンク（改行付き、全角数字、桁違い、署名が大文字）の Forbidden。ログ・例外メッセージに本文・署名・api_key が出ないこと。 / 根拠: `test_export_audit` は action と actor しか見ず、`actor_key` を確認しない。`test_tampered` は note_id の改ざんだけ。AC9 はテスト自体がない。実装は仕様どおりに見えるが、K5・K7・K8 の証拠がない。 / 提案: `actor_key` の完全一致（`ak-alice-0001` → `*********0001`、短い鍵は全部伏せる）、`now=expires-1` と `now=expires` の境界、不正な形のリンク複数件、`assertLogs` と例外メッセージに秘密が含まれないことを確かめる。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `list_notes` で page が非常に大きい（2^63 超）と `OFFSET` が OverflowError になり、ValidationError にならない。 / 提案: page に現実的な上限を設ける。または OverflowError を ValidationError に変換する。\n- [軽微2] 区分: 実装 / 対象: R4, R5 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、`BEGIN IMMEDIATE` の外で `_can_modify` を判定している。判定後に移管でオーナーが変わると、古い権限で更新が通る可能性がある。楽観的ロックの version は移管で上がるため、更新は Conflict になる。削除は version を確認しない。 / 提案: トランザクション内で行を再取得して認可を判定する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 はタイトル空の拒否と作成成功だけで不十分。本文・タグの境界、タグ重複、tags が文字列のとき、失敗時に何も残らないことは未確認（指摘[重大3]）。実装は仕様どおり。\n- AC2: 閲覧数の同時加算、他組織・非公開の NotFound が未検証で不十分（[重大1]、[重大3]）。\n- AC3: 不十分（[重大2]）。`LIKE ... ESCAPE '\\'` とプレースホルダーの実装は確認した。\n- AC4: 所有者の更新・削除の正常系のみ。Conflict・Forbidden・管理者・非公開が未検証で不十分（[重大1]、[重大3]）。\n- AC5: 正常系と非管理者の拒否のみ。他組織・ロールバックが未検証で不十分（[重大1]）。\n- AC6: `actor_key` を見ておらず不十分（[重大4]）。\n- AC7: 回数制限の基本動作のみ。境界と同時呼び出しが未検証で不十分（[重大3]）。\n- AC8: 往復と note_id の改ざんだけ。期限の境界と形の崩れが未検証で不十分（[重大4]）。\n- AC9: テストがなく不十分（[重大4]）。\n- AC10: テストがなく不十分（[重大3]）。\n- リスク K1・K2・K3・K4・K5・K6・K7・K8: 上記のとおりいずれも不十分。\n- エンジン検出の兆候: なし。skip・弱体化は確認していない。ただし検証が薄い。\n- テスト改ざん: `history` は途中までしか確認していない（出力が途中で切れた）。テストファイルは未コミットで、弱体化の比較対象はない。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest で足りる。ただし並行・障害の再現テストは別接続のファイル DB で書くこと。\n\n### 不足しているリスク\n- K1・K6: 他組織・非公開メモの漏えい、移管の失敗時のロールバックが未検証。\n- K2: SQL インジェクションと LIKE の特殊文字が未検証。\n- K3・K4: 並行処理と途中失敗の巻き戻しが未検証。\n- K5・K7・K8: 機密情報の露出と共有リンクの期限・形式が未検証。\n\n### 確認したこと\n- spec.md・design.md・`notes/*.py`・`tests/test_notes.py` をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK。\n- `$AQ trace` で V1〜V10 がいずれも `passed_but_unchallenged` であることを確認した。\n- `$AQ history` は途中で切れた。\n- 実装は仕様を読む限り大きな欠陥なし。LIKE のエスケープ、プレースホルダー、`BEGIN IMMEDIATE` と version 条件、`hmac.compare_digest`、`fullmatch` は確認した。\n- 実行による再現は行っていない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SQL-04",
+ "rep": 2,
+ "sec": 31.0,
+ "exit": 0,
+ "cost_usd": 0.10063430000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12377,
+  "cache_read_input_tokens": 121903,
+  "output_tokens": 3892,
+  "output_tokens_details": {
+   "thinking_tokens": 603
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12377,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2726,
+    "cache_read_input_tokens": 36781,
+    "cache_creation_input_tokens": 2451,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2451
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c0544cd2\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2, R9 / 対応区分: 修正必須 / 内容: `notes/service.py` の `search_notes` が、タグを検査せずに SQL 文字列へ埋め込んでいる（`quoted = \", \".join(f\"'{t}'\" ...)` を `sql` に連結）。仕様の「SQL は必ずプレースホルダー」「タグも R1 の規則で検査する」に違反する。タグは `TAG_RE` の検査を通らず、タグが文字列かどうかも確かめていない。 / 成立条件: `tags` に `\"zz') OR 1=1 OR ('\"` のような文字列を渡すだけで成立する。 / 影響: SQL インジェクション。実行して確認した（`tags=[\"zz') OR 1=1 OR ('\"]` で、タグを持たないメモが検索結果に出た）。`UNION SELECT` などで users の api_key など他の表を参照する経路も作れる。認可の絞り込み（org_id・private）はこの条件より前にあるので、外側の AND は残る。ただし、サブクエリの任意化と OperationalError の発生は確認できた。 / 根拠: `service.py` の `search_notes`（`if tags:` の分岐）。`_tag_list` は型の検査しかしない。上流にも検査はない。 / 提案: `_validate` と同じ規則（`TAG_RE` と文字列かどうか）でタグを検査する。SQL は `IN (?,?,…)` のプレースホルダーに変え、値は `args` で渡す。\n- [重大2] 区分: テスト / 対象: AC3, K2 / 対応区分: 証拠不足 / 内容: SQL インジェクション・LIKE の `%` と `_` とバックスラッシュ・タグの OR 絞り込み・不正なタグの拒否・page・per_page・sort の範囲外を確かめるテストが1つもない。`test_search` は通常語を1件探すだけ。 / 根拠: K2 は重要なリスクで、AC3 が明示している。実際に欠陥（重大1）があるのにテストが素通りしている。 / 提案: 悪意あるタグが ValidationError になるテスト、`50%` や `a_b` が文字どおり一致するテスト、他人の非公開メモが検索・一覧に出ないテスト、境界値の拒否テストを追加する。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC5, AC7, AC10, K1, K3, K4 / 対応区分: 証拠不足 / 内容: 設計が用意した差し込み口（`hooks.before_write`、`RateLimiter.hook`）を使うテストが0件。次の検証がすべて欠けている。(a) 同時閲覧での閲覧数の正確さ、(b) 更新の Conflict（古い version、読み出しと書き込みの間の割り込み）、(c) create・delete・transfer が途中で失敗したときのロールバック、(d) 例外の後も接続を使えること、(e) 他の組織・他人の非公開メモが NotFound になること、(f) 管理者でも非公開メモは NotFound・一般利用者の更新・削除は Forbidden、(g) 組織をまたぐ移管の Forbidden、(h) RateLimiter の「ちょうど window 秒」の境界と複数スレッドでの上限、(i) 共有リンクの期限ちょうど・形の崩れ。 / 根拠: これらは仕様が明示した受け入れ条件・リスクで、現在のテストは正常系を1つずつ確かめるだけ。 / 提案: 各条件を外したら失敗するテストを、決定論的に（hook とスレッド・イベントで）追加する。\n- [重大4] 区分: テスト / 対象: AC6, AC9, K5, K7 / 対応区分: 証拠不足 / 内容: `test_export_audit` は action と actor だけを確かめ、`actor_key` の伏せ方（末尾4文字・8文字未満はすべて伏せる）を一切確かめていない。ログ・例外に本文・署名・api_key が出ないことのテストもない。 / 根拠: AC6 と AC9 は検証が空洞。 / 提案: 8文字未満・ちょうど8文字・長い鍵の期待値を確かめるテストと、`assertLogs` でログに本文・署名が含まれないことを確かめるテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: 共有リンクは note_id の先頭に 0 を付けた形（例 `007.…`）でも、署名が int 化後の値で作られるため有効になる。仕様違反ではないが、同じ署名で複数の表記が通る。 / 提案: 正規化した表記と一致しないリンクを拒否する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と空題名の拒否のみ。タグの規則・文字数の境界・途中失敗での巻き戻しは未検証で、不十分（重大3に含む）。実装は読んだ範囲で規則どおり。\n- AC2: 閲覧数が1増えるテストも、同時閲覧・NotFound の統一を確かめるテストもなく、不十分。実装は `UPDATE views = views + 1` で原子的。\n- AC3: 重大1の実装欠陥がある。検証もなく、不十分（重大2）。\n- AC4: 所有者による更新・削除の正常系のみ。Conflict・Forbidden・割り込みは未検証で、不十分。実装は version を条件に UPDATE している。\n- AC5: 管理者でない場合の Forbidden と件数のみ。組織をまたぐ移管・途中失敗の巻き戻しは未検証で、不十分。\n- AC6: 伏せ方が未検証で、不十分（重大4）。実装は仕様どおりに読める。\n- AC7: 枠をまたぐテストだけ。ちょうど window 秒の境界・複数スレッドは未検証で、不十分。\n- AC8: 往復と改ざんのみ。期限の境界・形の崩れは未検証で、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。`transaction()` は ROLLBACK する実装。\n- エンジンが検出した兆候: なし。テストの skip・弱体化は確認できなかった（履歴上のテストはすべて追加のみ）。\n### E2E の要否\n- 不要（HTTP や UI のないライブラリ。unittest での単体・結合テストで足りる）。ただし、並行実行と途中失敗のテストは必須。\n### 不足しているリスク\n- K2: タグ経由の SQL インジェクションが未対策で、テストもない。\n- K1, K3, K4, K5, K6, K7, K8: 実装はおおむね妥当に読めるが、検証がない（重大3・重大4）。\n### 確認したこと\n- 仕様・設計と、`notes/*.py`・`tests/test_notes.py` を全部読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件がすべて通った。ただし上記のとおり検証は薄い。\n- 一時のメモリ DB で `search_notes` に `tags=[\"zz') OR 1=1 OR ('\"]` を渡し、タグを持たないメモが返ることを確認した（インジェクションの再現）。`UNION` を使った入力では OperationalError が出た。\n- `gate` は実行していない。コードも変更していない。",
+ "files_changed": [],
+ "valid": true
+}

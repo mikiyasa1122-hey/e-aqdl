@@ -1,0 +1,49 @@
+{
+ "case": "CLN-07",
+ "rep": 3,
+ "sec": 30.3,
+ "exit": 0,
+ "cost_usd": 0.1374187,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 22132,
+  "cache_read_input_tokens": 132747,
+  "output_tokens": 3560,
+  "output_tokens_details": {
+   "thinking_tokens": 1182
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22132,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1978,
+    "cache_read_input_tokens": 42365,
+    "cache_creation_input_tokens": 6707,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 6707
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 11cc3143\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8, K8 / 対応区分: 改善提案 / 内容: `notes/share.py:11,25` の `LINK_RE` は先頭ゼロ付きの数字（例 `007.…`）を通す。署名は `int` 変換後の値で検証するため、`7` の正規のリンクと同じ署名を持つ `007.<期限>.<署名>` も有効になる。同じメモを指す別表記のリンクが作れるだけで、偽造や権限拡大にはならない。 / 提案: `note_id` と期限の表記を正規形（先頭ゼロなし）に限定するか、検証時に `str(int)` と元の文字列が一致することを確かめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は妥当。題名・本文・タグの境界値と不正値（文字列そのもののタグ、末尾が改行のタグ）を確かめている。`hooks.before_write(\"create:tags\")` で途中の失敗を起こし、メモ・タグ・監査ログのどれも残らないことも確かめている。\n- AC2: V2 は妥当。他の組織・他人の非公開・存在しないメモがすべて NotFound になることを確かめている。NotFound のときに閲覧数が増えないことも確かめている。閲覧の合間に別の閲覧が入る場合と、ファイル DB で4スレッド×10回の閲覧が計40になることも確かめている。\n- AC3: V3 は、`list_notes`・`search_notes` を実装コードで追って確認した。LIKE は `_like_escape` と ESCAPE 句を使い、条件は題名・本文の両方に同じパターンを渡している。値はすべてプレースホルダーで渡している。page・per_page・sort の範囲外と、タグの検査も実装にある。\n- AC4: V4 は妥当。作成者・同じ組織の管理者・その他・他の組織・非公開のそれぞれを確かめている。古い version、読み出しと書き込みの間の割り込み、書き込みトランザクション内での認可の再確認、更新時の入力検証、削除途中の失敗のロールバックも確かめている。\n- AC5: V5 は、`transfer_notes` が管理者であること・3者が同じ組織であることを検査し、1つのトランザクションで移すことを確認した。途中の失敗のロールバックのテストもある。\n- AC6: V6 は、8文字未満をすべて伏せ、それ以上は末尾4文字だけを残す実装と照合して妥当。\n- AC7: V7 は妥当。ちょうど window 秒で新しい枠になる境界（159.999 と 160.0）を確かめている。拒否された呼び出しが枠を延ばさないことも確かめている。20スレッドが同時に呼んでも上限の5回を超えないことと、`hook` による判定の途中への割り込みも確かめている。どちらも sleep に頼らず Barrier・Event で決定論的に再現している。\n- AC8: V8 は、期限ちょうど以降が無効になる境界と、改ざん・形の崩れたリンクが Forbidden になることを確認した。\n- AC9: V9 は、ログ・例外メッセージに本文・署名・api_key が出ない実装と合致する。\n- AC10: V10 は、`transaction()` が `BaseException` で ROLLBACK して例外をそのまま伝え、ROLLBACK 自体の失敗で元の例外を隠さないことを確認した。\n- エンジンが検出したテストの兆候: なし。skip・`.only`・アサーションなしのテストは見当たらない。\n### E2E の要否\n- 不要。HTTP・UI のない標準ライブラリだけの Python パッケージで、単体テストが ID ごとのリスクを直接確かめている。\n### 不足しているリスク\n- なし（K1〜K8 はいずれも対応するテストがある）。\n### 確認したこと\n- 仕様書・設計書と、`notes/db.py`・`service.py`・`ratelimit.py`・`share.py`・`errors.py` をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。63件すべて通った（`PYTHONDONTWRITEBYTECODE=1`、リポジトリは変更していない）。\n- `$AQ trace` で R1〜R10 すべての要求・受け入れ条件・リスクが検証と結びついていることを確認した。\n- `$AQ history --since 0` は途中までしか出力できなかった（表示側が BrokenPipe で止まった）。確認できた範囲では、検証条件が弱められた形跡はない。\n- SQL の確認: `service.py` の SQL はすべてプレースホルダーを使う。`ORDER BY` に埋め込む値は `SORT_COLUMNS` の固定の辞書から取り、利用者の入力は入らない。`IN` の `?` の個数はタグの個数だけで、各タグは `TAG_RE.fullmatch` で検査済み。`MAX_OFFSET` の上限処理もある。",
+ "files_changed": [],
+ "valid": true
+}

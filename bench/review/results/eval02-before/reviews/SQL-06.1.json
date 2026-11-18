@@ -1,0 +1,49 @@
+{
+ "case": "SQL-06",
+ "rep": 1,
+ "sec": 34.7,
+ "exit": 0,
+ "cost_usd": 0.1311954,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19093,
+  "cache_read_input_tokens": 113774,
+  "output_tokens": 4343,
+  "output_tokens_details": {
+   "thinking_tokens": 1027
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19093,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2884,
+    "cache_read_input_tokens": 36377,
+    "cache_creation_input_tokens": 2717,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2717
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 7b81bfe0\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2, 設計「LIKE は ESCAPE」/ 対応区分: 修正必須 / 内容: `notes/service.py` の `search_notes` は `_like_escape` で `\\` `%` `_` をバックスラッシュ付きにしているが、SQL に `ESCAPE '\\'` がない。SQLite の LIKE には既定のエスケープ文字がないため、`\\%` は「バックスラッシュ＋任意文字列」として解釈される。その結果、`%` や `_` を含む語を普通の文字として部分一致で探せない。 / 成立条件: 検索語に `%` `_` `\\` のどれかが含まれるとき。たとえば題名 `50% off` を `50%` で検索する、題名 `a_b` を `a_b` で検索する。 / 影響: 仕様の「% と _ も普通の文字として部分一致で探す」を満たさず、存在するメモが 0 件になる。 / 確認した保証: 呼び出し元や DB 側で補う仕組みはない。既存の 12 件のテストに `%` `_` の検索はない。 / 根拠: `service.py` の search_notes の SQL（`title LIKE ? OR body LIKE ?`）。一時 DB で `50% off` `a_b` `axb` を作って確認した。`search_notes('%')`、`search_notes('50%')`、`search_notes('a_b')` はすべて `[]` を返した。期待は 1 件、1 件、1 件（`a_b` のみ）。 / 提案: SQL を `(title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\')` にする。あわせて下記の `%` `_` `\\` のテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10, K1, K2, K3, K4, K5, K6, K7, K8 / 対応区分: 証拠不足 / 内容: `tests/test_notes.py` は 12 件すべてが正常系の最小確認で、仕様の受け入れ条件とリスクの大半を確かめる検証がない。足りない証拠は次のとおり。(a) 設計で用意した `hooks.before_write` と `RateLimiter.hook` を使うテストがなく、ロールバック（AC1・AC4・AC5・AC10、K4）と、閲覧数・更新・RateLimiter の同時実行（AC2・AC4・AC7、K3）が未検証。(b) 認可の否定系がない。他の組織・他人の非公開メモが NotFound になること、管理者が非公開メモを扱えないこと、非作成者が Forbidden になること、組織をまたぐ移管の拒否、一覧・検索への漏えいがないこと（K1・K6）。(c) 境界値と異常系がない。題名 100 と 101 文字、本文 10000 と 10001 文字、タグ 5 個と 6 個、重複タグ、tags に文字列を渡す場合、page・per_page・sort の範囲外、version 競合の Conflict、RateLimiter の枠のちょうど window 秒、共有リンクの期限ちょうど・形崩れ・改行付き。(d) 注入の検証がない（K2）。(e) 機密の検証がない。api_key のマスク（8 文字未満・末尾 4 文字）、ログと例外メッセージに本文・署名・api_key が出ないこと（K5・K7・AC6・AC9）。 / 根拠: いずれも仕様に明記された必須の受け入れ条件で、特に K1・K3・K4・K8 は重要なリスクである。現状のテストは条件を外しても通る。重大1の欠陥が全テスト通過のまま残っていることが、その実例である。 / 提案: 上の (a)〜(e) を unittest で追加する。並行実行は別スレッド・別接続と hook を使い、sleep に頼らない決定論的な形にする。\n- [軽微1] 区分: 実装 / 対象: R4, AC4 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、権限と可視性の確認を `transaction` の外で行っている。確認の後に移管や削除が入った場合、旧所有者の権限で更新できてしまう余地がある。version 条件があるので更新が失われることはない。 / 提案: 確認と書き込みを `BEGIN IMMEDIATE` の内側に移す。`delete_note` は `DELETE` の rowcount も確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系 1 件と空題名の拒否 1 件だけ。境界値・タグ検査・ロールバックの確認がなく不十分。\n- AC2: 作成者本人が見る正常系のみ。他組織・非公開の NotFound、閲覧数の加算と同時実行がなく不十分。\n- AC3: ページングと検索の正常系のみ。`%` `_`（重大1）、OR のタグ絞り込み、範囲外入力、注入がなく不十分。\n- AC4: 作成者の更新と削除のみ。Conflict、Forbidden、管理者の扱い、更新時の入力検証、削除の失敗時にロールバックされることがなく不十分。\n- AC5: 件数の確認と非管理者の拒否のみ。他組織の拒否、元のまま残ること、メモの所有者が変わったことの確認がなく不十分。\n- AC6: 実行はしているが、api_key のマスクをアサートしておらず空洞。\n- AC7: 枠の再設定の正常系のみ。ちょうど window 秒の境界と同時呼び出しがなく不十分。\n- AC8: 往復と改ざんの 2 件のみ。期限の境界、期限切れ、形崩れの確認がなく不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip、`.only`、アサーションなしのファイルは見つからなかった）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、SQLite を使う単体・結合テストで足りる。\n\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 を確かめる検証がない（重大2）。\n- 同時実行の再現は未検証。実装は意図どおりに見える（RateLimiter は lock 内で判定する。閲覧数は SQL の加算式で更新する。更新は version 条件で守る）。\n\n### 確認したこと\n- `spec.md` と `design.md` を読み、`notes/*.py` と `tests/test_notes.py` をすべて読んだ。\n- `python3 -m unittest discover -s tests -t .` は 12 件すべて成功した（重大1の欠陥を検出できていない）。\n- 一時 DB で LIKE の挙動を再現し、重大1を確認した（`%` `50%` `a_b` の検索がすべて 0 件）。\n- コードを読んで次の点は仕様どおりと判断した。SQL は値をプレースホルダーで渡している（ORDER BY は固定の辞書から選ぶ）。`export_audit` のマスク。`verify_link` の `fullmatch`、期限の `>=`、`compare_digest`。`RateLimiter` の枠と lock。`transaction` の ROLLBACK。\n- `git status` では全ファイルが未追跡のため、差分での改ざん比較はできなかった。`$AQ trace` と `history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

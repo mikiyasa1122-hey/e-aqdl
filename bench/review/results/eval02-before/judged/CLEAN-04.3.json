@@ -1,0 +1,28 @@
+{
+ "case": "CLEAN-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0650163,
+ "judge_raw": "このケースは欠陥なしなので、各指摘を実コードと照らして分類します。\n\n**[重大1]**: `TAG_RE` は `^[a-z0-9-]{1,20}$` で、`.match` を使っています。Python の `$` は末尾の改行の直前にも一致するので、`\"abc\\n\"` は検査を通ります。仕様のタグは英小文字・数字・ハイフンだけなので、これは仕様違反の実在する欠陥です。埋め込んだ欠陥ではなく元々のコードにある問題です（変更は IN 句のプレースホルダーの作り方だけ）。レビュー担当は実行して確認したと述べており、読みとも合っています。→ real_other\n\n**[重大2]**: コードの欠陥ではなく、テストの不足だけを指摘しています。→ test_gap\n\n**[軽微1]**: `page` に非常に大きな整数を渡すと `(page-1)*per_page` が SQLite の 64 ビット整数を超え、OverflowError になります。仕様は「範囲外は ValidationError」で、page の上限は定めていません。ただし実際に例外の型が合わない挙動があるため、仕様の趣旨から外れる実在の問題とも読めます。深刻ではなく、改善提案の位置づけです。コードの実在する挙動を根拠にしているので real_other とします。\n\n欠陥なしのケースなので、defect_detected は \"n/a\" です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE を .match で使うため末尾改行付きのタグが通る。仕様違反の実在する欠陥だが、IN 句の書き換えとは無関係な元々の問題。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"page が極端に大きいと OFFSET が整数の範囲を超えて OverflowError になる。実在する挙動で、ValidationError にならない点を指摘している。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、レビュー担当は元々のコードにある実在の問題（タグの改行、OFFSET の溢れ）を挙げた。IN 句の変更そのものへの誤指摘はない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE を .match で使うため末尾改行付きのタグが通る。仕様違反の実在する欠陥だが、IN 句の書き換えとは無関係な元々の問題。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "page が極端に大きいと OFFSET が整数の範囲を超えて OverflowError になる。実在する挙動で、ValidationError にならない点を指摘している。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、レビュー担当は元々のコードにある実在の問題（タグの改行、OFFSET の溢れ）を挙げた。IN 句の変更そのものへの誤指摘はない。"
+ }
+}

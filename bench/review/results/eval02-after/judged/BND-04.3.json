@@ -1,0 +1,38 @@
+{
+ "case": "BND-04",
+ "rep": 3,
+ "judge_cost_usd": 0.0669983,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- 重大1は、埋め込んだ欠陥そのものです。`share.py:36` の `>` が期限ちょうどを有効にしており、箇所・原因・影響がすべて一致します。\n- 重大2は、実在する別の欠陥です。`TAG_RE.match` では `$` が末尾の改行に一致するため、仕様外のタグが通ります。\n- 重大3は、テストの不足だけを指摘しているので test_gap です。\n- 軽微1は、実行で確かめていない推測です。ただし `2**70` は SQLite の整数の範囲を超えるので OverflowError になる可能性は高く、仕様上は範囲外の入力です。コード上は実在する小さな欠陥ですが、根拠が弱く ambiguous とします。\n- 軽微2は、delete の認可確認がトランザクションの外にあることを指摘しています。移管直後に旧所有者の権限で削除が通る点は実在しますが、仕様が明示する範囲を超えるため ambiguous とします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"share.py の verify_link で期限比較が > になっており、期限ちょうどが有効になる埋め込み欠陥そのものを、再現つきで指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE の $ と match により末尾改行のタグが通るのは実在する検証漏れで、埋め込み欠陥とは別である。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"コードの欠陥ではなく、テストの不足だけを列挙している。\"},\n  {\"label\": \"軽微1\", \"class\": \"ambiguous\", \"reason\": \"巨大な page による OverflowError は未確認の推測で、仕様上の欠陥かどうか人の確認が必要。\"},\n  {\"label\": \"軽微2\", \"class\": \"ambiguous\", \"reason\": \"delete の認可確認がトランザクション外にある競合は実在しうるが、仕様が明示しておらず欠陥と言えるか判断できない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が verify_link の > を期限ちょうどの有効化として正しく特定しており、検出できている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "share.py の verify_link で期限比較が > になっており、期限ちょうどが有効になる埋め込み欠陥そのものを、再現つきで指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE の $ と match により末尾改行のタグが通るのは実在する検証漏れで、埋め込み欠陥とは別である。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "コードの欠陥ではなく、テストの不足だけを列挙している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "ambiguous",
+    "reason": "巨大な page による OverflowError は未確認の推測で、仕様上の欠陥かどうか人の確認が必要。"
+   },
+   {
+    "label": "軽微2",
+    "class": "ambiguous",
+    "reason": "delete の認可確認がトランザクション外にある競合は実在しうるが、仕様が明示しておらず欠陥と言えるか判断できない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が verify_link の > を期限ちょうどの有効化として正しく特定しており、検出できている。"
+ }
+}

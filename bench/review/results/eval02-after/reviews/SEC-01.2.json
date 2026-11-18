@@ -1,0 +1,49 @@
+{
+ "case": "SEC-01",
+ "rep": 2,
+ "sec": 33.8,
+ "exit": 0,
+ "cost_usd": 0.10616510000000001,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12741,
+  "cache_read_input_tokens": 123051,
+  "output_tokens": 4288,
+  "output_tokens_details": {
+   "thinking_tokens": 566
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12741,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3095,
+    "cache_read_input_tokens": 37451,
+    "cache_creation_input_tokens": 2158,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2158
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 6\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 857ad860\n### 指摘\n- [重大1] 区分: 実装 / 対象: R9, AC9, K5 / 対応区分: 修正必須 / 内容: `create_note` がメモの本文をログに出している。 / 成立条件: メモを作成するたび、logger \"notes\" が INFO 以上で出力される設定のとき（ハンドラーが付いていれば常に出る）。 / 影響: R9「ログにメモの本文を出さない」に違反する。機密の本文がログに残る。 / 根拠: notes/service.py の `log.info(\"note created id=%s owner=%s body=%r\", note_id, user[\"id\"], body)`（create_note の末尾）。上流で本文を伏せる処理はない。 / 提案: ログから body を外し、ID だけを出す（設計書の「ログには ID だけを出す」にも合う）。\n- [重大2] 区分: テスト / 対象: AC9, R9, K5 / 対応区分: 証拠不足 / 内容: 本文・共有リンクの署名・api_key がログ・例外メッセージ・出力に出ないことを確かめるテストがない（assertLogs もない）。重大1の違反はこのため見逃されている。 / 根拠: AC9 は必須の受け入れ条件。tests/test_notes.py に該当テストがない。 / 提案: assertLogs で全 logger のログを集め、本文・署名・api_key が含まれないことを、create・share・例外の各経路で確かめる。\n- [重大3] 区分: テスト / 対象: AC2, AC3, K1, K2 / 対応区分: 証拠不足 / 内容: 次の検証が1つもない。\n  - 他組織・他人の非公開・存在しないメモが、get・list・search・update・delete のすべてで NotFound になる、または結果に含まれないこと\n  - 閲覧数が1ずつ増えること\n  - `%`・`_`・`\\` を含む検索語が文字どおりの部分一致になること。SQL 文字列を埋め込めないこと\n  - page・per_page・sort の範囲外と、タグの OR 絞り込みと不正なタグの拒否\n  / 根拠: K1（漏えい）と K2（SQL インジェクション）は重要リスク。AC2・AC3 は必須。現状は正常系の get・list・search が各1件あるだけ。LIKE の ESCAPE 実装（service.py `_like_escape`）は読んで正しそうだが、実行した検証がない。 / 提案: 上の各項目について、異常系・境界値のテストを追加する。\n- [重大4] 区分: テスト / 対象: AC1, AC4, AC5, K4, K6, AC10 / 対応区分: 証拠不足 / 内容: 次の検証がない。\n  - 途中失敗でのロールバック（`hooks.before_write` で create・delete・transfer を途中で失敗させ、何も残らず例外が伝わること）\n  - 失敗後も同じ接続で次の操作ができること\n  - タグ・題名・本文の境界値（0・1・100・101 文字、タグ 5 個・6 個、重複、文字列そのままのタグ）\n  - 更新の version 不一致による Conflict\n  - 更新・削除の Forbidden（同じ組織の member）\n  - 管理者による非公開メモの NotFound\n  - 移管で別の組織が混ざったときの Forbidden\n  - 移管した後に version が増えること\n  / 根拠: 設計書は、`hooks.before_write` をこの検証のための差し込み口として用意している。テストは1つも使っていない。 / 提案: 上の各項目のテストを追加する。\n- [重大5] 区分: テスト / 対象: AC4, AC2, AC7, K3 / 対応区分: 証拠不足 / 内容: 同時実行のテストがない。\n  - 同時に閲覧したときの閲覧数に漏れがないこと\n  - 読み出しと書き込みの間に他の更新が入った場合の Conflict（`hooks.before_write(\"update\")` で割り込む）\n  - RateLimiter に複数スレッドから同時に呼んでも limit を超えないこと（`hook` を使って決定論的に）\n  / 根拠: K3・AC7 は並行性の必須項目。RateLimiter のテストは単一スレッドの1件だけ。 / 提案: 別々の接続・スレッドを使い、hook で順序を固定するテストを追加する。\n- [重大6] 区分: テスト / 対象: AC6, AC7, AC8, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証がない。\n  - `export_audit` で api_key が伏せられること（末尾4文字だけが残ること、8文字未満は全部伏せること、境界の7・8文字）。現状のテストは action と actor しか見ておらず、K7 を確かめていない。\n  - RateLimiter の枠の境界（ちょうど window 秒で新しい枠になる）。\n  - 共有リンクの期限ちょうど以降の拒否、期限切れ、署名の改ざん、形の崩れ（改行・全角数字・長すぎる数字・非 str）。現状は往復と note_id の差し替えの1件だけ。\n  / 根拠: AC6・AC7・AC8 は必須の受け入れ条件。実装はコードを読んだ限り正しそうだが、実行して確かめた検証がない。 / 提案: 境界値と異常系のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4, K3 / 対応区分: 改善提案 / 内容: `update_note`・`delete_note` の認可判定（`_visible`・`_can_modify`）がトランザクションの外にある。判定の後に移管で owner が変わると、古い認可に基づく操作になりうる。update は version が移管で増えるため Conflict になり安全。delete は version を使わない。 / 提案: トランザクション内で行を再読み込みして認可を再判定する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系1件と空題名1件だけで、境界値・タグ検証・ロールバックの検証がなく不十分（重大4）。\n- AC2: 閲覧の正常系だけで、非表示の NotFound・閲覧数・同時実行がなく不十分（重大3・5）。\n- AC3: 一覧と検索の正常系だけで、LIKE のワイルドカード・範囲外・タグ・組織分離がなく不十分（重大3）。\n- AC4: 所有者による更新と削除の正常系だけで、Conflict・Forbidden・検証・失敗時の巻き戻しがなく不十分（重大4・5）。\n- AC5: 正常系と非管理者の拒否だけで、別組織の混入・途中失敗がなく不十分（重大4）。\n- AC6: api_key の伏せ字を確かめておらず、不十分（重大6）。\n- AC7: 単一スレッドの1件だけで、境界・同時実行がなく不十分（重大5・6）。\n- AC8: 往復と改ざん1件だけで、期限の境界・形の崩れがなく不十分（重大6）。\n- AC9: テストなし。実装も本文をログに出していて違反（重大1・2）。\n- AC10: テストなし（重大4）。\n- エンジンが検出したテストの兆候: なし。skip・弱体化は見つからなかった。ただしテスト自体が全体として薄い（12件）。\n### E2E の要否\n- 不要。HTTP や UI がないライブラリで、SQLite のインメモリ DB を使う単体・結合テストで足りる。\n### 不足しているリスク\n- K1・K2・K3・K4・K5・K6・K7・K8 は、正常系以外の検証がない。上の重大2〜6のとおり。\n### 確認したこと\n- spec.md と design.md、notes/ の全ソース（db.py・service.py・ratelimit.py・share.py・errors.py）を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK だった。\n- SQL を確認した。すべてプレースホルダーを使っている。LIKE は `\\` → `%` → `_` の順にエスケープし、ESCAPE '\\\\' を title と body の両方に適用している。ORDER BY は固定の辞書から取っている。ここに欠陥は見つからなかった。\n- 共有リンクは fullmatch・compare_digest・`>=` による期限判定で、実装は仕様と整合している。\n- `$AQ trace`・`$AQ history` は実行していない。レビューはソースとテストの直接の読解で行った。",
+ "files_changed": [],
+ "valid": true
+}

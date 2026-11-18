@@ -1,0 +1,33 @@
+{
+ "case": "SQL-06",
+ "rep": 3,
+ "judge_cost_usd": 0.0654003,
+ "judge_raw": "## 判定\n\n- **重大1**: 埋め込み欠陥そのものです。箇所は `search_notes` の LIKE（service.py:141-143）で、原因は ESCAPE 句がないこと、影響は `%` や `_` を含む検索で 0 件になることです。いずれも正解データと一致します。\n- **重大2**: `TAG_RE` を `match` で使うと、`$` が末尾の改行の直前にも一致します。そのため `\"abc\\n\"` が通ります。仕様の「英小文字・数字・ハイフンの1〜20文字」に反する実在のバグで、埋め込み欠陥とは別物です。\n- **重大3**: コードの欠陥ではなく、テストの不足だけを指摘しています。\n- **軽微1**: `private` の型検証がないという提案です。仕様に違反しているとは言えず、改善提案に当たります。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes の LIKE に ESCAPE 句がなく、%・_ を含む検索語で 0 件になるという、埋め込み欠陥と原因・影響・箇所がすべて一致する。\"},\n{\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を match で使うため末尾が改行のタグが通る。仕様に反する実在のバグだが、埋め込み欠陥とは別物。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足・弱さだけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"private の型検証がないという改善提案で、仕様違反の主張ではない。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が ESCAPE 句の欠落と、それによる % や _ の検索不能を、実行結果つきで正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes の LIKE に ESCAPE 句がなく、%・_ を含む検索語で 0 件になるという、埋め込み欠陥と原因・影響・箇所がすべて一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を match で使うため末尾が改行のタグが通る。仕様に反する実在のバグだが、埋め込み欠陥とは別物。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足・弱さだけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "private の型検証がないという改善提案で、仕様違反の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が ESCAPE 句の欠落と、それによる % や _ の検索不能を、実行結果つきで正確に指摘している。"
+ }
+}

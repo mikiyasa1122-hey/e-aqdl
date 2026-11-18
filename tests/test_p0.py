@@ -30,8 +30,9 @@ REVIEW_TMPL = """## レビュー結果
 ### 確認したこと
 - python3 -m unittest
 """
-MAJOR = "- [重大1] 区分: 実装 / 対象: R1 / 内容: 空白だけのメモが保存される / 根拠: src/memo.py:2 / 提案: strip"
-MINOR = "- [軽微1] 区分: テスト / 対象: V1 / 内容: テスト名が分かりにくい"
+MAJOR = ("- [重大1] 区分: 実装 / 対象: R1 / 対応区分: 修正必須 / 内容: 空白だけのメモが保存される / 成立条件: 空白だけを渡す / "
+         "影響: 空のメモが残る / 根拠: src/memo.py:2 / 提案: strip")
+MINOR = "- [軽微1] 区分: テスト / 対象: V1 / 対応区分: 改善提案 / 内容: テスト名が分かりにくい"
 
 
 def review(verdict="判定: 合格", blocking=0, minor=0, findings="- なし"):
@@ -50,10 +51,11 @@ class P01ReviewVerdictTest(unittest.TestCase):
     def tearDown(self):
         self.e.cleanup()
 
-    def run_review(self, message, attempts=4):
+    def run_review(self, message, attempts=4, spawn=True):
         e = self.e
-        self.assertFalse(denied(e.spawn("reviewer")))
-        e.start("reviewer")
+        if spawn:
+            self.assertFalse(denied(e.spawn("reviewer")))
+            e.start("reviewer")
         res = None
         for _ in range(attempts):
             res = e.stop("reviewer", message)
@@ -73,10 +75,19 @@ class P01ReviewVerdictTest(unittest.TestCase):
         self.e.aq("check")
 
     def test_needs_fix_zero_blocking_is_not_completable(self):
-        res = self.run_review(review("判定: 要修正", 0, 1, MINOR))
+        # 「要修正」で重大0件（改善提案だけ）は判定の矛盾。書き直しを求め、直らなければ無効なレビューとして記録する
+        # （完了はできず、実装の修正ループにも進めない。もう一度レビューする）
+        self.assertFalse(denied(self.e.spawn("reviewer")))
+        self.e.start("reviewer")
+        res = self.e.stop("reviewer", review("判定: 要修正", 0, 1, MINOR))
+        self.assertTrue(blocked(res))
+        self.assertIn("重大な指摘が0件", res["reason"])
+        res = self.run_review(review("判定: 要修正", 0, 1, MINOR), spawn=False)
         self.assertIsNone(res)
         self.assert_not_completable()
-        self.assertIn("実装", self.e.next())  # 修正ループへ
+        nxt = self.e.next()
+        self.assertIn("無効", nxt)
+        self.assertIn("aq-dlc:reviewer", nxt)
 
     def test_needs_fix_one_blocking_is_not_completable(self):
         self.run_review(review("判定: 要修正", 1, 0, MAJOR))

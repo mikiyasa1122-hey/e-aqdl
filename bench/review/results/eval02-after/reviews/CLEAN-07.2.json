@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-07",
+ "rep": 2,
+ "sec": 36.3,
+ "exit": 0,
+ "cost_usd": 0.1524561,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 22950,
+  "cache_read_input_tokens": 158161,
+  "output_tokens": 4482,
+  "output_tokens_details": {
+   "thinking_tokens": 933
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 22950,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2837,
+    "cache_read_input_tokens": 42773,
+    "cache_creation_input_tokens": 409,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 409
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード d524f16c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検証用の正規表現 `TAG_RE = ^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾が改行のタグ（例 `\"ab\\n\"`）が通る。`$` は末尾の改行の手前にも一致するため。仕様は、英小文字・数字・ハイフンだけの1〜20文字としている。 / 成立条件: create_note・update_note・search_notes に、末尾に `\\n` が付いたタグを渡す。 / 影響: 仕様で禁じた文字を含むタグが保存される。実行して確認した。`create_note(..., ['ab\\n'])` が成功し、note_tags に `'ab\\n'` が保存された。`share.py` の LINK_RE では `fullmatch` を使って同じ問題を避けているのに、タグには適用されていない。 / 根拠: notes/service.py の TAG_RE の定義（約14行目）と `_validate`・`search_notes` の `TAG_RE.match(t)`。上流での防止はなく、既存のテストも防いでいない。 / 提案: `TAG_RE.fullmatch(t)` に変える（または `\\Z` を使う）。末尾が改行のタグを拒否するテストを加える。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8, R9, R10 / 対応区分: 証拠不足 / 内容: tests/test_notes.py は12件で、ほとんど正常系の1経路だけを確かめている。次の検証が丸ごとない。(1) 他の組織・他人の非公開メモが NotFound になること（AC2・K1。list・search・update・delete も含む）。(2) 閲覧数の増加と同時閲覧（`hooks.before_write(\"view\")` による競合の再現）。(3) 一覧の範囲外・ソート不正の拒否、`%`・`_`・`\\` を含む検索語、SQL インジェクションの文字列、タグ OR 絞り込み（AC3・K2）。(4) 題名・本文・タグの境界値と、tags が文字列のときの拒否、途中失敗で何も残らないこと（AC1・K4）。(5) version の不一致や競合による Conflict、管理者・他人による更新・削除の Forbidden、非公開メモは管理者でも NotFound、削除の失敗が伝わること（AC4）。(6) 他の組織への移管の Forbidden、途中失敗で元のままになること（AC5・K6）。(7) api_key の伏せ方（8文字未満・ちょうど8文字）（AC6・K7）。(8) RateLimiter の枠のちょうど境界とマルチスレッド（AC7）。(9) 共有リンクの期限ちょうど・期限切れ・形の崩れ（AC8・K8）。(10) ログと例外に機密情報が出ないこと（AC9）。(11) 例外の後も接続が使えること（AC10）。 / 根拠: 仕様はこれらを受け入れ条件・重要なリスクとしている。設計も `hooks.before_write` と `RateLimiter.hook` を、テストで並行実行と途中の失敗を再現するために用意している。ところが、その2つを使うテストが1件もない。`trace` ではすべて「合格」だが、その実体は上の12件の正常系だけである。認可の条件・ESCAPE 句・version の条件・ロールバックを外してもテストは通る。上の重大1のバグも、境界値テストがなかったため見逃された。 / 提案: 上の (1)〜(11) を決定論的なテストとして加える。並行実行は `hooks` と `hook` を使い、sleep に頼らない。\n- [軽微1] 区分: 実装 / 対象: R4, AC4 / 対応区分: 改善提案 / 内容: delete_note は、削除の対象の行が確かめた後に消えていても、DELETE の rowcount を見ない。トランザクションの中で可視性と権限を確かめ直さないため、並行して削除されたメモでも成功して監査ログが残る。メモの漏えいやデータの破壊には至らない。 / 提案: トランザクションの中で行を読み直す。または rowcount が 0 のとき NotFound にする。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: test_create_and_get と test_empty_title_rejected だけ。境界値・タグの規則・トランザクションの巻き戻しがないため不十分。実際に末尾が改行のタグのバグが残っている。\n- AC2: 閲覧の正常系だけ。他の組織・非公開メモの NotFound と閲覧数の増加、同時閲覧がないため不十分。\n- AC3: 一覧の1ページ目と単純な検索だけ。範囲外・ワイルドカード・SQL インジェクション・タグ OR・他人の非公開メモの除外がないため不十分。\n- AC4: 作成者による更新・削除の正常系だけ。Conflict・Forbidden・競合・非公開メモのケースがないため不十分。\n- AC5: 管理者による移管の正常系と、管理者以外の拒否だけ。他の組織への移管と途中失敗の巻き戻しがないため不十分。\n- AC6: 監査ログの action と actor だけを確かめ、api_key の伏せ方は確かめていないため不十分。\n- AC7: 枠を超えた後のリセットだけ。ちょうど window 秒の境界とスレッドがないため不十分。\n- AC8: 往復と改ざん1例だけ。期限の境界・期限切れ・形の崩れがないため不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip・弱いアサーションは見つかっていない。ただし、検証の範囲そのものが狭い。\n- 検証条件・テストの改ざん: `history` の出力は途中で止まった（BrokenPipe）。確認できた範囲では、弱められた検証は見つからなかった。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unit・統合のテストで足りる。必要なのは、並行実行と途中失敗の決定論的なテスト。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめるテストがない。コードの認可（`_visible`・`_can_modify`、list・search の WHERE）は読んで妥当と判断した。\n- K2: LIKE は `_like_escape` と ESCAPE 句、プレースホルダーで実装されている。`%`・`_`・`\\` に対する検証はない。\n- K3: 同時の更新・閲覧・呼び出しの競合を、`hooks` を使って再現するテストがない。\n- K4: 途中の失敗で何も残らないことを確かめるテストがない。\n- K5: ログ・例外に機密情報が出ないことを確かめるテストがない。\n- K6: 他の組織への移管を拒否し、一部だけ移らないことを確かめるテストがない。\n- K7: api_key の伏せ方（8文字未満など）を確かめるテストがない。\n- K8: 期限の境界と形の崩れたリンクを確かめるテストがない。\n- R9, R10: ログに ID だけを出す実装は妥当。ただし例外のメッセージ・出力の検証と、例外後の接続の再利用の検証がない。\n\n### 確認したこと\n- `spec.md`・`design.md`・notes/*.py・tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` は12件がすべて OK。\n- 末尾が改行のタグが保存されることを、一時的なメモリ DB で再現した（リポジトリは変更していない）。\n- `aqdlc trace` で、要求と検証の対応を確認した。`history` は途中で出力が切れた。",
+ "files_changed": [],
+ "valid": true
+}

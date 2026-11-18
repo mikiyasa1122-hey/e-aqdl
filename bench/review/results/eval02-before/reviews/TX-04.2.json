@@ -1,0 +1,49 @@
+{
+ "case": "TX-04",
+ "rep": 2,
+ "sec": 30.6,
+ "exit": 0,
+ "cost_usd": 0.1086456,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14221,
+  "cache_read_input_tokens": 121656,
+  "output_tokens": 3958,
+  "output_tokens_details": {
+   "thinking_tokens": 722
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14221,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2556,
+    "cache_read_input_tokens": 37671,
+    "cache_creation_input_tokens": 2956,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2956
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード a7130b66\n### 指摘\n- [重大1] 区分: 実装 / 対象: R10, R1, R4, R5, K4, AC1, AC4, AC5, AC10 / 対応区分: 修正必須 / 内容: `transaction()` が例外時に ROLLBACK しない。設計書の「例外のときに ROLLBACK」に反する。 / 成立条件: `with transaction(conn)` の中で例外が出るとき。例は NotFound、Conflict、途中の障害、`hooks.before_write` の例外。 / 影響: 接続が BEGIN IMMEDIATE の状態のまま残る。次の書き込みはすべて「cannot start a transaction within a transaction」で失敗し、接続が使えなくなる（AC10 未達）。途中までの書き込みも、同じ接続で後から COMMIT されると残る。create・update・delete・transfer・get_note の失敗時に何も残さない、という要件も守れない。 / 根拠: notes/service.py:177-179 の `except BaseException: raise` に ROLLBACK がない。確認した保証: 呼び出し元に別の ROLLBACK はなく、`isolation_level=None` のため自動で戻らない。再現: `before_write` で create:tags に例外を投げた後、`conn.in_transaction` が True になった。続く `create_note` は OperationalError で失敗した。 / 提案: `except BaseException:` の中で `if conn.in_transaction: conn.execute(\"ROLLBACK\")` を行ってから `raise` する。\n- [重大2] 区分: 実装 / 対象: R1, R4, AC1, AC4 / 対応区分: 修正必須 / 内容: タグの検査 `TAG_RE = ^[a-z0-9-]{1,20}$` を `match` で使っており、`$` が末尾の改行を許す。 / 成立条件: タグが \"abc\\n\" のように末尾に改行を含むとき。作成・更新・検索の絞り込みのすべてで通る。 / 影響: 仕様の「英小文字・数字・ハイフンの1〜20文字」に反するタグが保存される。 / 根拠: notes/service.py:158, 207, 293。`create_note(..., [\"abc\\n\"])` が成功した。share.py は fullmatch を使っており、同じ注意が service にはない。 / 提案: `fullmatch` を使うか、`\\Z` で終える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは正常系が中心の12件だけ。次の検証がない。他の組織・他人の非公開メモの NotFound、閲覧数の同時加算、更新の Conflict（古い version と読み書きの間の割り込み）、Forbidden（member による他人メモの更新）、R5 の組織外の拒否と途中失敗での巻き戻し、`%`・`_`・SQL 文字を含む検索語、タグの OR 絞り込み、入力の境界値、api_key の伏せ字、枠の境界と複数スレッドの RateLimiter、共有リンクの期限ちょうど・形の崩れ。 / 根拠: 重大1・2 の欠陥が既存のテストをすべて通っている。K1〜K8 と AC の大半は、実装の中身を確かめる検証が空洞になっている。設計書は `hooks.before_write` と `RateLimiter.hook` を並行・障害の再現用に用意しているが、テストから使われていない。 / 提案: 上の各項目について、異常系と境界値のテストを追加する。並行系は hook で決定論的に再現し、sleep に頼らない。\n- [重大4] 区分: テスト / 対象: R9, AC9, K5 / 対応区分: 証拠不足 / 内容: ログ・例外のメッセージに本文・署名・api_key が出ないことを確かめる検証がない。 / 根拠: R9 は機密情報の露出に関わる重要な要求（K5）。コードでは ID だけをログに出しているように見えるが、テストで確認されていない。 / 提案: `assertLogs` と例外メッセージで、本文・署名・鍵が含まれないことを確かめるテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` の認可の確認（`_visible`・`_can_modify`）がトランザクションの外にある。楽観的ロックの version が実質的に守っているので、動作上の欠陥までは確認していない。 / 提案: 読み出しをトランザクションの内側に移す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 空の題名と正常系だけで不十分。長さ・タグの境界、失敗時に何も残らないことが未検証。実際に欠陥（重大1・2）がある。\n- AC2: 同じ組織での閲覧のみ。他組織・非公開・閲覧数の同時加算が未検証。\n- AC3: 基本の一覧と検索のみ。範囲外の入力、`%`・`_`、タグの OR、非公開の除外が未検証。\n- AC4: 作成者の更新と削除のみ。Conflict と Forbidden が未検証。\n- AC5: 管理者以外の拒否と正常系のみ。組織外の拒否と巻き戻しが未検証。\n- AC6: `rows[0]` の action と actor だけを確認。api_key の伏せ字は未検証で不十分。\n- AC7: 基本の1ケースのみ。ちょうど window 秒の境界と同時の呼び出しが未検証。\n- AC8: 往復と改ざんのみ。期限ちょうど・形の崩れが未検証。\n- AC9: 検証なし。\n- AC10: 検証なし。実際に欠陥がある（重大1）。\n- エンジンが検出したテストの兆候はなし（skip・.only・アサーションなしのファイルは見つからなかった）。\n### E2E の要否\n- 不要（ライブラリで HTTP・UI がない）。ただし並行系は hook を使った単体テストで再現する必要がある。\n### 不足しているリスク\n- K1: 漏えいの検証がない。\n- K2: 検索の SQL インジェクションを確かめるテストがない。コードはプレースホルダーを使っている。\n- K3: 同時の閲覧・更新・RateLimiter の検証がない。\n- K4: ロールバックの欠陥（重大1）。\n- K5・K7: 検証がない。\n- K6: 組織外への移管の拒否と巻き戻しの検証がない。\n- K8: 期限・形の崩れの境界の検証がない。\n### 確認したこと\n- spec.md・design.md と notes/*.py・tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` → 12件すべて成功。\n- 検証用の再現スクリプト（メモリ上の DB。リポジトリは変更していない）で次を確認した。末尾に改行を含むタグが保存された。途中障害の後に `in_transaction` が True のままになり、次の `create_note` が失敗した。\n- `$AQ trace`・`$AQ history` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,49 @@
+{
+ "case": "SQL-03",
+ "rep": 1,
+ "sec": 34.1,
+ "exit": 0,
+ "cost_usd": 0.15371579999999999,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 24002,
+  "cache_read_input_tokens": 123818,
+  "output_tokens": 4531,
+  "output_tokens_details": {
+   "thinking_tokens": 535
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 24002,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3193,
+    "cache_read_input_tokens": 41405,
+    "cache_creation_input_tokens": 2598,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2598
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 86e2428c\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K2（notes/service.py の list_notes、SQL を組み立てる行） / 対応区分: 修正必須 / 内容: sort を検証せず、`SORT_COLUMNS.get(sort, sort)` で未知の値をそのまま `ORDER BY` に埋め込んでいる。R3 は updated と title 以外を ValidationError にし、利用者の入力を SQL に埋め込まないことを求めている。 / 成立条件: `list_notes(conn, user, sort=<任意の文字列>)` を呼ぶだけで起きる。認証や権限は関係しない。 / 影響: ValidationError にならず、`OperationalError`（no such column）や `ProgrammingError`（バインド数の不一致）になる。`sort='(SELECT body FROM notes)'` は例外なく実行される。ORDER BY に任意の式を差し込めるので、SQL インジェクションにあたる。 / 確認した保証: 上流の検証はなく、呼び出し元も検査しない。実際に実行して確認した（`sort='bogus'` は OperationalError、`sort='title; --'` は ProgrammingError、サブクエリは通った）。 / 根拠: notes/service.py の list_notes にある `ORDER BY {SORT_COLUMNS.get(sort, sort)}`。tests/test_notes.py に sort を検査するテストがない。 / 提案: `sort not in SORT_COLUMNS`（文字列でない場合を含む）なら ValidationError を投げる。`.get` のフォールバックをやめて `SORT_COLUMNS[sort]` を使う。\n- [重大2] 区分: テスト / 対象: AC1〜AC5, AC7〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは 12 件の正常系中心で、受け入れ条件の中核を確かめていない。足りない証拠は次のとおり。(a) 他の組織・他人の非公開メモが NotFound になること（K1。get・list・search・update・delete）。(b) 更新の Conflict（古い version、`hooks.before_write` での競合）と Forbidden。(c) 閲覧数が、複数スレッド・複数接続で数え漏れしないこと（K3）。(d) 作成・削除・移管の途中で失敗したときのロールバック。`hooks.before_write` はあるのに使われていない（K4、AC5、AC10）。(e) LIKE の `%` `_` と SQL インジェクション文字列（K2）。(f) 境界値。題名 100/101 文字、本文 10000 文字、タグ 5/6 個とタグの形式、page と per_page の範囲、sort の不正値。(g) 移管で別の組織を拒否すること（K6）。(h) 監査ログの api_key の伏せ方（8 文字未満・8 文字以上、末尾 4 文字）。現状の `test_export_audit` は action と actor しか見ていない（K7、AC6）。(i) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッド（AC7）。(j) 共有リンクの期限ちょうど・形の崩れ・長すぎる数字（AC8）。(k) ログや例外メッセージに本文・署名・api_key が出ないこと（AC9）。 / 根拠: これらは仕様が受け入れ条件・リスクとして明示した規則である。上の指摘 1 は、これらのテストがあれば検出できた欠陥で、現状のテストでは見逃される。 / 提案: 上の各項目に、異常系・境界値のテストを追加する。並行処理のテストは sleep ではなく、フックとスレッドで決定論的に再現する。\n- [重大3] 区分: テスト / 対象: AC7, K3（RateLimiter）, AC4（楽観的ロック） / 対応区分: 証拠不足 / 内容: 同時実行の保証（RateLimiter の上限、更新の Conflict、閲覧数の増加）を確かめるテストがない。設計は `RateLimiter.hook` と `service.hooks.before_write` をこのために用意しているが、どのテストも使っていない。 / 根拠: 仕様は「同時に呼ばれても上限を超えない」「後から書いた側が先の更新を消さない」「数え漏れがない」を明示している。ロックや version 条件を外してもテストは落ちない。 / 提案: ロックを外す、または UPDATE の `version` 条件を外すと失敗するテストを書く。例: hook の中で別スレッドか別接続から書き込みを割り込ませ、Conflict や上限超過を決定論的に確かめる。\n- [軽微1] 区分: 実装 / 対象: R3, search_notes / 対応区分: 改善提案 / 内容: tags の件数・形式の検査が `_validate` と重複している。 / 提案: 共通の `_validate_tags` に切り出す。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常な作成と空の題名の拒否だけを確かめていて不十分。境界値、タグ、失敗時の巻き戻しがない。\n- AC2: V2 は同じ組織の利用者による正常な閲覧しか確かめておらず、不十分。閲覧数の加算、他の組織や非公開メモの NotFound、同時の閲覧がない。K1 の検証（VK1）は実質的に空。\n- AC3: V3 は一覧の 1 ページ目と検索の 1 件を確かめるだけで、不十分。sort の不正値を拒否できておらず、実装も満たしていない（重大 1）。`%` `_`、タグ OR、範囲外の入力もない。K2 の検証（VK2）がない。\n- AC4: V4 は所有者による更新・削除の正常系だけで不十分。Conflict、Forbidden、管理者の扱い、非公開メモ、削除時のロールバックがない。\n- AC5: V5 は件数が 2 件になることと管理者以外の拒否だけで不十分。別の組織の拒否、途中で失敗したときに元のままであること、移管後の所有者の確認がない。\n- AC6: V6 は api_key の伏せ方を確かめておらず、空洞化している。\n- AC7: V7 は枠の再開しか確かめず不十分。ちょうど window 秒の境界と複数スレッドがない。\n- AC8: V8 は往復と改ざんだけで不十分。期限ちょうど、形の崩れ、期限切れがない。\n- AC9: V9 に該当するテストがなく、検証が存在しない。\n- AC10: V10 に該当するテストがなく、例外の後に接続を使い続けられることの検証が存在しない。\n- エンジンが検出したテストの兆候はなし。skip や `.only` はなく、アサーションは存在するが弱い。\n\n### E2E の要否\n- 不要。ライブラリで、UI も HTTP もない。単体テストと統合テスト（実際の SQLite とスレッド）で十分。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモを見せないことのテストがない。実装（`_visible`）は読んだ範囲で正しい。\n- K2: sort 経由の SQL インジェクションが実在する（重大 1）。\n- K3: 並行処理のテストがない（重大 3）。\n- K4: ロールバックのテストがない。\n- K5: 機密情報の露出のテストがない。\n- K6: 別の組織への移管を拒否するテストがない。\n- K7: api_key の伏せ方のテストがない。\n- K8: 期限の境界・形の崩れのテストがない。\n- 実装は読んだ範囲で次の点が妥当。`transaction` の `BEGIN IMMEDIATE` と ROLLBACK、`update_note` の `WHERE version=?` と rowcount による判定、`get_note` の NotFound、`share.py` の `fullmatch` と `compare_digest`、`RateLimiter` の `>=` による枠の判定とロック、`export_audit` の伏せ方。\n\n### 確認したこと\n- spec.md、design.md、`notes/*.py`、`tests/test_notes.py` を全文読んだ。\n- `$AQ trace` と `history` で、検証条件が弱められていないことを確認した（V1〜V10 と VK は追加のみ）。\n- `python3 -m unittest discover -s tests -t .` で 12 件が OK だった。\n- `list_notes(sort='bogus')` は OperationalError、`sort='title; --'` は ProgrammingError になった。`sort='(SELECT body FROM notes)'` は ORDER BY に差し込まれ、例外なく実行された。\n- コードは変更していない。gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

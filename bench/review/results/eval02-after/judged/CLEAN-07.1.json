@@ -1,0 +1,38 @@
+{
+ "case": "CLEAN-07",
+ "rep": 1,
+ "judge_cost_usd": 0.06634229999999999,
+ "judge_raw": "各指摘の分類です。このケースは欠陥なし（内部の名前を変えるだけの変更）なので、matches_defect は使いません。\n\n- **重大1**: タグ検証は `^[a-z0-9-]{1,20}$` を `re.match` で使っており、`$` が末尾の改行の直前にマッチします。実際に `\"ab\\n\"` が通ることを実行で確認しています。仕様違反の実在する欠陥なので real_other です。\n- **重大2**: ロールバックを確かめるテストがないという指摘です。コードの欠陥ではないので test_gap です。\n- **重大3**: 認可と入力境界の異常系のテストがないという指摘です。test_gap です。\n- **重大4**: 並行実行・境界・マスク・ログのテストがないという指摘です。test_gap です。\n- **軽微1**: `sort` に list などの unhashable な値を渡すと、`sort not in SORT_COLUMNS` が ValidationError ではなく TypeError になります。範囲外は ValidationError という仕様に反するので、実在する小さなバグです。real_other です。\n\n```json\n{\"findings\": [\n{\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE を re.match と $ で使うため末尾改行のタグが通ることを実行で確認しており、仕様に反する実在の欠陥である。\"},\n{\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"ロールバックを確かめるテストの不足だけを指摘している。\"},\n{\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"認可・入力境界の異常系のテストの不足だけを指摘している。\"},\n{\"label\": \"重大4\", \"class\": \"test_gap\", \"reason\": \"並行実行・境界・マスク・ログのテストの不足だけを指摘している。\"},\n{\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"unhashable な sort で ValidationError でなく TypeError になり、範囲外は ValidationError という仕様に反する小さな実在のバグである。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースで、実在の別バグ2件（重大1、軽微1）とテスト不足3件が報告された。名前変更に関する誤指摘はない。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE を re.match と $ で使うため末尾改行のタグが通ることを実行で確認しており、仕様に反する実在の欠陥である。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "ロールバックを確かめるテストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "認可・入力境界の異常系のテストの不足だけを指摘している。"
+   },
+   {
+    "label": "重大4",
+    "class": "test_gap",
+    "reason": "並行実行・境界・マスク・ログのテストの不足だけを指摘している。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "unhashable な sort で ValidationError でなく TypeError になり、範囲外は ValidationError という仕様に反する小さな実在のバグである。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースで、実在の別バグ2件（重大1、軽微1）とテスト不足3件が報告された。名前変更に関する誤指摘はない。"
+ }
+}

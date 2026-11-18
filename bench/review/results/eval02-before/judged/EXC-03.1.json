@@ -1,0 +1,28 @@
+{
+ "case": "EXC-03",
+ "rep": 1,
+ "judge_cost_usd": 0.0623543,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**は埋め込んだ欠陥そのものです。notes/share.py の verify_link で、形の崩れたリンクに対して Forbidden を送出せず None を返す点を指摘しています。原因（except ValueError: return None）と影響（呼び出し側が None を検証済みとして扱う）も正解データと一致します。\n- **重大2**はテストの不足だけを指摘しているので test_gap です。\n- **軽微1**は先頭ゼロの note_id が int 化され、同じ署名で別の文字列表現が通るという指摘です。コードの挙動としては実在しますが、報告自身が有害ではないと述べており、保守性・堅牢性の提案にとどまるので style にしました。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"verify_link が形の崩れたリンクで Forbidden でなく None を返す点を、同じ箇所・同じ原因・同じ影響で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"コードの欠陥ではなく、テストが受け入れ条件を確かめていないという不足の指摘だけである。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロの note_id が別の文字列表現でも通る点は、報告自身が有害ではないとしており、改善提案にとどまる。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥（形の崩れた共有リンクで None を返す）を箇所・原因・影響とも正確に捉えている。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "verify_link が形の崩れたリンクで Forbidden でなく None を返す点を、同じ箇所・同じ原因・同じ影響で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "コードの欠陥ではなく、テストが受け入れ条件を確かめていないという不足の指摘だけである。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロの note_id が別の文字列表現でも通る点は、報告自身が有害ではないとしており、改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥（形の崩れた共有リンクで None を返す）を箇所・原因・影響とも正確に捉えている。"
+ }
+}

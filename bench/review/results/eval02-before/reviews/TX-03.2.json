@@ -1,0 +1,49 @@
+{
+ "case": "TX-03",
+ "rep": 2,
+ "sec": 30.7,
+ "exit": 0,
+ "cost_usd": 0.103668,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13389,
+  "cache_read_input_tokens": 120160,
+  "output_tokens": 3808,
+  "output_tokens_details": {
+   "thinking_tokens": 603
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13389,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2739,
+    "cache_read_input_tokens": 36402,
+    "cache_creation_input_tokens": 3393,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3393
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 62accf30\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, K4, R10 / 対応区分: 修正必須 / 内容: `create_note` がメモの INSERT と、タグ・監査ログの INSERT を2つの別トランザクションに分けている（notes/service.py:96-103）。仕様 R1 は「メモ・タグ・監査ログの記録は1つのトランザクション」「途中で失敗したら何も残さない」と定めている。 / 成立条件: 1つ目の COMMIT の後、2つ目のトランザクションの前（`hooks.before_write(\"create:tags\")` の位置）、またはタグ・監査の INSERT で例外が起きたとき。 / 影響: タグも監査ログもないメモが残る。呼び出し側には例外が返るのに、メモは作成済みになる。監査ログも欠落する。 / 確認した保証: 上流の検証や DB 制約はこの分割を防いでいない。差し込み口がまさにこの隙間にあり、設計の「途中の失敗」の再現点と矛盾する。 / 根拠: notes/service.py:96-103 に `with transaction(conn)` が2回ある。 / 提案: INSERT notes・note_tags・audit を1つの `with transaction(conn):` にまとめる。`before_write` はその内側に置く。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは tests/test_notes.py の12件だけで、ほぼ正常系の1本ずつである。次の検証がない。R1 の途中失敗で何も残らないこと（`hooks.before_write` を使うテストがない）。R4 の Conflict と Forbidden、更新の途中割り込みによる Conflict。R5 の組織またぎ拒否・途中失敗の巻き戻し・元のまま。R2 の他組織・他人の非公開メモが NotFound になること、同時閲覧での数え漏れ。R3 の `%` `_` と SQL インジェクション文字列、タグの OR、page・per_page・sort の範囲外。R6 の api_key の伏せ字と8文字未満の境界。R7 の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。R8 の期限ちょうど・形の崩れたリンク。R9 のログに機密が出ないこと。R10 の例外後の接続の再利用。 / 根拠: 仕様は AC2〜AC10 と K1〜K8 をこれらの境界・異常系・並行で定義している。通る12件では漏えい・不整合・競合を確かめられない。gate の合格は、重大1の欠陥を検出できなかったことからも、欠陥検出の証明にならない。 / 提案: 上記の項目ごとに、決定論的な異常系・境界・並行のテストを追加する。並行はスレッドと差し込み口を使い、sleep に頼らない。各テストは、認可・WHERE・トランザクションなどの条件を外すと失敗する形にする。\n- [重大3] 区分: テスト / 対象: AC9, K5, AC6, K7 / 対応区分: 証拠不足 / 内容: 本文・署名・api_key がログや例外メッセージに出ないことを確かめる検証が一切ない。`export_audit` の伏せ字も、`actor` の確認だけで `actor_key` は未検証である。 / 根拠: R6 と R9 は機密情報の露出防止を要求している。コードは ID だけをログに出している（service.py の log.info、share.py の log.info。署名は含まない）。ただし `verify_link` は `ValueError(link)` を握りつぶして Forbidden にしており、メッセージに署名は出ない。この結果は静的に確認したもので、テストでは確認されていない。 / 提案: `assertLogs` と例外メッセージの検査で、本文・署名・api_key の文字列が含まれないことを確かめる。`actor_key` は、8文字以上と8文字未満の2通りで検査する。\n- [軽微1] 区分: 実装 / 対象: R8 / 対応区分: 改善提案 / 内容: `verify_link` は署名を int 化した note_id と expires で検証する。このため「007.…」のように先頭ゼロを付けた別表記のリンクも有効になり、同じメモに複数の正規でない表記が通る。 / 提案: `str(note_id)` と元の文字列の一致を確かめるか、正規形だけを受け付ける。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 正常系と題名の空だけを確かめており不十分。途中失敗で何も残らないことを確かめる検証がなく、実装にも欠陥がある（重大1・2）。\n- AC2: 作成者本人が見る正常系だけで不十分。他組織・他人の非公開メモ・存在しないメモが NotFound になること、閲覧数の増加と同時閲覧の数え漏れが未検証。\n- AC3: 一覧の1ページ目と単純な検索だけで不十分。`%` `_`、タグの OR、範囲外の入力、SQL インジェクション、他人の非公開メモの除外が未検証。コードは仕様に沿って見える（プレースホルダー・ESCAPE）。\n- AC4: 作成者の更新・削除の正常系だけで不十分。Conflict・Forbidden・管理者・非公開メモ・競合・削除の失敗の伝播が未検証。\n- AC5: 管理者による移管の件数と、管理者以外の拒否だけで不十分。組織またぎの拒否、全部か何もしないか、元のまま残ることが未検証。\n- AC6: `actor` だけを確認しており、api_key の伏せ字は未検証で不十分。\n- AC7: 回数超過と枠のリセットだけで不十分（61秒は境界でない）。ちょうど window 秒の境界と複数スレッドの同時呼び出しが未検証。\n- AC8: 往復と改ざん1例だけで不十分。期限ちょうど・期限切れ・形の崩れ・不正な署名が未検証。\n- AC9: 検証なし（重大3）。\n- AC10: 検証なし。例外後に接続を再利用できることを確かめていない。\n- エンジンが検出したテストの兆候: なし。history では、検証条件の弱体化は見つからなかった（bind の追加のみ）。\n\n### E2E の要否\n- 不要。HTTP や UI のないライブラリである。ただし、別接続・別スレッドの並行テストと、ファイル DB を使った統合テストは必要。\n\n### 不足しているリスク\n- K1: 他の組織・他人の非公開メモの漏えいを確かめる否定のテストがない。\n- K2: SQL インジェクションの入力を使った検証がない。\n- K3: 同時の更新・閲覧・呼び出しの検証がない。\n- K4: 途中失敗の巻き戻しを確かめる検証がなく、create_note に実際の欠陥がある。\n- K5〜K8: 機密情報の露出・移管・api_key の漏れ・共有リンクの異常系の検証がない。\n\n### 確認したこと\n- spec.md と design.md、notes/*.py と tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が合格した。\n- `aqdlc.py history --since 0` の末尾を確認した。検証条件の弱体化はなかった。\n- update_note・get_note・delete_note・transfer_notes・list_notes・search_notes・export_audit・RateLimiter は、コードを読んで仕様と矛盾する点を見つけていない（実行による確認はしていない）。",
+ "files_changed": [],
+ "valid": true
+}

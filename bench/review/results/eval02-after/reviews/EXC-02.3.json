@@ -1,0 +1,49 @@
+{
+ "case": "EXC-02",
+ "rep": 3,
+ "sec": 34.2,
+ "exit": 0,
+ "cost_usd": 0.1380625,
+ "num_turns": 7,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 20562,
+  "cache_read_input_tokens": 117185,
+  "output_tokens": 4408,
+  "output_tokens_details": {
+   "thinking_tokens": 670
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 20562,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3066,
+    "cache_read_input_tokens": 38203,
+    "cache_creation_input_tokens": 2591,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2591
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 763c4b09\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K4, R10 / 対応区分: 修正必須 / 内容: `delete_note` が例外を握りつぶしている。トランザクション内で失敗しても `except Exception` がログに警告を出すだけで、呼び出し側には成功したように見える。 / 成立条件: 削除中に DB エラーが起きる場合。ロックのタイムアウト（database is locked）、制約違反、`hooks.before_write(\"delete:note\")` の例外などで起きる。 / 影響: 仕様は「失敗したら例外を呼び出し側に伝える（握りつぶさない）」と定めている。現状は削除に失敗しても呼び出し側が成功と誤認する。メモが残り、削除の監査ログも残らない。 / 根拠: notes/service.py:187-194。`transaction()` は ROLLBACK して再送出するが、193 行の `except Exception` が吸収している。上流でこの例外を防ぐ仕組みはない。 / 提案: `try/except` を外すか、ログを出したあとに `raise` する。\n- [重大2] 区分: 実装 / 対象: R1, R3, R4, AC1, AC3, AC4 / 対応区分: 修正必須 / 内容: タグの検証が `TAG_RE.match` と `^...$` の組み合わせで、末尾の改行を許す。`\"ab\\n\"` が有効なタグとして通る。 / 成立条件: `create_note`・`update_note`・`search_notes` の tags に、末尾が `\\n` のタグ（例 `\"ab\\n\"`）を渡したとき。 / 影響: 仕様は各タグを「英小文字・数字・ハイフンの1〜20文字」と定めている。違反するタグが保存され、検索の絞り込みにも使われる。 / 根拠: notes/service.py:14, 64, 150。実行で確認した。`create_note(c,u,\"t\",\"b\",[\"ab\\n\"])` が拒否されず note_id 1 を返した。 / 提案: `TAG_RE.fullmatch` に変えるか、パターンの `$` を `\\Z` にする。3 箇所とも直す。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは 12 件で、ほぼ正常系だけである。次の検証がない。(a) 閲覧数の同時加算（AC2, K3）。(b) 楽観的ロックの Conflict と、読み出しから書き込みの間に更新が入る競合（AC4）。(c) 作成・削除・移管の途中失敗でのロールバックと、失敗後に接続を使い続けられること（AC1, AC4, AC5, AC10, K4）。(d) 他の組織・他人の非公開メモが NotFound になること、メンバーが更新・削除すると Forbidden になること（K1）。(e) LIKE の `%`・`_`・`\\` と、タグの OR 絞り込み（AC3, K2）。(f) 一覧の範囲外（page, per_page, sort）。(g) api_key の伏せ字で、8 文字未満と末尾 4 文字（AC6, K7）。(h) RateLimiter の枠の境界（ちょうど window 秒）と、複数スレッドでの上限（AC7）。(i) 共有リンクの期限ちょうど、形の崩れ、署名の改ざん（AC8, K8）。(j) ログに本文・署名・api_key が出ないこと（AC9）。 / 根拠: tests/test_notes.py の全体。`delete_note` の握りつぶし（重大1）と、タグの改行（重大2）は、この空白のためにテストを通過している。仕様は上記の挙動を受け入れ条件として明示しており、設計書も `hooks.before_write` と `RateLimiter.hook` の差し込み口を用意している。 / 提案: 上記(a)〜(j)を決定論的に検証するテストを追加する。並行処理は sleep ではなく hooks や `threading.Barrier` で再現する。認可の条件や更新条件を外すと失敗するテストにする。\n- [軽微1] 区分: 実装 / 対象: R4, K1 / 対応区分: 改善提案 / 内容: `update_note` と `delete_note` は、トランザクションの外で行を読んで `_visible` と `_can_modify` を判定している。判定のあとに所有者が `transfer_notes` で変わっても、古い判定のまま更新できる。 / 提案: 権限判定をトランザクション内（BEGIN IMMEDIATE のあと）で行う。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで不十分。タグの規則・件数・重複、文字数の境界、トランザクションの巻き戻しの検証がない。実際にタグの改行が漏れている。\n- AC2: 通常の閲覧しか確かめておらず不十分。閲覧数の増加、同時閲覧、他の組織・非公開・存在しない場合の NotFound の検証がない。\n- AC3: `test_list_first_page` と `test_search` のみで不十分。範囲外の入力、LIKE の特殊文字、タグの OR、非公開メモの除外の検証がない。\n- AC4: `test_update_by_owner` と `test_delete_by_owner` のみで不十分。Conflict、Forbidden、管理者の更新、削除失敗の伝播の検証がない。握りつぶしを見逃している。\n- AC5: `test_transfer` は件数を確かめるだけ。org をまたぐ移管、失敗時に元のままであること、所有者が実際に移ったことの検証がない。`test_transfer_requires_admin` は管理者以外の拒否だけである。\n- AC6: `test_export_audit` は action と actor だけを見ている。api_key の伏せ字は未検証で、不十分。\n- AC7: `test_limit` は単一スレッドの枠の超過と枠の更新だけ。ちょうど window 秒の境界と同時の呼び出しは未検証で、不十分。\n- AC8: 往復と改ざんが 1 件ずつだけ。期限ちょうど、期限切れ、形の崩れは未検証で、不十分。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。skip や弱体化は見当たらない（検証条件の変更履歴は確認していない。未確認）。\n### E2E の要否\n- 不要。HTTP や UI のないライブラリで、unittest による統合テスト（SQLite を使う）で足りる。ただし並行処理・ロールバックの統合テストは必須である（重大3）。\n### 不足しているリスク\n- K1, K3, K4: 認可の漏れ、同時更新・閲覧、途中失敗は未検証（重大3）。\n- K2: LIKE のエスケープ（`_like_escape` と ESCAPE 句、プレースホルダー）はコード上は正しく適用されているが、テストがない。\n- K5, K7: api_key の伏せ字と R9 の出力は、コード上は問題ないが、テストがない。\n- K6: 組織またぎの移管の拒否と、失敗時の元の状態は、テストがない。\n- K8: 共有リンクは、コード上は fullmatch と compare_digest で適切だが、境界のテストがない。\n### 確認したこと\n- spec.md と design.md を読み、notes/ の全 5 ファイルと tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行した。12 件が成功した。\n- 末尾が改行のタグ `\"ab\\n\"` を `create_note` に渡すと、拒否されず note_id 1 を返すことを実行で確認した。\n- SQL はすべてプレースホルダーを使っている。`LIMIT`・`OFFSET` も値で渡している。ORDER BY は固定のホワイトリストである。\n- RateLimiter は 1 つのロックで保護されており、`now - start >= window` で枠が切り替わる。\n- 実行していないもの: `trace`、`history`、`git diff`（リポジトリがすべて未追跡のため差分なし）、並行処理の再現。",
+ "files_changed": [],
+ "valid": true
+}

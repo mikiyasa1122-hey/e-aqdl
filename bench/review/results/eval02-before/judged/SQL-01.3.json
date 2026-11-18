@@ -1,0 +1,33 @@
+{
+ "case": "SQL-01",
+ "rep": 3,
+ "judge_cost_usd": 0.06405229999999999,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `search_notes` で検索語 q を f 文字列で SQL に埋め込んでおり、埋め込んだ欠陥と同じ箇所・同じ原因です。他組織の非公開メモが漏れることも実行で確認しています。\n- **重大2**: `TAG_RE` を `re.match` と `$` で使うため、末尾に改行の付いたタグを通します。欠陥は実在しますが、埋め込んだ SQL インジェクションとは別物です。\n- **重大3**: テストの不足だけを指摘しています。\n- **重大4**: `transfer_notes` が、存在しない to_user で生の IntegrityError を返すことは実在します。ただし影響は軽く、組織またぎは仕様上の信頼範囲内で未確認と報告者自身が認めています。実在する欠陥を、根拠を挙げて指摘しているため real_other とします。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"search_notes の q を f 文字列で SQL に直接埋め込む SQL インジェクションを、再現付きで指摘しており、埋め込んだ欠陥と箇所・原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"real_other\", \"reason\": \"TAG_RE を re.match と $ で使うため、末尾に改行の付いたタグを通すことが実在する別の欠陥で、実行でも確認している。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大4\", \"class\": \"real_other\", \"reason\": \"存在しない to_user で生の IntegrityError が返る点は実在する軽微な欠陥で、組織またぎは未確認と明記している。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が search_notes の SQL インジェクションを正しく特定し、再現と修正案（プレースホルダー化）も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "search_notes の q を f 文字列で SQL に直接埋め込む SQL インジェクションを、再現付きで指摘しており、埋め込んだ欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "real_other",
+    "reason": "TAG_RE を re.match と $ で使うため、末尾に改行の付いたタグを通すことが実在する別の欠陥で、実行でも確認している。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大4",
+    "class": "real_other",
+    "reason": "存在しない to_user で生の IntegrityError が返る点は実在する軽微な欠陥で、組織またぎは未確認と明記している。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が search_notes の SQL インジェクションを正しく特定し、再現と修正案（プレースホルダー化）も示している。"
+ }
+}

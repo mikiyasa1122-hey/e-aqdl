@@ -1,0 +1,49 @@
+{
+ "case": "CLEAN-06",
+ "rep": 2,
+ "sec": 54.9,
+ "exit": 0,
+ "cost_usd": 0.24239059999999998,
+ "num_turns": 5,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 10,
+  "cache_creation_input_tokens": 40674,
+  "cache_read_input_tokens": 135446,
+  "output_tokens": 6613,
+  "output_tokens_details": {
+   "thinking_tokens": 2000
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 40674,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 4088,
+    "cache_read_input_tokens": 40233,
+    "cache_creation_input_tokens": 441,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 441
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 3\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f7150041\n### 指摘\n- [重大1] 区分: 実装 / 対象: R4, AC4, K3, K1 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、メモの読み出し（`_row`）と認可判定（`_visible`・`_can_modify`）を `transaction()` の外で行っている。`update_note` は、読み出した古い行から `new_title`・`new_body` を作り、UPDATE の条件には呼び出し側が渡した `version` を使う。その結果、古い行の内容を、新しい version の行に書き込める。 / 成立条件: スレッド A が `update_note(version=2, title=…)`（body は省略）を呼び、行を読んだ（v1・body=X）後、UPDATE を実行する前に、スレッド B が body=Y に更新して v2 になる。A の UPDATE の条件 `version=2` は成立し、A は古い body=X で B の更新を上書きする。`delete_note` も同様で、認可判定の後に `transfer_notes` で所有者が変わっても、元の所有者がそのまま削除できる。 / 影響: 「後から書いた側が先の更新を消さない」という R4 に反し、更新が失われる。所有権を失った利用者による削除も通り、K3 と K1 のリスクにつながる。 / 根拠: notes/service.py の update_note（`row = _row(...)` から `hooks.before_write(\"update\")` を経て `with transaction`）。確認のため、`hooks.before_write` で `update` の時点に別接続から body=Y に更新し、その後に A が version=2 で title だけ更新したところ、最終的な body は `X` だった（B の更新が消えた）。実行は一時フォルダの DB で行い、リポジトリは変更していない。上流に防ぐ仕組みはなく、既存のテストにも該当するものがない。 / 提案: `BEGIN IMMEDIATE` の中でメモを読み直し、そこで認可・存在・`row[\"version\"] == version` を判定してから UPDATE する（delete も同様）。\n- [重大2] 区分: テスト / 対象: AC2, AC3, AC4, AC5, AC1, K1, K2, K3, K4, K6 / 対応区分: 証拠不足 / 内容: 重要なリスクを確かめるテストがほとんどない。tests/test_notes.py の12件は正常系の確認が中心である。次のテストが無い。 (a) 他の組織・他人の非公開メモが NotFound になること（K1）。 (b) 管理者が非公開メモに触れないこと、および Forbidden になる場合。 (c) 閲覧数が同時に正確に増えること。 (d) version の Conflict と、読み出しから書き込みの間に入る更新（上記重大1）。 (e) 作成・更新・削除・移管の途中で失敗したときのロールバック（`hooks.before_write` を使った再現。K4・R10）。 (f) 他の組織の利用者を含む移管が Forbidden になること（K6）。 (g) `%` `_` `\\` の検索と SQL インジェクション文字列（K2）。 (h) 入力検証の境界（題名100/101文字・空白だけ、本文10000文字、タグ5/6個・重複・不正文字・文字列を渡す場合、per_page 0/51、page 0、不正な sort）。 / 根拠: AC1〜AC5 は規則どおりに動くことを要求しており、テストが無ければ検証できない。K1・K2・K4 は仕様上の重要なリスクである。 / 提案: 上記 (a)〜(h) を、決定論的な（スレッドの sleep に頼らない）テストとして追加する。条件を外すと失敗することが確認できる形にする。\n- [重大3] 区分: テスト / 対象: AC6, AC7, AC8, AC9, AC10, K5, K7, K8 / 対応区分: 証拠不足 / 内容: AC6〜AC10 の検証が不足、または空洞化している。 (AC6) 監査ログの api_key が伏せられていることを確かめていない。`test_export_audit` は action と actor しか見ていない。8文字未満・ちょうど8文字の境界もない。 (AC7) 枠の境界（ちょうど window 秒で新しい枠になること、window 秒の1つ手前）と、`RateLimiter.hook` を使った複数スレッドの同時呼び出しを確かめていない。 (AC8) 期限の時刻ちょうど・1秒前の境界、期限切れ、署名の改ざん、形の崩れたリンク（改行・全角数字・長さ違い・非文字列）を確かめていない。`test_tampered` は note_id の書き換えだけである。 (AC9) ログ・例外のメッセージに本文・署名・api_key が出ないことを確かめていない。 (AC10) 例外の後に同じ接続が使えることを確かめていない。 / 根拠: R6・R7・R8・R9・R10 に対応する受け入れ条件であり、K5・K7・K8 は機密情報の漏えいと不正なリンクの通過に関わる。設計は `RateLimiter.hook` と `before_write` を再現用の差し込み口として挙げているが、テストで使われていない。 / 提案: AC6 は鍵の長さ7・8・9で期待値を固定して確認する。AC7 は clock を固定して境界を確認し、`hook` 内で別スレッドから呼ぶテストを加える。AC8 は期限の境界と各種の不正なリンクを確認する。AC9 は `assertLogs` と例外メッセージで秘密の値が含まれないことを確認する。AC10 は例外後にも書き込みと読み出しができることを確認する。\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `verify_link` は先頭に0が付いた数字（例: `007.1060.<sig>`）を `int()` で正規化して署名を検証するため、1つの有効なリンクに対して、署名が同じで形の異なる文字列が複数通る。 / 提案: 正規形（先頭0なし）でない note_id・期限は Forbidden にする。\n- [軽微2] 区分: 実装 / 対象: R4, R10 / 対応区分: 改善提案 / 内容: `delete_note` は、同時に削除されて対象が0行でも成功扱いにし、存在しないメモの `delete` 監査ログを残す。`transaction()` の ROLLBACK 自体が失敗すると、元の例外が隠れる。 / 提案: DELETE の rowcount を確認して NotFound にする。ROLLBACK の失敗は握りつぶして元の例外を伝える。\n- [軽微3] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` のタグ検査が `_validate` と重複している。 / 提案: タグ検査を共通の関数にまとめる。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V は `test_create_and_get` と `test_empty_title_rejected` だけで不十分。境界値・タグの規則・失敗時に何も残らないこと（`hooks.before_write(\"create:tags\")` を使う再現）を確認していない。\n- AC2: `test_create_and_get` は作成者が見る正常系だけで不十分。他の組織・非公開・存在しないメモが NotFound になること、閲覧数の増加と同時閲覧を確認していない。\n- AC3: `test_list_first_page` と `test_search` は正常系だけで不十分。範囲外の入力、`%` と `_`、タグの OR、他の組織・非公開の除外、インジェクションを確認していない。実装は ESCAPE 句・プレースホルダー・SQL の組み立てを確認した範囲では適切（`_like_escape` を題名・本文の両方に適用し、ORDER BY はホワイトリストで、LIKE は `ESCAPE '\\'`）。ただしテストでは確かめられていない。\n- AC4: `test_update_by_owner` と `test_delete_by_owner` は正常系だけで不十分。Conflict・Forbidden・管理者・非公開の扱い・競合を確認していない。実装には重大1の欠陥がある。\n- AC5: `test_transfer` と `test_transfer_requires_admin` は管理者の拒否と件数の確認だけで不十分。他の組織の利用者、途中で失敗したときの巻き戻し、移管後の所有者を確認していない。\n- AC6: api_key を確認しておらず不十分。実装（8文字未満はすべて伏せ、それ以外は末尾4文字を残す）は仕様どおりだが、テストが無い。\n- AC7: `test_limit` は枠の更新と超過を確認しているが、境界（ちょうど window 秒）と同時呼び出しが無く不十分。\n- AC8: `test_roundtrip` と `test_tampered` だけで不十分。期限の境界と形の崩れたリンクが無い。\n- AC9: 検証なしで不十分。\n- AC10: 検証なしで不十分。\n- エンジンが検出したテストの兆候はなし。skip・`.only`・アサーションなしのファイルは見つからなかった。\n- 検証条件・テストの弱体化: tests/ と notes/ は未追跡のため、`git diff` では確認できなかった。`history` はコマンドを実行しておらず確認していない。\n\n### E2E の要否\n- 不要（HTTP・UI の無いライブラリであり、SQLite を使うユニット・結合テストで足りる）。ただし、別接続・別スレッドを使った並行のテストは必要。\n\n### 不足しているリスク\n- K1: 他の組織・非公開メモの NotFound のテストが無い（重大2）。\n- K2: SQL インジェクション・LIKE のワイルドカードのテストが無い（重大2）。\n- K3: 同時の更新・閲覧・呼び出しのテストが無く、実装にも欠陥がある（重大1・重大2・重大3）。\n- K4: 作成・更新・削除・移管の途中失敗のテストが無い（重大2）。\n- K5・K7: api_key と、ログ・例外のメッセージにある機密情報のテストが無い（重大3）。\n- K6: 他の組織を含む移管と、途中失敗のテストが無い（重大2）。\n- K8: 期限切れ・改ざん・形の崩れたリンクのテストが無い（重大3）。\n\n### 確認したこと\n- spec.md・design.md と notes/ の全ファイル（service.py・db.py・ratelimit.py・share.py・errors.py）、tests/test_notes.py を読んだ。\n- `python3 -m unittest discover -s tests -t .` を実行した。12件が OK だった。\n- 重大1を一時 DB で再現した（古い body=X が最終的に残る）。\n- `gate` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

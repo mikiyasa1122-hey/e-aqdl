@@ -1,0 +1,23 @@
+{
+ "case": "CLEAN-09",
+ "rep": 3,
+ "judge_cost_usd": 0.0631003,
+ "judge_raw": "**[重大1]** TAG_RE は `^[a-z0-9-]{1,20}$` を `re.match` で使っている。Python の `$` は末尾の改行の直前にも一致するので、\"abc\\n\" のようなタグが通る。これは仕様 R1 の規則に反する実在のバグで、レビュー担当は再現も確認している。埋め込んだ変更（タグの行を変数に分けるだけ）とは別の箇所なので、real_other とする。\n\n**[重大2]** コードの欠陥の指摘ではなく、テストの不足だけを述べている。test_gap とする。\n\nこのケースは欠陥なしなので、defect_detected は n/a。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"real_other\", \"reason\": \"TAG_RE の `$` と re.match により末尾が改行のタグが通る。仕様 R1 に反する実在の欠陥で、埋め込んだ変更とは別。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"異常系・境界値・並行・途中失敗のテスト不足だけを指摘しており、コードの欠陥の主張ではない。\"}\n],\n\"defect_detected\": \"n/a\", \"matched_label\": null, \"note\": \"欠陥なしのケースだが、TAG_RE の改行の穴は元のコードに実在するバグなので real_other とした。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "real_other",
+    "reason": "TAG_RE の `$` と re.match により末尾が改行のタグが通る。仕様 R1 に反する実在の欠陥で、埋め込んだ変更とは別。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "異常系・境界値・並行・途中失敗のテスト不足だけを指摘しており、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "n/a",
+  "matched_label": null,
+  "note": "欠陥なしのケースだが、TAG_RE の改行の穴は元のコードに実在するバグなので real_other とした。"
+ }
+}

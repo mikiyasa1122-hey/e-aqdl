@@ -1,0 +1,42 @@
+{
+ "BND-03#3": {
+  "findings": {
+   "重大4": "real_other"
+  }
+ },
+ "CLEAN-07#1": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "CLEAN-10#2": {
+  "findings": {
+   "重大3": "real_other"
+  }
+ },
+ "EXC-01#1": {
+  "findings": {
+   "重大5": "real_other"
+  }
+ },
+ "RACE-02#2": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "TX-01#2": {
+  "findings": {
+   "軽微2": "real_other"
+  }
+ },
+ "TX-03#1": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ },
+ "VAL-02#3": {
+  "findings": {
+   "軽微1": "real_other"
+  }
+ }
+}

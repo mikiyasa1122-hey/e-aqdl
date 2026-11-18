@@ -1,0 +1,49 @@
+{
+ "case": "VAL-02",
+ "rep": 2,
+ "sec": 34.7,
+ "exit": 0,
+ "cost_usd": 0.1088173,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 13435,
+  "cache_read_input_tokens": 122013,
+  "output_tokens": 4286,
+  "output_tokens_details": {
+   "thinking_tokens": 659
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 13435,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 3114,
+    "cache_read_input_tokens": 36838,
+    "cache_creation_input_tokens": 3466,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 3466
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード f2b7a217\n### 指摘\n- [重大1] 区分: 実装 / 対象: R1, AC1, R4, AC4 / 対応区分: 修正必須 / 内容: メモ作成・更新でタグ数の上限（5個、重複も数える）を検査していない。`_validate` はタグ1つずつの形式しか見ない。`TAGS_MAX` を使うのは `search_notes` だけ。 / 成立条件: `create_note` または `update_note` に6個以上のタグ（例 `[\"a\"]*6`）を渡す。 / 影響: 仕様は ValidationError を要求するが、作成が成功する。上限を超えるタグが保存される。 / 根拠: `notes/service.py` の `_validate`（60〜66行付近）に長さ検査がない。`create_note(c,u,\"t\",\"b\",[\"a\"]*6)` を実行すると note_id=1 が返った。上流や DB 制約による防止はない。 / 提案: `_validate` に `len(tags) > TAGS_MAX` の拒否を追加する。重複を除く前の個数で数え、作成・更新の両方で通す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: テストは12件の正常系中心で、受け入れ条件の異常系・境界・同時実行・障害を確かめていない。足りない検証は次のとおり。(a) 境界値（題名100文字と101文字、本文10000文字と10001文字、タグ5個と6個、タグの形式、per_page 0/50/51、page 0、不正な sort）。(b) 認可の拒否（他組織・他人の非公開メモの NotFound、一般利用者の更新・削除の Forbidden、管理者が非公開メモを扱うと NotFound、組織をまたぐ移管の Forbidden）。(c) 楽観的ロックの Conflict と、`hooks.before_write` を使った競合の再現。(d) 閲覧数の同時加算。(e) 作成・削除・移管の途中失敗でのロールバックと、その後に接続が使えること（AC10）。(f) `%` と `_` を含む検索語、SQL インジェクション風の入力、タグの OR 絞り込み。(g) api_key の伏せ字（8文字未満・ちょうど8文字）。(h) RateLimiter の枠の境界（ちょうど window 秒）とスレッド同時の呼び出し。(i) 共有リンクの期限ちょうど・期限切れ・形の崩れ。(j) ログへの機密情報（本文・署名・api_key）の出力がないこと（AC9）。 / 根拠: `tests/test_notes.py` は90行で、`assertRaises` は空題名・transfer の Forbidden・RateLimited・改ざんの4種類だけ。設計書が用意した `hooks.before_write` と `RateLimiter.hook` の差し込み口は、テストで一度も使われていない。重大1のバグ（タグ6個を通す）は、境界テストがあれば検出できた。テストは全件通っているが、リスクを確かめていない。K1・K2・K3・K4・K6・K7・K8 と AC4〜AC10 の検証が空洞になっている。 / 提案: 上の(a)〜(j)を決定論的な単体テストとして追加する。sleep には頼らず、フックと注入した clock を使う。並行の検証は別々の接続・スレッドで行う。\n- [重大3] 区分: 実装 / 対象: R4, AC4, K1 / 対応区分: 修正必須 / 内容: `update_note` と `delete_note` は、可視性・権限の判定をトランザクションの外で読んだ行に対して行う。`delete_note` には version の条件もない。 / 成立条件: 判定の後で、別スレッドが `transfer_notes` や更新を完了させる。 / 影響: `update_note` は `version` の条件があるため、移管後は version がずれて Conflict になり、古い権限での更新は止まる。`delete_note` は権限判定の後に `DELETE ... WHERE id=?` を行う。判定と削除の間に所有者が変わると、元の所有者が、すでに他人のものになったメモを削除できる。 / 根拠: `notes/service.py` の `delete_note`（行取得と `_can_modify` が `with transaction` の前）。`hooks.before_write(\"delete:note\")` は transaction の内側にあり、判定の前に差し込めない。同時実行は実行して確かめていないため、成立は仕様と実装からの推論。 / 提案: `delete_note` で、`BEGIN IMMEDIATE` の中で行を再取得して `_visible` と `_can_modify` を判定してから削除する。`update_note` も、transaction の中で行を再取得して判定するほうが安全。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` が書き込む前に `hooks.before_write(\"update\")` を呼ぶのは、transaction の外（読み出しと書き込みの間）。競合のテストには役立つが、権限判定との順序が上の重大3と同じ構造になっている。 / 提案: 重大3の修正と合わせて、判定を transaction の内側に移す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。空題名の拒否と正常系だけ。境界、タグ上限（実装に不具合あり）、トランザクション失敗時に何も残らないことは未検証。\n- AC2: 不十分。自分のメモの閲覧だけ。他組織・非公開・存在しないメモの NotFound、閲覧数の加算、同時の閲覧は未検証。\n- AC3: 不十分。件数と単純な検索だけ。範囲外の入力、sort、`%` と `_`、タグ OR、インジェクション、他人の非公開メモの除外は未検証。\n- AC4: 不十分。作成者による更新・削除の正常系だけ。Conflict、Forbidden、NotFound、更新時の入力検証、削除の失敗は未検証。\n- AC5: 不十分。移管の正常系と非管理者の拒否だけ。組織をまたぐ場合と、途中失敗でのロールバックは未検証。\n- AC6: 不十分。`test_export_audit` は action と actor しか見ず、`actor_key` の伏せ字を見ていない。\n- AC7: 不十分。枠の更新（0→61秒）は確かめているが、ちょうど window 秒の境界と同時実行は未検証。\n- AC8: 不十分。往復と改ざん1パターンだけ。期限ちょうど、期限切れ、形の崩れは未検証。\n- AC9: 検証なし。ログ出力を確かめるテストがない。\n- AC10: 検証なし。例外後に接続を再利用できることを確かめるテストがない。\n- エンジンが検出したテストの兆候: なし。`history` でも検証の弱体化は見当たらない（bind の追加のみ）。\n### E2E の要否\n- 不要。HTTP・UI のないライブラリで、sqlite3 の単体・統合テストで足りる。ただし、同時実行は別々の接続・スレッドを使うテストが必要。\n### 不足しているリスク\n- K1: 認可の拒否と、判定から書き込みの間の所有者変更（重大3）の検証がない。\n- K2: インジェクション入力と LIKE の特殊文字のテストがない。実装は ESCAPE とプレースホルダーを使っていた。\n- K3: 同時の更新・閲覧・呼び出しのテストがない。\n- K4: 障害の差し込みを使うロールバックのテストがない。\n- K6: 組織をまたぐ移管と、一部だけ移る場合のテストがない。\n- K7: api_key の伏せ字の境界のテストがない。実装は読んだ範囲で仕様どおり。\n- K8: 期限・改ざん・形の崩れのテストが不足している。実装は読んだ範囲で仕様どおり。\n### 確認したこと\n- `spec.md`・`design.md`・`notes/*.py`・`tests/test_notes.py` を通読した。\n- `python3 -m unittest discover -s tests -t .` → 12件すべて OK。\n- 一時的な `:memory:` の DB で `create_note(..., [\"a\"]*6)` を実行 → 例外にならず note_id=1 が返った（重大1を確認）。\n- `aqdlc.py history --since 0` を確認 → 検証条件の弱体化はなし。\n- `gate` は実行していない。依存関係のインストールも、ファイルの変更もしていない。",
+ "files_changed": [],
+ "valid": true
+}

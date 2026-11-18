@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-01",
+ "rep": 1,
+ "sec": 31.1,
+ "exit": 0,
+ "cost_usd": 0.1408851,
+ "num_turns": 6,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 23142,
+  "cache_read_input_tokens": 112411,
+  "output_tokens": 3706,
+  "output_tokens_details": {
+   "thinking_tokens": 457
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 23142,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2574,
+    "cache_read_input_tokens": 37303,
+    "cache_creation_input_tokens": 2200,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2200
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 55ea07b9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R4, K1, AC2, AC4 / 対応区分: 修正必須 / 内容: `_visible`（notes/service.py:66-68）が org_id を比較しない。別の組織の公開メモを `get_note` で読めてしまう。`update_note` と `delete_note` は、別の組織の非管理者に NotFound ではなく Forbidden を返し、メモの存在を明かす。 / 成立条件: 別の組織の利用者が、公開（private=0）メモの id を指定する。 / 影響: 組織をまたいだ本文の漏えい。閲覧数の改ざん。存在確認ができる。仕様の「他の組織は NotFound」に反する。 / 根拠: 次の再現で確認した。org1 の alice がメモを作成する。org2 の bob が `get_note` を呼ぶと、題名が返った。bob が `delete_note` を呼ぶと Forbidden になった（NotFound ではない）。`get_note` の再確認（service.py:96）も同じ `_visible` を使うので、org は一切検査されない。 / 提案: `_visible` に `row[\"org_id\"] == user[\"org_id\"]` を追加する。`get_note`・`update_note`・`delete_note` はすべてこの関数を通るので、1か所の修正で足りる。\n- [重大2] 区分: テスト / 対象: AC2, AC4, K1 / 対応区分: 証拠不足 / 内容: 他組織・他人の非公開・存在しないメモが NotFound になることを確かめるテストがない。tests の利用者は全員 org 10 で、別の組織が一度も登場しない。重大1がテストをすべて通過しているのはこのため。 / 根拠: K1 は漏えいリスクで、R2・R3・R4 が直接要求している。この検証がなければ空洞化している。 / 提案: 別組織の利用者による get・update・delete・list・search で、本文が漏れず NotFound になるテストを足す。非公開メモ（管理者を含む）の NotFound もあわせて確かめる。\n- [重大3] 区分: テスト / 対象: AC2, AC4, AC7, K3 / 対応区分: 証拠不足 / 内容: 並行実行の検証がない。同時閲覧で views の数え漏れがないこと、更新の version 競合で Conflict になること、RateLimiter の複数スレッドでの上限を確かめるテストがない。`hooks.before_write` と `RateLimiter.hook` の差し込み口は、使われていない。 / 根拠: AC4・AC7 に「競合」「同時」が明記され、K3 が重要リスクになっている。 / 提案: 別々の接続・スレッドで、差し込み口を使って決定論的に再現するテストを足す。例: `before_write(\"update\")` の間に別の更新を入れて Conflict を確認する。\n- [重大4] 区分: テスト / 対象: AC1, AC3, AC5, AC6, AC8, AC9, AC10, K2, K4, K6, K7, K8 / 対応区分: 証拠不足 / 内容: 次の検証が欠けている。(a) 入力検証の境界値（題名 100/101 文字、空白のみ、タグ 5/6 個、不正タグ、tags に文字列を渡す、per_page/page/sort の範囲外）。(b) `%` `_` `\\` を含む検索語と、タグの OR 絞り込み。(c) 途中失敗のロールバック（create・delete・transfer で hook から例外を出し、何も残らないこと）。(d) 移管の組織またぎ Forbidden。(e) api_key の伏せ方（8 文字未満・末尾 4 文字）。現在のテストは正常系 1 件のみ。(f) 共有リンクの期限ちょうど、形崩れ、署名改ざん。(g) 例外後の接続の再利用。(h) ログ・例外に本文・署名・api_key が出ないこと。 / 根拠: 受け入れ条件 AC1・AC3・AC5・AC6・AC8・AC9・AC10 が、リスク K2・K4・K6・K7・K8 を直接示している。 / 提案: 上記の異常系・境界値のテストを追加する。\n- [軽微1] 区分: 実装 / 対象: R4 / 対応区分: 改善提案 / 内容: `update_note` は非公開かどうかの確認と、更新の version 条件を別々に行う（権限は事前確認のみ）。メモを渡した後の所有者の変更はトランザクション内で再確認されない。version 条件が実質的に防ぐので、実害は小さい。 / 提案: トランザクション内で行を読み直して権限を再確認する。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空題名のみで、境界値とロールバックの検証がない。\n- AC2: 不十分。他組織の漏えいという実バグ（重大1）を検出できていない。同時閲覧の検証もない。\n- AC3: 不十分。範囲外・`%`・`_`・タグ OR・別組織の除外がない。実装を読む限り、LIKE は ESCAPE とプレースホルダーを使っており、順序の列は許可リスト方式なので妥当。\n- AC4: 不十分。Conflict・Forbidden・競合・削除失敗の検証がない。\n- AC5: 不十分。管理者以外の拒否のみ。組織またぎとロールバックがない。\n- AC6: 不十分。伏せ字の検証がない（実装は仕様どおり）。\n- AC7: 不十分。枠の境界（ちょうど window 秒）・同時呼び出しがない。\n- AC8: 不十分。期限ちょうど・形崩れがない。\n- AC9: 不十分。検証がない。\n- AC10: 不十分。検証がない。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（HTTP なしのライブラリ。ただし別の組織・並行・ロールバックの結合テストは、上記のとおり必須）。\n### 不足しているリスク\n- K1（他の組織の漏えい）: 実装の欠陥があり、テストもない（重大1・2）。\n- K3: 並行の検証が未実施（重大3）。\n- K2・K4・K6・K7・K8・K5: 実装は仕様どおりに見えるが、検証がない（重大4）。\n### 確認したこと\n- spec・design・notes/*.py・tests/test_notes.py をすべて読んだ。\n- `python3 -B -m unittest discover -s tests -t .` で 12 件が OK だった（上記のとおり、欠陥を検出できないテスト）。\n- 別組織の利用者で `get_note` と `delete_note` を呼ぶ再現コードを実行した。公開メモの題名が返り、削除は Forbidden になった。\n- ファイルは一切変更していない。gate は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

@@ -1,0 +1,23 @@
+{
+ "case": "RACE-01",
+ "rep": 1,
+ "judge_cost_usd": 0.0616703,
+ "judge_raw": "## 判定\n\n**重大1**は、埋め込んだ欠陥そのものを指摘しています。\n- 箇所は `update_note` で一致します。\n- 原因も一致します。version の比較は transaction の外で読み出し時に行うだけで、UPDATE の WHERE に version がありません。\n- 影響も一致します。割り込んだ更新を後の更新が上書きして消します。\n- hooks による再現も実行しています。\n- 行番号の表記は実際のコードと少しずれていますが、内容は正しいです。\n\n**重大2**は、テストが不足しているという指摘だけで、コードの欠陥の主張ではありません。そのため test_gap です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"update_note の UPDATE の WHERE に version がなく、読み出し後に割り込んだ更新を上書きして消すという欠陥の原因・影響・箇所が一致し、再現も実行している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"受け入れ条件やリスクを確かめるテストが不足しているという指摘だけで、コードの欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"楽観的ロックの破れを、原因・影響・再現まで正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "update_note の UPDATE の WHERE に version がなく、読み出し後に割り込んだ更新を上書きして消すという欠陥の原因・影響・箇所が一致し、再現も実行している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "受け入れ条件やリスクを確かめるテストが不足しているという指摘だけで、コードの欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "楽観的ロックの破れを、原因・影響・再現まで正確に指摘している。"
+ }
+}

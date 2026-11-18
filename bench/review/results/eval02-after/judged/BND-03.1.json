@@ -1,0 +1,33 @@
+{
+ "case": "BND-03",
+ "rep": 1,
+ "judge_cost_usd": 0.0639663,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: `notes/ratelimit.py` の `hit` で、`now - start > self.window` の比較がちょうど window 秒後を枠の中と数えています。これは埋め込んだ欠陥と同じ箇所・同じ原因です。ただし影響の書き方は「本来許可すべき呼び出しが RateLimited になる」で、正解データの「余分に1回制限される」と実質同じです。→ matches_defect\n- **重大2**: コードの欠陥ではなく、テストの不足を指摘しているだけです。→ test_gap\n- **重大3**: `update_note` と `delete_note` は、認可判定を BEGIN IMMEDIATE の前に古い row で行っています。transfer で所有者が変わった後、version を取り直した呼び出し側が更新できます。これは R4 の「同じ組織の管理者・作成者だけ」に反する実在の競合です。ただし指摘者は実行で再現していません。コード経路からの判断で、成立条件も具体的です。→ real_other\n- **軽微1**: 先頭ゼロ付きの note_id は、仕様の「10進の数字だけ」に合致します。仕様は正規形を要求していないので、欠陥ではなく改善提案です。→ style\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"ratelimit.py の hit で > を使っているため、ちょうど window 秒後が枠の中と数えられ、埋め込んだ欠陥と同じ箇所・原因・影響になっている。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足を指摘しているだけで、コードの欠陥の主張ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"real_other\", \"reason\": \"update_note と delete_note で認可判定が transaction の外の古い row に基づいており、所有者変更後に元の作成者が更新できる経路は実在する。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"先頭ゼロは仕様の「10進の数字だけ」に反せず、正規形の強制は改善提案にとどまる。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が ratelimit.py の > 比較という埋め込み欠陥を、実行での再現つきで正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "ratelimit.py の hit で > を使っているため、ちょうど window 秒後が枠の中と数えられ、埋め込んだ欠陥と同じ箇所・原因・影響になっている。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足を指摘しているだけで、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "real_other",
+    "reason": "update_note と delete_note で認可判定が transaction の外の古い row に基づいており、所有者変更後に元の作成者が更新できる経路は実在する。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "先頭ゼロは仕様の「10進の数字だけ」に反せず、正規形の強制は改善提案にとどまる。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が ratelimit.py の > 比較という埋め込み欠陥を、実行での再現つきで正しく指摘している。"
+ }
+}

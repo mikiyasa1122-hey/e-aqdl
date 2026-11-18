@@ -1,0 +1,33 @@
+{
+ "case": "SQL-03",
+ "rep": 1,
+ "judge_cost_usd": 0.0649523,
+ "judge_raw": "## 判定\n\n- **重大1**: 埋め込まれた欠陥そのものです。`list_notes` の `SORT_COLUMNS.get(sort, sort)` で、許可した値以外の sort をそのまま ORDER BY に入れている点を指摘しています。箇所も原因も一致し、影響も「任意の式を差し込める」で一致しています。報告者は、サブクエリが例外なく実行されることまで確認しています。\n- **重大2**: テストの不足だけの指摘です。コードの欠陥の主張はありません。sort の不正値のテスト欠如には触れていますが、欠陥そのものは重大1で扱っています。\n- **重大3**: 同時実行まわりのテストの不足を指摘しているだけなので、test_gap です。\n- **軽微1**: tags の検査が重複しているという保守性の提案です。欠陥の主張ではないので style です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"list_notes の ORDER BY に SORT_COLUMNS.get(sort, sort) で未検証の sort をそのまま入れており、埋め込んだ SQL 差し込みの欠陥と箇所・原因・影響が一致する。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"受け入れ条件全般についてテストの不足を述べているだけで、コードの欠陥の指摘ではない。\"},\n  {\"label\": \"重大3\", \"class\": \"test_gap\", \"reason\": \"同時実行の保証を確かめるテストがないという、テストの不足だけの指摘である。\"},\n  {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"tags 検査の重複を共通化する保守性の提案で、欠陥の主張ではない。\"}\n ],\n \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が、sort を許可した値に限らず ORDER BY に入れている埋め込み欠陥を、実行で確認したうえで正確に指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "list_notes の ORDER BY に SORT_COLUMNS.get(sort, sort) で未検証の sort をそのまま入れており、埋め込んだ SQL 差し込みの欠陥と箇所・原因・影響が一致する。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "受け入れ条件全般についてテストの不足を述べているだけで、コードの欠陥の指摘ではない。"
+   },
+   {
+    "label": "重大3",
+    "class": "test_gap",
+    "reason": "同時実行の保証を確かめるテストがないという、テストの不足だけの指摘である。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "tags 検査の重複を共通化する保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が、sort を許可した値に限らず ORDER BY に入れている埋め込み欠陥を、実行で確認したうえで正確に指摘している。"
+ }
+}

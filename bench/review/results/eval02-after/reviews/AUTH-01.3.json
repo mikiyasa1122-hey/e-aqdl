@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-01",
+ "rep": 3,
+ "sec": 25.6,
+ "exit": 0,
+ "cost_usd": 0.11883010000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 18811,
+  "cache_read_input_tokens": 115401,
+  "output_tokens": 3203,
+  "output_tokens_details": {
+   "thinking_tokens": 369
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 18811,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2272,
+    "cache_read_input_tokens": 36861,
+    "cache_creation_input_tokens": 2182,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2182
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "```\n## レビュー結果\n判定: 要修正\n重大な指摘: 3\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 55ea07b9\n### 指摘\n- [重大1] 区分: 実装 / 対象: R2, R4, K1, AC2, AC4 / 対応区分: 修正必須 / 内容: `_visible`（notes/service.py:60-62）が組織を見ていない。`get_note`・`update_note`・`delete_note` は他組織の公開メモを NotFound にしない。 / 成立条件: 組織 A の利用者が、組織 B の非公開でないメモの ID を指定する。 / 影響: 他組織のメモの本文を読めて、閲覧数も増える（R2・K1 違反）。`delete_note` と `update_note` では、作成者でも同じ組織の管理者でもない利用者に NotFound ではなく Forbidden が返り、他組織メモの存在が分かる。 / 根拠: 実際に実行して確認した。org1 の alice が作ったメモを org2 の bob が `get_note` すると題名が取得できた。同じメモを bob が `delete_note` すると Forbidden が返った（NotFound ではない）。上流に組織を絞る処理はなく、既存テストは全利用者が org 10 で、他組織のケースを持たない。 / 提案: `_visible` で `row[\"org_id\"] == user[\"org_id\"]` も条件にする。他組織の取得・更新・削除が NotFound になるテストを追加する。\n- [重大2] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 仕様の規則と異常系を確かめるテストがほとんどない。具体的には次のとおり。(a) 他組織・他人の非公開メモの NotFound。(b) 管理者が非公開メモを扱えないこと。(c) version 競合と、`hooks.before_write` を使った更新の競合。(d) 同時の閲覧数（数え漏れがないこと）。(e) 作成・削除・移管が途中で失敗したときのロールバック。(f) page・per_page・sort の範囲外や境界値。(g) 検索の `%`・`_`・`\\` の扱い、タグの OR 絞り込み。(h) 題名・タグ・本文の境界値の検証。(i) 他組織への移管が Forbidden になること。(j) api_key の伏せ字（末尾4文字、8文字未満）。(k) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドの同時呼び出し。(l) 共有リンクの期限の境界（期限ちょうど）、形の崩れたリンク、期限の改ざん。(m) ログへの機密情報の漏えい。(n) 例外の後に接続を使い続けられること。 / 根拠: 全12件のテストは正常系が中心で、AC1〜AC10 の大半を確かめていない。重大1の欠陥も検出できていない。「同時」「途中の失敗」は設計が差し込み口（hooks）を用意しているのに、使われていない。 / 提案: 上の各項目について、決定論的なテスト（hooks とスレッドで再現する。sleep には頼らない）を追加する。\n- [重大3] 区分: 実装 / 対象: R2, R4, K3, AC2 / 対応区分: 修正必須 / 内容: `get_note`・`update_note`・`delete_note` の認可判定が、トランザクションの外で読んだ行に基づく。`get_note` は行を再確認するが、`update_note` と `delete_note` の `_can_modify` は読み出し時点の古い行（owner・private）のまま使う。 / 成立条件: 読み出しと書き込みの間に、別の接続でメモを移管する、または非公開にする。 / 影響: 移管や非公開化の後に、元の作成者が更新・削除できてしまう場合がある。`delete_note` は version も見ないので、競合を検出できない。 / 根拠: notes/service.py:155-163 の `delete_note` は、トランザクションの外で `_row` と `_visible`・`_can_modify` を判定し、その後 `DELETE ... WHERE id = ?` を version や owner の条件なしで実行する。 / 提案: トランザクション（BEGIN IMMEDIATE）の中で行を再読込して、認可を判定する。\n- [軽微1] 区分: 実装 / 対象: R3 / 対応区分: 改善提案 / 内容: `search_notes` のタグ検証と `_validate` のタグ検証が重複している。 / 提案: 共通の関数にまとめる。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 不十分。正常系と空題名の拒否だけで、境界値・タグの規則・失敗時のロールバックの検証がない。\n- AC2: 不十分。組織をまたぐ漏えいがある（重大1）。同時の閲覧数と非公開メモの検証もない。\n- AC3: 不十分。範囲外の入力、LIKE の `%`・`_`、タグの OR を確かめていない。実装は ESCAPE とプレースホルダーを使っており、コード上は妥当（未実行）。\n- AC4: 不十分。競合、Forbidden、管理者の扱い、ロールバックの検証がない。\n- AC5: 不十分。他組織・途中の失敗の検証がない。\n- AC6: 不十分。伏せ字の検証がない。\n- AC7: 不十分。枠の境界と同時の呼び出しを検証していない。\n- AC8: 不十分。期限ちょうど・形の崩れたリンクの検証がない。\n- AC9, AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（ライブラリで HTTP・UI がない）。ただし、並行実行・途中の失敗の統合テストは必要（重大2）。\n### 不足しているリスク\n- K1: 重大1のとおり、他組織の漏えいが未対策。\n- K3, K4, K5, K6, K7, K8: 実装はおおむね妥当に見えるが、検証がない（重大2）。\n### 確認したこと\n- 仕様・設計・全ソース・テストを読んだ。\n- `python3 -m unittest discover -s tests -t .` → 12件 OK。\n- 一時的な Python スクリプトで他組織の `get_note` が成功し、`delete_note` が Forbidden になることを再現した（ファイル変更なし）。\n```",
+ "files_changed": [],
+ "valid": true
+}

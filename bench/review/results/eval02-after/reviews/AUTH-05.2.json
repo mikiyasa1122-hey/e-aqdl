@@ -1,0 +1,49 @@
+{
+ "case": "AUTH-05",
+ "rep": 2,
+ "sec": 25.7,
+ "exit": 0,
+ "cost_usd": 0.0928684,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 12009,
+  "cache_read_input_tokens": 121964,
+  "output_tokens": 3262,
+  "output_tokens_details": {
+   "thinking_tokens": 406
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 12009,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2454,
+    "cache_read_input_tokens": 36834,
+    "cache_creation_input_tokens": 2037,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2037
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 2\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード bd3d930e\n### 指摘\n- [重大1] 区分: 実装 / 対象: R3, AC3, K1 / 対応区分: 修正必須 / 内容: `search_notes` が他人の非公開メモを除外していない。 / 成立条件: 同じ組織の利用者 A が `private=True` のメモを作り、同じ組織の別の利用者 B（または管理者）が、そのメモの題名か本文に含まれる語で検索する。 / 影響: 他人の非公開メモの id と題名が返り、題名と本文の存在確認もできる。R2 の「非公開は作成者だけ」と R3 の「他人の非公開メモは含めない」に違反し、K1 の情報漏えいになる。 / 確認した保証: `list_notes` には `(private = 0 OR owner_id = ?)` の条件があるが、`search_notes` にはない。呼び出し元・DB の制約・上流の検証にも、これを防ぐものはない。 / 根拠: notes/service.py の `search_notes` の SQL は `WHERE org_id = ? AND (title LIKE ... OR body LIKE ...)` だけで、`private` と `owner_id` を参照していない。 / 提案: where に `AND (private = 0 OR owner_id = ?)` を加え、引数に `user[\"id\"]` を渡す。\n- [重大2] 区分: テスト / 対象: AC1〜AC10 のうち AC1, AC2, AC3, AC4, AC5, AC6, AC7, AC8, AC9, AC10 / 対応区分: 証拠不足 / 内容: テストが正常系の疎通確認に偏っており、受け入れ条件の中心である異常系・境界・並行・漏えいを確かめていない。特に、AC3/K1（検索で他人の非公開メモが漏れる）を検出するテストがなく、重大1が見逃されている。 / 根拠: tests/test_notes.py は 12 件が全部通る。ただし、次を確かめるテストが1件もない。 (a) 他組織・他人の非公開メモが NotFound になること、一覧・検索に含まれないこと（K1）。 (b) LIKE の `%` `_` `\\` の扱い（K2）。 (c) 楽観的ロックの Conflict と更新・削除の Forbidden（AC4）。 (d) hooks による途中失敗でのロールバックと、その後の接続の再利用（AC1, AC5, AC10, K4）。 (e) 閲覧数の同時実行での正確さ（AC2, K3）。 (f) RateLimiter の枠の境界（ちょうど window 秒）と複数スレッドからの同時呼び出し（AC7）。 (g) 共有リンクの期限ちょうど・形の崩れ・期限切れ（AC8, K8）。 (h) `export_audit` の鍵のマスク（AC6, K7）。 (i) ログに機密が出ないこと（AC9）。 (j) tags の件数・形式の検査（AC1）。仕様が重要リスクとして挙げているものの検証が空洞化している。 / 提案: 上記の (a)〜(j) を決定論的に確かめるテストを追加する。並行・途中失敗の再現には `service.hooks.before_write` と `RateLimiter.hook` を使い、sleep には頼らない。\n- [軽微1] 区分: 実装 / 対象: R3, AC3 / 対応区分: 改善提案 / 内容: `search_notes` のタグ検査が `_validate` と重複しており、規則が変わったときに食い違う恐れがある。 / 提案: タグ検査を共通の関数に切り出す。\n### 受け入れ条件ごとの検証の妥当性\n- AC1: `test_create_and_get` と `test_empty_title_rejected` だけで、不十分。タグ・本文・題名の境界、およびロールバックを確かめていない。実装のコードを読むと、検査とトランザクションはある。\n- AC2: 正常系の get しかなく、不十分。閲覧数の増加、見えないメモが NotFound になること、同時実行のいずれも確かめていない。実装は `UPDATE views = views + 1` で、コードの上では妥当。\n- AC3: 不十分で、実装にも欠陥がある（重大1）。非公開の除外、LIKE のエスケープ、範囲外の入力を確かめていない。\n- AC4: 所有者による更新と削除の正常系だけで、不十分。Conflict・Forbidden・タグの検査・競合を確かめていない。\n- AC5: 正常系と非管理者の拒否だけで、不十分。他組織への移管と、途中失敗でのロールバックを確かめていない。\n- AC6: `test_export_audit` は actor と action だけを確認しており、不十分。鍵のマスクを一切確認していない。実装のコードを読む限り、マスクは正しい。\n- AC7: 上限超過と枠の再開（61 秒後）だけで、不十分。ちょうど window 秒の境界と、複数スレッドからの同時呼び出しを確かめていない。実装は Lock で守られており、境界は `>=` で仕様どおり。\n- AC8: 往復と1種類の改ざんだけで、不十分。期限ちょうど・期限切れ・形の崩れを確かめていない。実装は妥当。\n- AC9: 検証なし。実装は ID だけをログに出しており、コードの上では妥当。\n- AC10: 検証なし。`transaction()` は ROLLBACK してから例外を再送出するので、コードの上では妥当。\n- エンジンが検出したテストの兆候: なし。\n### E2E の要否\n- 不要（HTTP や UI のない Python ライブラリで、単体・統合テストで足りる）。ただし上記の単体テストの追加は必須。\n### 不足しているリスク\n- K1: 検索での漏えいが実装にあり、検出するテストもない（重大1・2）。\n- K2: LIKE の `%` `_` `\\` のエスケープは実装済みだが、テストがない。\n- K3: 閲覧数と更新の並行実行、およびレート制限の同時呼び出しのテストがない。\n- K4: ロールバックのテストがない。\n- K5, K7: マスクとログのテストがない。\n- K6: 他組織への移管のテストがない。\n- K8: 期限の境界・形の崩れのテストがない。\n### 確認したこと\n- spec.md と design.md を読み、notes/ 配下の全ソースと tests/test_notes.py を通読した。\n- `python3 -m unittest discover -s tests -t .` を実行し、12 件が全部通った。ただし上記のとおり、重要なリスクは確かめられていない。\n- `git status` で、notes/ と tests/ はすべて未追跡であることを確認した（比較対象の履歴はない）。\n- `$AQ history` と `$AQ trace` は実行していない。",
+ "files_changed": [],
+ "valid": true
+}

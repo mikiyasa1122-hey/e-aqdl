@@ -1,0 +1,28 @@
+{
+ "case": "SQL-05",
+ "rep": 1,
+ "judge_cost_usd": 0.0625643,
+ "judge_raw": "各指摘の分類は次のとおりです。\n\n- **重大1**: 埋め込んだ欠陥そのものです。`_like_escape` が `\\` をエスケープしていない点を、同じ箇所・同じ原因で指摘しています。影響も一致しています。`\\` を探すと `%` を含むメモに当たる点と、`a\\b` が見つからない点です。\n- **重大2**: コードの欠陥の指摘ではなく、テストの不足だけを述べています。\n- **軽微1**: `sort` にリストなど非ハッシュ値を渡すと、`sort not in SORT_COLUMNS` が TypeError になります。ValidationError にならないのは実在する軽微な不具合です。ただし埋め込んだ欠陥とは別です。\n\n```json\n{\"findings\": [\n  {\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"_like_escape が \\\\ をエスケープしていない点を、同じ箇所・同じ原因・同じ影響（\\\\ 検索で % を含むメモに当たる）で指摘している。\"},\n  {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。\"},\n  {\"label\": \"軽微1\", \"class\": \"real_other\", \"reason\": \"sort に非ハッシュ値を渡すと ValidationError でなく TypeError になるのは実在する別の不具合である。\"}\n],\n\"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"重大1が埋め込み欠陥の原因・箇所・影響に一致し、再現も示している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "_like_escape が \\ をエスケープしていない点を、同じ箇所・同じ原因・同じ影響（\\ 検索で % を含むメモに当たる）で指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの網羅不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "real_other",
+    "reason": "sort に非ハッシュ値を渡すと ValidationError でなく TypeError になるのは実在する別の不具合である。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "重大1が埋め込み欠陥の原因・箇所・影響に一致し、再現も示している。"
+ }
+}

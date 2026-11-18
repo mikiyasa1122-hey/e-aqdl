@@ -1,0 +1,49 @@
+{
+ "case": "SEC-02",
+ "rep": 2,
+ "sec": 30.5,
+ "exit": 0,
+ "cost_usd": 0.11026090000000001,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 14660,
+  "cache_read_input_tokens": 126449,
+  "output_tokens": 3896,
+  "output_tokens_details": {
+   "thinking_tokens": 650
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 14660,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 2665,
+    "cache_read_input_tokens": 39050,
+    "cache_creation_input_tokens": 2481,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2481
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 要修正\n重大な指摘: 4\n軽微な指摘: 0\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード c4a8b4e4\n### 指摘\n- [重大1] 区分: 実装 / 対象: R6, AC6, K7, K5 / 対応区分: 修正必須 / 内容: `export_audit` が api_key を伏せずにそのまま返している。 / 成立条件: 管理者が `export_audit` を呼ぶだけで起きる。 / 影響: 監査ログの出力に利用者の api_key が全文出る。仕様の末尾4文字以外を伏せる規則と、8文字未満は全部伏せる規則の両方に違反する。 / 根拠: notes/service.py の `export_audit` の戻り値で `\"actor_key\": r[\"api_key\"]` を返している。マスク処理はコード全体のどこにもない。`api_key='abcdefghijkl'` で実行すると `'actor_key': 'abcdefghijkl'` が返ることを確認した。 / 提案: 戻す前に、8文字以上は末尾4文字以外を `*` に置き換え、8文字未満は全部 `*` にする。\n- [重大2] 区分: 実装 / 対象: R1, R3, AC1, AC3 / 対応区分: 修正必須 / 内容: `TAG_RE` が `^[a-z0-9-]{1,20}$` を `.match` で使っているため、末尾が改行のタグ（例 `\"ab\\n\"`）が検査を通る。 / 成立条件: `create_note`・`update_note` の tags や `search_notes` の tags に、末尾が改行の文字列を渡す。 / 影響: 「英小文字・数字・ハイフンの1〜20文字」という規則に反するタグが保存される。20文字＋改行の21文字も通る。 / 根拠: notes/service.py の `TAG_RE` と、`_validate` および `search_notes` の `TAG_RE.match(t)`。`create_note(..., ['ab\\n'])` が成功し、ノート ID 1 が返ることを実行して確認した。share.py は `fullmatch` を使っており、service.py だけ対策が漏れている。 / 提案: `TAG_RE.fullmatch(t)` に変える。\n- [重大3] 区分: テスト / 対象: AC1〜AC10, K1〜K8 / 対応区分: 証拠不足 / 内容: 受け入れ条件の大半を確かめる検証がなく、あるのは正常系のスモークテスト（12件）だけ。次の項目に検証がない。AC1: 長さ・件数・タグ規則の境界、途中失敗時のロールバック。AC2: 閲覧数の並行加算、他組織・非公開メモの NotFound。AC3: ワイルドカード（`%` と `_`）、per_page・sort の範囲外、タグの OR 絞り込み、他人の非公開メモの除外。AC4: Conflict（古い version、読み書きの間の割り込み）、Forbidden、削除の失敗。AC5: 組織をまたぐ移管、途中失敗時の元のまま。AC6: マスク（`test_export_audit` は api_key を見ていない）。AC7: 枠のちょうど境界、並行呼び出し。AC8: 期限ちょうど、形の崩れたリンク。AC9: 機密がログや出力に出ないこと。AC10: 例外後の接続の再利用。 / 根拠: 重大1・重大2が実在するのにテストが通っていることが、検証の空洞化の証拠になる。設計が用意した `hooks.before_write` と `RateLimiter.hook` の差し込み口を使うテストが1つもない。 / 提案: 上のリスクごとに、異常系・境界値のテストを追加する。例は、api_key のマスク、`\"ab\\n\"` の拒否、`before_write` で例外を起こしてロールバックを確認する、`hook` を使って決定論的に並行を再現する、他組織・非公開メモの NotFound、LIKE ワイルドカード、期限ちょうどなど。\n- [重大4] 区分: 実装 / 対象: R4, K1 / 対応区分: 修正必須 / 内容: `update_note` の認可と入力検証が、トランザクションの外で読んだ行に基づいている。 / 成立条件: 読み出しの後に他の操作（削除・移管など）が入る。 / 影響: version の条件が守るので、更新が失われることは起きない。ただし `delete_note` は認可確認をトランザクションの外で行い、そのあと `DELETE` が条件なしで実行される。確認と削除の間に所有者や存在が変わると、確認時点の判断で削除が実行されうる。 / 根拠: notes/service.py の `delete_note` は `_row` と `_can_modify` をトランザクションの外で行い、`DELETE ... WHERE id = ?` に所有者・組織の条件がない。`transfer_notes` は version を上げるので、`update_note` は Conflict になる。削除にはその保護がない。 / 提案: `delete_note` で `BEGIN IMMEDIATE` の後に行を読み直して `_visible`・`_can_modify` を再確認する。または `DELETE ... WHERE id = ? AND owner_id = ?` にして rowcount を確認する。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: V1 は正常系と空題名だけで不十分。境界値、タグ規則、ロールバックを確かめていない。\n- AC2: 不十分。閲覧数の並行、他組織・非公開の NotFound の検証がない。\n- AC3: 不十分。ワイルドカード、範囲外、OR、除外を確かめていない。LIKE の実装（ESCAPE、プレースホルダー）自体は妥当に見えるが、検証がない。\n- AC4: 不十分。Conflict・Forbidden・失敗時の巻き戻しの検証がない。\n- AC5: 不十分。正常系と非管理者の拒否だけで、組織をまたぐ場合と失敗時の元のままを確かめていない。\n- AC6: 不十分で、実装も未達。`test_export_audit` は api_key を確認していない。\n- AC7: 不十分。枠の境界の一部（61秒後）だけを見ており、ちょうど60秒と並行を確かめていない。\n- AC8: 不十分。期限ちょうど、形の崩れ、期限切れを確かめていない。\n- AC9: 検証なし。\n- AC10: 検証なし。\n- エンジンが検出したテストの兆候: なし（skip・`.only` なし）。\n\n### E2E の要否\n- 不要（HTTP や UI のないライブラリで、単体テストと並行・障害の差し込み口で確かめられる）。\n\n### 不足しているリスク\n- K1: 削除の認可確認と実行が分離している（重大4）。他の組織・非公開メモの検証もない。\n- K3, K4: 並行・途中失敗の検証がない。\n- K5, K7: api_key が漏れる（重大1）。\n- K2: SQL は静的で、プレースホルダーと ESCAPE は使われている。ただし検証がない。\n- K8: 実装は妥当に見える（`fullmatch`、`compare_digest`、期限の境界）が、検証がない。\n\n### 確認したこと\n- `git status` と `history`: 検証条件の弱体化の痕跡はなし。\n- `python3 -B -m unittest discover -s tests -t .`: 12件すべて成功。\n- 上記の再現スクリプト（コードは変更していない）: `['ab\\n']` が受理され、`export_audit` が api_key を平文で返すことを確認した。",
+ "files_changed": [],
+ "valid": true
+}

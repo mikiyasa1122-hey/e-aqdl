@@ -1,0 +1,28 @@
+{
+ "case": "SEC-01",
+ "rep": 3,
+ "judge_cost_usd": 0.0592603,
+ "judge_raw": "## 判定\n\n**重大1**: 埋め込まれた欠陥そのものです。`notes/service.py` の `create_note`（93行目。報告は92行目と書いていますが、同じログ行です）で、メモの本文 `body` を `log.info` に渡しています。原因も影響も正解データと一致します。つまり、作成のログに本文を含めていて、非公開メモの本文がログに残ります。R9 違反という指摘も妥当です。\n\n**重大2**: コードの欠陥ではなく、テストが不足しているという指摘だけです。そのため test_gap です。\n\n**軽微1**: `search_notes` のタグ検査が `_validate` と重複しているという保守性の提案です。欠陥の主張ではないので style です。\n\n```json\n{\"findings\": [{\"label\": \"重大1\", \"class\": \"matches_defect\", \"reason\": \"create_note のログに本文 body を出している点を、箇所・原因・影響とも埋め込んだ欠陥どおりに指摘している。\"}, {\"label\": \"重大2\", \"class\": \"test_gap\", \"reason\": \"テストの不足だけを指摘しており、コードの欠陥の主張ではない。\"}, {\"label\": \"軽微1\", \"class\": \"style\", \"reason\": \"タグ検査の重複をまとめる保守性の提案で、欠陥の主張ではない。\"}], \"defect_detected\": \"yes\", \"matched_label\": \"重大1\", \"note\": \"本文のログ出力を、箇所・原因・影響とも正しく指摘している。\"}\n```",
+ "parsed": {
+  "findings": [
+   {
+    "label": "重大1",
+    "class": "matches_defect",
+    "reason": "create_note のログに本文 body を出している点を、箇所・原因・影響とも埋め込んだ欠陥どおりに指摘している。"
+   },
+   {
+    "label": "重大2",
+    "class": "test_gap",
+    "reason": "テストの不足だけを指摘しており、コードの欠陥の主張ではない。"
+   },
+   {
+    "label": "軽微1",
+    "class": "style",
+    "reason": "タグ検査の重複をまとめる保守性の提案で、欠陥の主張ではない。"
+   }
+  ],
+  "defect_detected": "yes",
+  "matched_label": "重大1",
+  "note": "本文のログ出力を、箇所・原因・影響とも正しく指摘している。"
+ }
+}

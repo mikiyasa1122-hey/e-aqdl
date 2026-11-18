@@ -1,0 +1,49 @@
+{
+ "case": "CLN-04",
+ "rep": 1,
+ "sec": 24.7,
+ "exit": 0,
+ "cost_usd": 0.1211995,
+ "num_turns": 4,
+ "models": [
+  "claude-sonnet-5-5"
+ ],
+ "usage": {
+  "input_tokens": 8,
+  "cache_creation_input_tokens": 19971,
+  "cache_read_input_tokens": 116195,
+  "output_tokens": 2968,
+  "output_tokens_details": {
+   "thinking_tokens": 787
+  },
+  "server_tool_use": {
+   "web_search_requests": 0,
+   "web_fetch_requests": 0
+  },
+  "service_tier": "standard",
+  "cache_creation": {
+   "ephemeral_1h_input_tokens": 19971,
+   "ephemeral_5m_input_tokens": 0
+  },
+  "inference_geo": "global",
+  "iterations": [
+   {
+    "input_tokens": 2,
+    "output_tokens": 1777,
+    "cache_read_input_tokens": 37405,
+    "cache_creation_input_tokens": 2917,
+    "cache_creation": {
+     "ephemeral_5m_input_tokens": 0,
+     "ephemeral_1h_input_tokens": 2917
+    },
+    "type": "message"
+   }
+  ],
+  "speed": "standard",
+  "fallback_credit": null
+ },
+ "is_error": false,
+ "result": "## レビュー結果\n判定: 合格\n重大な指摘: 0\n軽微な指摘: 1\nレビュー対象: 仕様 4c5d5ea6 / 設計 9c009c45 / コード 6af8af08\n### 指摘\n- [軽微1] 区分: 実装 / 対象: R8, AC8 / 対応区分: 改善提案 / 内容: `verify_link` は note_id と期限を `int()` に直してから署名を検証する。先頭に 0 を足したリンク（例 `07.5.<sig>`）も、正規のリンク `7.5.<sig>` と同じ署名で通る。形式の規則（10進の数字だけ）には反しておらず、期限と署名の検証は崩れない。 / 提案: 厳密にするなら、`str(int(x)) != x` のときは Forbidden にして、リンクの表現を1つに決める。\n\n### 受け入れ条件ごとの検証の妥当性\n- AC1: 妥当。`create_note` は検証を先に行い、1つのトランザクションでメモ・タグ・監査を書く。`before_write(\"create:tags\")` で途中の失敗を再現し、何も残らないことを確かめている。tags が文字列の場合、タグの重複を数えること、各境界も検査している。\n- AC2: 妥当。`_visible` を、他の組織・他人の非公開・存在しないメモのすべてに適用し、NotFound にしている。閲覧数の加算は `BEGIN IMMEDIATE` の中で行う。インターリーブの再現テストと、スレッドを使った同時閲覧のテストがあり、数え漏れがないことを確かめている。NotFound のときに閲覧数が増えないことも検査している。\n- AC3: 妥当。page・per_page・sort の範囲外を ValidationError にしている。検索の LIKE は `ESCAPE '\\\\'` と `_like_escape` を使い、`%`・`_`・`\\` を普通の文字として扱う。題名と本文の両方に同じ `pattern` を渡している。値はすべてプレースホルダーで渡し、`f\"{SORT_COLUMNS[sort]}\"` の部分は固定の辞書から選ぶ。タグの検査と OR の絞り込みもある。\n- AC4: 妥当。version は UPDATE の WHERE 条件と rowcount で判定する。権限は書き込みと同じトランザクションの中で読み直して確認する（`test_permission_is_checked_again_inside_the_write` など）。読み出しと書き込みの間の更新による Conflict、更新時の検証、削除の途中失敗と例外の伝播も、それぞれテストがある。\n- AC5: 妥当。管理者であること、3者が同じ組織であることを確認し、1つのトランザクションで移管する。途中の失敗で元のままに戻ることを、`before_write(\"transfer:i\")` で確かめている。\n- AC6: 妥当。`export_audit` は 8 文字未満をすべて伏せ、8 文字以上は末尾 4 文字以外を伏せる。管理者だけが呼べる。境界のテストがある。\n- AC7: 妥当。枠の境界（159.999 で拒否、160.0 で新しい枠）、拒否された呼び出しが枠を延ばさないこと、20 スレッドの同時呼び出しで 5 回だけ許すことを検査している。`hook` を使ったテストは、sleep でなく Event で順序を制御している。\n- AC8: 妥当。`fullmatch` で形式を検査し、期限は `now >= expires` で無効にする。署名の比較は `hmac.compare_digest`。期限の境界、改ざん、形の崩れ、非文字列のテストがある。\n- AC9: 妥当。ログと例外メッセージに本文・署名・api_key は出ない。`verify_link` は `from None` で、リンクを含む ValueError を伝えない。\n- AC10: 妥当。`transaction` は例外のときに ROLLBACK する。ROLLBACK 自体の失敗で元の例外を隠さない。例外の後も接続を使えることをテストしている。\n- 実行結果: unittest 63 件がすべて通った。skip・`.only`・アサーションなしのテストはなく、検証条件が弱められた形跡も見つからなかった。\n\n### E2E の要否\n- 不要。HTTP の API や UI がないライブラリで、SQLite の実 DB を使った単体・結合テストで全受け入れ条件をカバーしている。\n\n### 不足しているリスク\n- なし\n\n### 確認したこと\n- 仕様書と設計書を読んだ。\n- `notes/*.py` の全ファイルをコードで確認した。\n  - 認可（`_visible`・`_can_modify`）が、利用者の入力から使われる箇所まで適用されていること。\n  - SQL にプレースホルダーと ESCAPE 句が使われていること。\n  - トランザクション境界。\n  - ロックの範囲。\n- `python3 -m unittest discover -s tests -t .` を実行し、63 件がすべて通った（0.678 秒）。",
+ "files_changed": [],
+ "valid": true
+}
