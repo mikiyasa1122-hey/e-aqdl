@@ -24,6 +24,7 @@ from .commands.gate import cmd_gate
 from .commands.metrics import cmd_metrics, collect_metrics
 from .commands.spec import cmd_spec
 from .commands.decisions import cmd_dec, cmd_dec_revisit, cmd_dec_select, cmd_decisions
+from .commands.findings import cmd_finding_add, cmd_finding_judge, cmd_finding_resolve, cmd_findings
 from .hook_handlers import LEGACY_HOOKS, run_hook
 from .hook_handlers.common import read_payload
 
@@ -1138,6 +1139,8 @@ COMMANDS = {
     "assume": cmd_assume, "drop": cmd_drop,
     "design-map": cmd_design_map, "decision": cmd_decision, "add-check": cmd_add_check,
     "dec": cmd_dec, "dec-select": cmd_dec_select, "dec-revisit": cmd_dec_revisit, "decisions": cmd_decisions,
+    "findings": cmd_findings, "finding-judge": cmd_finding_judge, "finding-resolve": cmd_finding_resolve,
+    "finding-add": cmd_finding_add,
     "remove-check": cmd_remove_check, "checks": cmd_checks,
     "bind": cmd_bind, "impl-map": cmd_impl_map, "holdout": cmd_holdout, "report": cmd_report, "workflow": cmd_workflow,
     "spec": cmd_spec, "answer": cmd_answer, "ask": cmd_ask, "resume": cmd_resume, "wait": cmd_wait,
