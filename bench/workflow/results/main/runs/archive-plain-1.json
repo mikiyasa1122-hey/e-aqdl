@@ -1,0 +1,74 @@
+{
+ "task": "archive",
+ "cond": "plain",
+ "rep": 1,
+ "model": "claude-sonnet-5-5",
+ "turns": [
+  {
+   "sec": 25.0,
+   "exit": 0,
+   "cost_usd": 0.1625,
+   "num_turns": 5,
+   "session_id": "74030f1d-3c9f-40f8-9ac7-ae746aa35a92",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "is_error": false,
+   "result": "メモのアーカイブ機能（R11）を実装しました。既存のテストと新しいテスト（`tests/test_ac11_archive.py`）を合わせて 70 件が通っています。コミットはしていません。\n\n- **スキーマ**: `notes/db.py` の notes テーブルに `archived INTEGER NOT NULL DEFAULT 0` を足しました。`archived` 列のない既存 DB を `db.connect` で開いたときは、列を自動で追加します。\n- **`archive_note` / `unarchive_note`**: version を1増やして新しい version を返します。権限と NotFound / Forbidden の扱いは更新（R4）と同じです。すでにその状態なら Conflict です。\n- **監査ログ**: `\"archive\"` / `\"unarchive\"` を、状態の変更と同じトランザクションで記録します。失敗したら何も残りません。\n- **`list_notes` / `search_notes`**: `include_archived=False` を足しました。既定ではアーカイブ済みを結果と `total` から除きます。\n- **`get_note`**: `archived` を含めて返します（行のすべての列を返す作りなので、コードの変更は不要でした）。\n- **`update_note`**: アーカイブ済みなら Conflict にします。削除と移管は従来どおりできます。\n\n`docs/contract.md` には「`notes/db.py` は変えない」とありますが、依頼で変更が許されているのでスキーマを変えました。契約書は更新していません。",
+   "usage": {
+    "input_tokens": 10,
+    "cache_creation_input_tokens": 25415,
+    "cache_read_input_tokens": 220987,
+    "output_tokens": 3872,
+    "output_tokens_details": {
+     "thinking_tokens": 179
+    },
+    "server_tool_use": {
+     "web_search_requests": 0,
+     "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 25415,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [
+     {
+      "input_tokens": 2,
+      "output_tokens": 527,
+      "cache_read_input_tokens": 53379,
+      "cache_creation_input_tokens": 3272,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 3272
+      },
+      "type": "message"
+     }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+   },
+   "cost_cumulative_usd": 0.1624987,
+   "prompt": "docs/request-archive.md の依頼を実現してください。\n進め方: Memory を使う場合はプロジェクト内だけにしてください。選択肢のある質問は、推奨の選択で進めてください。\nPR の作成とリモートへの push は不要です（ローカルで完了まで進めてください）。",
+   "state_after": null
+  }
+ ],
+ "human_replies": 0,
+ "cost_usd": 0.1625,
+ "sec": 25.0,
+ "final_state": null,
+ "budget_hit": false,
+ "stopped_by": "done",
+ "evaluation": {
+  "hidden_run": 53,
+  "hidden_failed": 0,
+  "hidden_pass_rate": 1.0,
+  "failed_reference_only": 0,
+  "failed_required": 0,
+  "repro_failed": [],
+  "failed": [],
+  "own_tests": 70,
+  "own_tests_ok": true
+ }
+}

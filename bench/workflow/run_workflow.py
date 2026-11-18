@@ -200,7 +200,9 @@ def hidden_suite(project, task="spec"):
     import sql_cases as SQ
     with tempfile.TemporaryDirectory() as tmp:
         work = os.path.join(tmp, "p")
-        shutil.copytree(project, work, ignore=shutil.ignore_patterns(".git", ".aq-dlc", "__pycache__"))
+        # .git も写す（自作テストが git diff で「db.py を変えていない」を確かめることがある。main の試行で、.git がないために
+        # 自作テストが失敗と記録された）。隠しテストは git を使わない
+        shutil.copytree(project, work, ignore=shutil.ignore_patterns(".aq-dlc", "__pycache__"))
         hid = os.path.join(work, "hidden_tests")
         src = os.path.join(HERE, "tasks", "archive", "hidden") if task == "archive" else os.path.join(REVIEW, "app_clean", "tests")
         shutil.copytree(src, hid, ignore=shutil.ignore_patterns("__pycache__"))
@@ -268,7 +270,7 @@ def summary(recs):
     for (task, cond), rs in sorted(groups.items()):
         ev = [r.get("evaluation") or {} for r in rs]
         done = sum(1 for r in rs if r["cond"] == "plain" and r["stopped_by"] == "done" and not r["budget_hit"]
-                   or (r.get("final_state") or {}).get("status") in ("complete", "pr_ready"))
+                   or (r.get("final_state") or {}).get("status") in ("complete", "pr_ready", "closed"))
         lines.append(f"| {task} | {cond} | {len(rs)} | {_stat([e.get('failed_required') for e in ev])} | "
                      f"{_stat([e.get('failed_reference_only') for e in ev])} | {_stat([r['cost_usd'] for r in rs])} | "
                      f"{_stat([round(r['sec'] / 60, 1) for r in rs])} | {_stat([r['human_replies'] for r in rs])} | "

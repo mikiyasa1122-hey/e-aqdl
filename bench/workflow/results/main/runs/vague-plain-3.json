@@ -1,0 +1,133 @@
+{
+ "task": "vague",
+ "cond": "plain",
+ "rep": 3,
+ "model": "claude-sonnet-5-5",
+ "turns": [
+  {
+   "sec": 88.0,
+   "exit": 0,
+   "cost_usd": 0.2909,
+   "num_turns": 8,
+   "session_id": "48052fd9-a87f-452e-9e2f-8cb1ddd0a4a0",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "is_error": false,
+   "result": "`notes/service.py`・`notes/ratelimit.py`・`notes/share.py` と、テスト 20 件（`tests/test_notes.py`）を作りました。`python3 -m unittest discover -s tests -t .` は全件通っています。ローカルでコミット済みで、push と PR はしていません。`db.py` と `errors.py` は変えていません。\n\n契約で決まっていなかった部分は、次のように決めました。\n\n- **見える範囲:** 他の組織のメモや他人の非公開メモは、「存在しない」（`NotFound`）として扱います。管理者でも他人の非公開メモは見えず、直せず、消せません。引き継ぎ（transfer）だけは非公開メモも対象です。\n- **権限:** 同じ組織のメモが見えるのに作成者でも管理者でもない場合は `Forbidden` になります。\n- **同時編集:** 渡された `version` が現在と違えば `Conflict` になり、先に入った変更を上書きしません。書き込みは `BEGIN IMMEDIATE` で始め、失敗したら巻き戻します。\n- **入力チェック:**\n  - 題名は 1〜200 文字です。\n  - 本文は 10 万文字までです。\n  - タグは 1 つ 50 文字まで、最大 20 個で、重複は除きます。\n  - `per_page` は 1〜100 です。\n- **検索:** 題名か本文の部分一致で、`%` や `_` も普通の文字として扱います。`tags` を複数渡したときは、すべてを持つメモだけが対象です。\n- **引き継ぎ:** `from_user` と `to_user` は dict でも id でも渡せます。2 人とも管理者と同じ組織にいる必要があります。途中で失敗したら全件を元に戻します。\n- **監査ログ:** 管理者だけが、自分の組織の分を出せます。`actor_key` は末尾 4 文字だけ見せ、8 文字以下のキーは `****` だけにします。ログ本文に API キーは入れません。\n- **書き込みの制限:** `RateLimiter` は直近 `window_sec` 秒の回数を数える方式です。`hook` の最中に別の呼び出しが割り込んでも、上限は超えません。\n- **共有リンク:** 期限ちょうどの秒までは有効で、それより後は `Forbidden` です。署名の比較は定数時間で行います。\n\n`share.py` の `verify_link` は、リンクが指すメモの id を返すだけです。リンクからメモを読む関数は契約にないので作っていません。",
+   "usage": {
+    "input_tokens": 16,
+    "cache_creation_input_tokens": 27826,
+    "cache_read_input_tokens": 370729,
+    "output_tokens": 14252,
+    "output_tokens_details": {
+     "thinking_tokens": 2316
+    },
+    "server_tool_use": {
+     "web_search_requests": 0,
+     "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 27826,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [
+     {
+      "input_tokens": 2,
+      "output_tokens": 872,
+      "cache_read_input_tokens": 59230,
+      "cache_creation_input_tokens": 286,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 286
+      },
+      "type": "message"
+     }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+   },
+   "cost_cumulative_usd": 0.2909289,
+   "prompt": "docs/request.md の依頼を実現してください。\n進め方: Memory を使う場合はプロジェクト内だけにしてください。選択肢のある質問は、推奨の選択で進めてください。\nPR の作成とリモートへの push は不要です（ローカルで完了まで進めてください）。",
+   "state_after": null
+  }
+ ],
+ "human_replies": 0,
+ "cost_usd": 0.2909,
+ "sec": 88.0,
+ "final_state": null,
+ "budget_hit": false,
+ "stopped_by": "done",
+ "evaluation": {
+  "hidden_run": 101,
+  "hidden_failed": 47,
+  "hidden_pass_rate": 0.5346534653465347,
+  "failed_reference_only": 4,
+  "failed_required": 43,
+  "repro_failed": [
+   "auth_04",
+   "bnd_01",
+   "bnd_04",
+   "res_page_overflow",
+   "res_rollback_mask",
+   "res_tag_newline",
+   "sql_04",
+   "val_02",
+   "val_03",
+   "val_04"
+  ],
+  "failed": [
+   "hidden_tests.test_ac10_recovery.RecoveryTest.test_connection_usable_after_each_kind_of_failure",
+   "hidden_tests.test_ac10_recovery.RecoveryTest.test_connection_usable_after_each_kind_of_failure (exc='ValidationError')",
+   "hidden_tests.test_ac10_recovery.RecoveryTest.test_original_error_is_not_hidden_when_rollback_is_impossible",
+   "hidden_tests.test_ac1_create.CreateTest.test_body_boundaries (body=<class 'str'>)",
+   "hidden_tests.test_ac1_create.CreateTest.test_rejected_input_leaves_nothing",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_count_counts_duplicates_but_stores_unique",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_rules (tags=['A'])",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_rules (tags=['\\nabc'])",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_rules (tags=['a b'])",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_rules (tags=['a_b'])",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_rules (tags=['abc\\n'])",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_rules (tags=['xxxxxxxxxxxxxxxxxxxxx'])",
+   "hidden_tests.test_ac1_create.CreateTest.test_tag_rules (tags=['日本'])",
+   "hidden_tests.test_ac1_create.CreateTest.test_title_boundaries (title='aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')",
+   "hidden_tests.test_ac3_list_search.ListTest.test_huge_page_returns_no_items",
+   "hidden_tests.test_ac3_list_search.ListTest.test_invalid_paging_and_sort (per_page='51')",
+   "hidden_tests.test_ac3_list_search.SearchTest.test_invalid_query_and_tags (q='   ')",
+   "hidden_tests.test_ac3_list_search.SearchTest.test_invalid_query_and_tags (q='')",
+   "hidden_tests.test_ac3_list_search.SearchTest.test_invalid_query_and_tags (q='qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq')",
+   "hidden_tests.test_ac3_list_search.SearchTest.test_invalid_query_and_tags (tags=['BAD'])",
+   "hidden_tests.test_ac3_list_search.SearchTest.test_invalid_query_and_tags (tags=['a', 'a', 'a', 'a', 'a', 'a'])",
+   "hidden_tests.test_ac3_list_search.SearchTest.test_invalid_query_and_tags (tags=['abc\\n'])",
+   "hidden_tests.test_ac3_list_search.SearchTest.test_tag_filter_is_or",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_update_validates_like_create",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_update_validates_like_create (body=\"'bbbbbbbbbbbbbbbbbbb\")",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_update_validates_like_create (tags=\"['BAD']\")",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_update_validates_like_create (tags=\"['a', 'a', 'a', 'a',\")",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_update_validates_like_create (tags=\"['abc\\\\n']\")",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_update_validates_like_create (title=\"'aaaaaaaaaaaaaaaaaaa\")",
+   "hidden_tests.test_ac5_transfer.TransferTest.test_only_within_one_org (admin='evil-root', src='alice', dst='bob')",
+   "hidden_tests.test_ac5_transfer.TransferTest.test_only_within_one_org (admin='evil-root', src='eve', dst='alice')",
+   "hidden_tests.test_ac5_transfer.TransferTest.test_only_within_one_org (admin='root', src='alice', dst='eve')",
+   "hidden_tests.test_ac5_transfer.TransferTest.test_only_within_one_org (admin='root', src='eve', dst='alice')",
+   "hidden_tests.test_ac6_audit.AuditTest.test_key_masked_except_last_four",
+   "hidden_tests.test_ac6_audit.AuditTest.test_short_keys_fully_masked",
+   "hidden_tests.test_ac8_share.ShareTest.test_expiry_boundary",
+   "hidden_tests.test_ac9_secrets.SecretsTest.test_exception_messages_have_no_body_or_key",
+   "hidden_tests.test_repro_auth_04.R.test",
+   "hidden_tests.test_repro_bnd_01.R.test",
+   "hidden_tests.test_repro_bnd_04.R.test",
+   "hidden_tests.test_repro_res_page_overflow.R.test",
+   "hidden_tests.test_repro_res_rollback_mask.R.test",
+   "hidden_tests.test_repro_res_tag_newline.R.test",
+   "hidden_tests.test_repro_sql_04.R.test",
+   "hidden_tests.test_repro_val_02.R.test",
+   "hidden_tests.test_repro_val_03.R.test",
+   "hidden_tests.test_repro_val_04.R.test"
+  ],
+  "own_tests": 20,
+  "own_tests_ok": true
+ }
+}

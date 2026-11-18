@@ -1,0 +1,85 @@
+{
+ "task": "spec",
+ "cond": "plain",
+ "rep": 2,
+ "model": "claude-sonnet-5-5",
+ "turns": [
+  {
+   "sec": 112.3,
+   "exit": 0,
+   "cost_usd": 0.3685,
+   "num_turns": 7,
+   "session_id": "331ba7fa-255b-4938-82e6-945d71a541cc",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "is_error": false,
+   "result": "`notes/service.py`、`notes/ratelimit.py`、`notes/share.py` と、`tests/` の unittest 42 件を作りました。`python3 -m unittest discover -s tests -t .` で全件通り、5 回繰り返しても毎回通りました。`db.py` と `errors.py` は変えていません。コミットはしていません（指示がなかったため）。\n\n実装で決めたこと（仕様に書かれていなかった点）：\n- **書き込みのトランザクション**: すべて `BEGIN IMMEDIATE` で始めます。更新・閲覧は、トランザクションの中で見える権限と version をもう一度確かめます。そのため、読み出しと書き込みの間に他の更新が入れば Conflict になり、同時に閲覧しても数え漏れはありません。\n- **RateLimiter**: ロックを持ったまま `hook` を呼ぶと、テストが複数スレッドを `hook` で待ち合わせたときに止まってしまいます。そこで、ロックの中で一度判定し、ロックを外して `hook` を呼び、数える直前にもう一度判定する作りにしました。\n- **共有リンク**: 形の検査は `[0-9]+\\.[0-9]+\\.[0-9a-f]{64}` の完全一致です。署名は `hmac.compare_digest` で比べ、期限は `now >= 期限` で無効にします。\n- **検索**: `%`・`_`・`\\` はエスケープして `ESCAPE` を指定します。タグ絞り込みで SQL に組み立てるのは `?` の個数だけで、値はすべてパラメータで渡します。\n- **移管**: 移す元の非公開メモも含めてすべて移します。\n\nテストの方針：\n- 並行の確認は、実際に別スレッド・別接続で動かす形と、`hooks.before_write` / `RateLimiter.hook` で割り込ませる形の両方で行っています。\n- 例外の後に接続を使い続けられることも確かめています。\n\n`notes/__pycache__/` が未追跡で残っています。`.gitignore` は作っていません。",
+   "usage": {
+    "input_tokens": 14,
+    "cache_creation_input_tokens": 35344,
+    "cache_read_input_tokens": 355126,
+    "output_tokens": 19156,
+    "output_tokens_details": {
+     "thinking_tokens": 2427
+    },
+    "server_tool_use": {
+     "web_search_requests": 0,
+     "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+     "ephemeral_1h_input_tokens": 35344,
+     "ephemeral_5m_input_tokens": 0
+    },
+    "inference_geo": "global",
+    "iterations": [
+     {
+      "input_tokens": 2,
+      "output_tokens": 754,
+      "cache_read_input_tokens": 66192,
+      "cache_creation_input_tokens": 985,
+      "cache_creation": {
+       "ephemeral_5m_input_tokens": 0,
+       "ephemeral_1h_input_tokens": 985
+      },
+      "type": "message"
+     }
+    ],
+    "speed": "standard",
+    "fallback_credit": null
+   },
+   "cost_cumulative_usd": 0.3684766,
+   "prompt": "docs/spec.md の仕様と docs/contract.md のインターフェースの契約に従って、notes パッケージ（notes/service.py・\nnotes/ratelimit.py・notes/share.py）と、そのテスト（tests/ に unittest。`python3 -m unittest discover -s tests -t .` で実行）を作ってください。\nnotes/db.py と notes/errors.py は用意済みで、変えないでください。Python 3 の標準ライブラリだけを使います。\n進め方: Memory を使う場合はプロジェクト内だけにしてください。選択肢のある質問は、推奨の選択で進めてください。\nPR の作成とリモートへの push は不要です（ローカルで完了まで進めてください）。",
+   "state_after": null
+  }
+ ],
+ "human_replies": 0,
+ "cost_usd": 0.3685,
+ "sec": 112.3,
+ "final_state": null,
+ "budget_hit": false,
+ "stopped_by": "done",
+ "evaluation": {
+  "hidden_run": 101,
+  "hidden_failed": 6,
+  "hidden_pass_rate": 0.9405940594059405,
+  "failed_reference_only": 4,
+  "failed_required": 2,
+  "repro_failed": [
+   "res_authz_toctou",
+   "res_page_overflow",
+   "res_stale_fields"
+  ],
+  "failed": [
+   "hidden_tests.test_ac3_list_search.ListTest.test_huge_page_returns_no_items",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_permission_is_checked_again_inside_the_write",
+   "hidden_tests.test_ac4_update_delete.UpdateTest.test_unchanged_fields_come_from_the_latest_row",
+   "hidden_tests.test_repro_res_authz_toctou.R.test",
+   "hidden_tests.test_repro_res_page_overflow.R.test",
+   "hidden_tests.test_repro_res_stale_fields.R.test"
+  ],
+  "own_tests": 42,
+  "own_tests_ok": true
+ }
+}

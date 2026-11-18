@@ -1,0 +1,17 @@
+== 2026-11-18T03:20:41 archive plain 1
+archive-plain-1 turn 1 $0.1625 25.0s None
+== 2026-11-18T03:21:06 archive eaqdl 1
+archive-eaqdl-1 turn 1 $0.3592 85.5s {'status': 'in_progress', 'reviews': 0, 'fix_iterations': 0, 'impl_rounds': 0, 'human_events': 0, 'spec_version': 1, 'spec_approved': False, 'asks_total': 1, 'stop_blocks_total': None}
+archive-eaqdl-1 turn 2 $1.3517 391.5s {'status': 'closed', 'reviews': 1, 'fix_iterations': 0, 'impl_rounds': 1, 'human_events': 2, 'spec_version': 1, 'spec_approved': True, 'asks_total': 1, 'stop_blocks_total': None}
+== 2026-11-18T03:29:03 archive eaqdl 2
+archive-eaqdl-2 turn 1 $0.3328 95.5s {'status': 'in_progress', 'reviews': 0, 'fix_iterations': 0, 'impl_rounds': 0, 'human_events': 0, 'spec_version': 1, 'spec_approved': False, 'asks_total': 1, 'stop_blocks_total': None}
+archive-eaqdl-2 turn 2 $0.1546 29.8s {'status': 'in_progress', 'reviews': 0, 'fix_iterations': 0, 'impl_rounds': 0, 'human_events': 1, 'spec_version': 2, 'spec_approved': False, 'asks_total': 2, 'stop_blocks_total': 1}
+archive-eaqdl-2 turn 3 $0.9388 270.4s {'status': 'closed', 'reviews': 1, 'fix_iterations': 0, 'impl_rounds': 1, 'human_events': 2, 'spec_version': 2, 'spec_approved': True, 'asks_total': 2, 'stop_blocks_total': 1}
+== 2026-11-18T03:35:39 archive plain 2
+archive-plain-2 turn 1 $0.1543 23.0s None
+== 2026-11-18T03:36:02 archive plain 3
+archive-plain-3 turn 1 $0.1667 25.0s None
+== 2026-11-18T03:36:27 archive eaqdl 3
+archive-eaqdl-3 turn 1 $0.3035 86.1s {'status': 'in_progress', 'reviews': 0, 'fix_iterations': 0, 'impl_rounds': 0, 'human_events': 0, 'spec_version': 1, 'spec_approved': False, 'asks_total': 1, 'stop_blocks_total': None}
+archive-eaqdl-3 turn 2 $0.9352 273.0s {'status': 'closed', 'reviews': 1, 'fix_iterations': 0, 'impl_rounds': 1, 'human_events': 2, 'spec_version': 1, 'spec_approved': True, 'asks_total': 1, 'stop_blocks_total': None}
+== 2026-11-18T03:42:26 lane archive done
