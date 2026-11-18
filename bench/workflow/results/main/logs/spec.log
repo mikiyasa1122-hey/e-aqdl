@@ -1,0 +1,16 @@
+== 2026-11-18T03:20:38 spec plain 1
+spec-plain-1 turn 1 $0.4504 106.4s None
+== 2026-11-18T03:22:24 spec eaqdl 1
+spec-eaqdl-1 turn 1 $0.2694 54.8s {'status': 'in_progress', 'reviews': 0, 'fix_iterations': 0, 'impl_rounds': 0, 'human_events': 0, 'spec_version': 1, 'spec_approved': False, 'asks_total': 1, 'stop_blocks_total': None}
+spec-eaqdl-1 turn 2 $1.4134 463.5s {'status': 'closed', 'reviews': 1, 'fix_iterations': 0, 'impl_rounds': 1, 'human_events': 3, 'spec_version': 1, 'spec_approved': True, 'asks_total': 1, 'stop_blocks_total': None}
+== 2026-11-18T03:31:03 spec eaqdl 2
+spec-eaqdl-2 turn 1 $0.2881 77.5s {'status': 'in_progress', 'reviews': 0, 'fix_iterations': 0, 'impl_rounds': 0, 'human_events': 0, 'spec_version': 2, 'spec_approved': False, 'asks_total': 1, 'stop_blocks_total': None}
+spec-eaqdl-2 turn 2 $1.53 511.0s {'status': 'closed', 'reviews': 1, 'fix_iterations': 0, 'impl_rounds': 1, 'human_events': 3, 'spec_version': 2, 'spec_approved': True, 'asks_total': 1, 'stop_blocks_total': None}
+== 2026-11-18T03:40:52 spec plain 2
+spec-plain-2 turn 1 $0.3685 112.3s None
+== 2026-11-18T03:42:44 spec plain 3
+spec-plain-3 turn 1 $0.3799 117.1s None
+== 2026-11-18T03:44:41 spec eaqdl 3
+spec-eaqdl-3 turn 1 $0.2445 62.8s {'status': 'in_progress', 'reviews': 0, 'fix_iterations': 0, 'impl_rounds': 0, 'human_events': 0, 'spec_version': 1, 'spec_approved': False, 'asks_total': 1, 'stop_blocks_total': None}
+spec-eaqdl-3 turn 2 $1.1152 352.9s {'status': 'closed', 'reviews': 1, 'fix_iterations': 0, 'impl_rounds': 1, 'human_events': 2, 'spec_version': 1, 'spec_approved': True, 'asks_total': 1, 'stop_blocks_total': None}
+== 2026-11-18T03:51:37 lane spec done
